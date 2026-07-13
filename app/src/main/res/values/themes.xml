@@ -1,0 +1,8 @@
+<resources>
+    <style name="Theme.GymLog" parent="android:style/Theme.Material.Light.NoActionBar">
+        <item name="android:fontFamily">sans</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:statusBarColor">#132A24</item>
+        <item name="android:navigationBarColor">#F5F7F2</item>
+    </style>
+</resources>
