@@ -13,6 +13,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
@@ -31,7 +32,7 @@ import androidx.compose.ui.unit.dp
 import com.gymlog.app.data.GymRepository
 import com.gymlog.app.data.MachineSummary
 
-private enum class Screen { OVERVIEW, REORDER, BACKUP, DETAIL }
+private enum class Screen { OVERVIEW, STATS, HISTORY, REORDER, BACKUP, DETAIL }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -42,12 +43,19 @@ fun GymLogApp(
     onImport: () -> Unit,
 ) {
     var machines by remember { mutableStateOf(repository.loadMachines()) }
+    var history by remember { mutableStateOf(repository.loadHistory()) }
+    var areaColors by remember { mutableStateOf(repository.loadAreaColors()) }
     var screen by remember { mutableStateOf(Screen.OVERVIEW) }
     var selectedId by remember { mutableStateOf<Long?>(null) }
     var showAdd by remember { mutableStateOf(false) }
+    var showMenu by remember { mutableStateOf(false) }
     var confirmImport by remember { mutableStateOf(false) }
 
-    fun refresh() { machines = repository.loadMachines() }
+    fun refresh() {
+        machines = repository.loadMachines()
+        history = repository.loadHistory()
+        areaColors = repository.loadAreaColors()
+    }
     LaunchedEffect(externalDataVersion) { refresh() }
 
     val selected = machines.firstOrNull { it.machine.id == selectedId }
@@ -60,28 +68,28 @@ fun GymLogApp(
 
     Scaffold(
         topBar = {
-            TopAppBar(
+            if (screen != Screen.OVERVIEW) TopAppBar(
                 title = {
                     Text(
                         when (screen) {
-                            Screen.OVERVIEW -> "GymLog"
+                            Screen.OVERVIEW -> ""
+                            Screen.STATS -> "Stats"
+                            Screen.HISTORY -> "History"
                             Screen.REORDER -> "Change order"
                             Screen.BACKUP -> "Data & backup"
-                            Screen.DETAIL -> selected?.machine?.name ?: "Machine"
+                            Screen.DETAIL -> selected?.machine?.let { machine ->
+                                machine.name + machine.titleNote.takeIf { it.isNotBlank() }?.let { " · $it" }.orEmpty()
+                            } ?: "Exercise"
                         },
                     )
                 },
                 navigationIcon = {
-                    if (screen != Screen.OVERVIEW) TextButton(onClick = {
+                    if (screen != Screen.OVERVIEW) TextButton(
+                        colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.onPrimary),
+                        onClick = {
                         screen = Screen.OVERVIEW
                         selectedId = null
                     }) { Text("‹ Back") }
-                },
-                actions = {
-                    if (screen == Screen.OVERVIEW) {
-                        TextButton(onClick = { screen = Screen.REORDER }) { Text("Order") }
-                        TextButton(onClick = { screen = Screen.BACKUP }) { Text("Backup") }
-                    }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = MaterialTheme.colorScheme.primary,
@@ -101,10 +109,25 @@ fun GymLogApp(
                     screen = Screen.DETAIL
                 },
                 onAdd = { showAdd = true },
+                onMenu = { showMenu = true },
+                onStats = { screen = Screen.STATS },
+                areaFrequency = machines.flatMap { it.areas }.groupBy { it.area }.mapValues { (_, values) -> values.sumOf { it.strength.value } },
                 onQuickSet = { machine, reps ->
-                    repository.addSet(machine.machine.id, reps, machine.machine.currentWeight)
+                    if (machine.machine.trackingMode == "STRENGTH") {
+                        reps.firstOrNull()?.let { repository.addLevelSet(machine.machine.id, it) }
+                    } else {
+                        repository.addSets(machine.machine.id, reps, machine.machine.currentWeight)
+                    }
                     refresh()
                 },
+            )
+            Screen.HISTORY -> HistoryScreen(
+                history = history,
+                modifier = Modifier.padding(padding),
+            )
+            Screen.STATS -> StatsScreen(
+                history = history,
+                modifier = Modifier.padding(padding),
             )
             Screen.REORDER -> ReorderScreen(
                 machines = machines,
@@ -122,8 +145,11 @@ fun GymLogApp(
             Screen.DETAIL -> selected?.let { summary ->
                 DetailScreen(
                     summary = summary,
+                    areaUsage = machines.flatMap { it.areas }.groupingBy { it.area }.eachCount(),
+                    areaColors = areaColors,
                     modifier = Modifier.padding(padding),
                     repository = repository,
+                    onAreaColor = { area, color -> repository.setAreaColor(area, color); refresh() },
                     onChanged = ::refresh,
                     onDeleted = {
                         refresh()
@@ -137,13 +163,31 @@ fun GymLogApp(
 
     if (showAdd) AddMachineDialog(
         onDismiss = { showAdd = false },
-        onAdd = { name, weight ->
-            val id = repository.addMachine(name, weight)
+        onAdd = { name, weight, trackingMode ->
+            val id = repository.addMachine(name, weight, trackingMode)
             refresh()
             showAdd = false
             selectedId = id
             screen = Screen.DETAIL
         },
+    )
+
+    if (showMenu) AlertDialog(
+        onDismissRequest = { showMenu = false },
+        title = { Text("Menu") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                TextButton(onClick = { showMenu = false; screen = Screen.HISTORY }) { Text("Calendar & history") }
+                TextButton(onClick = { showMenu = false; screen = Screen.REORDER }) { Text("Change exercise order") }
+                TextButton(onClick = { showMenu = false; onExport() }) { Text("Download backup / save to Drive") }
+                TextButton(onClick = { showMenu = false; confirmImport = true }) { Text("Upload backup / open from Drive") }
+                Text(
+                    "Choose Google Drive in the Android file picker for manual cross-phone sync.",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        },
+        confirmButton = { TextButton(onClick = { showMenu = false }) { Text("Close") } },
     )
 
     if (confirmImport) AlertDialog(
@@ -192,7 +236,7 @@ private fun BackupScreen(modifier: Modifier = Modifier, onExport: () -> Unit, on
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
         Text("Keep your progress portable", style = MaterialTheme.typography.headlineSmall)
-        Text("A backup includes every machine, its order, notes, body areas, weight history, set history, and app settings. The file is readable JSON and stays under your control.")
+        Text("A backup includes every exercise, its order, notes, body areas, weight history, set history, and app settings. The file is readable JSON and stays under your control.")
         Button(onClick = onExport) { Text("Download backup") }
         androidx.compose.material3.OutlinedButton(onClick = onImport) { Text("Upload and restore backup") }
         Text("Tip: save an occasional copy to cloud storage or another device. Restoring replaces the data currently on this phone.", color = MaterialTheme.colorScheme.onSurfaceVariant)

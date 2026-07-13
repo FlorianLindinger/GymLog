@@ -1,15 +1,20 @@
 # GymLog
 
-GymLog is a private, offline Android workout tracker built for one ordered machine routine. It uses Kotlin, Jetpack Compose, and the phone's SQLite database.
+GymLog is a private, offline Android workout tracker built for one ordered exercise routine. It uses Kotlin, Jetpack Compose, and the phone's SQLite database.
 
 ## Included
 
-- A reorderable machine list with your own names, current weights, and today's reps
-- One-tap set logging with recent rep amounts as shortcuts
-- Machine details with notes, recent sets, weight history, a progress chart, and time since the last weight change
-- Editable body-area assignments at full or half strength
+- A reorderable exercise list with your own names, current weights, and today's reps
+- Five 0-15 rep wheels that remember the previous set pattern; zero skips a set
+- Exercise details with notes, recent sets, weight history, a progress chart, and time since the last weight change
+- A saved pause-between-sets note per exercise (display only, with no timer)
+- Last-trained and 30-day set-frequency indicators on the routine overview
+- A calendar/history screen with daily sessions and 8-week `weight × reps` volume trends
+- A tappable front/back body guide with full or half strength
+- Separate upper/lower back, usage sorting, and customizable distinct colors
 - A distinct color for each body area; half-strength assignments use half-width markers
-- JSON download/upload containing machines, ordering, notes, areas, sets, weights, and settings
+- Per-exercise weight and volume charts with remembered preset time windows
+- JSON download/upload containing exercises, ordering, notes, areas, sets, weights, and settings
 - Offline storage with no account, analytics, or internet permission
 
 ## Run it on this computer
@@ -59,11 +64,3 @@ From the overview, open **Backup**. **Download backup** creates a `.json` file u
 
 ## Good next additions
 
-- Rest timers with a notification after each set
-- Exercise frequency or “last trained” indicators on the overview
-- Personal goals such as a target weight or rep range per machine
-- A calendar/history screen and volume (`weight × reps`) trends
-- Warm-up-set marking so warm-ups do not distort progress statistics
-- Optional kilograms/pounds and light/dark appearance settings
-
-The first two are especially useful without making the core logging flow slower.
