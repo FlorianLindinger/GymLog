@@ -456,7 +456,7 @@ private fun AreaDialog(
 ) {
     val choices = remember(current) {
         mutableStateMapOf<BodyArea, Strength?>().apply {
-            BodyArea.entries.filter { it.selectable }.forEach { area -> put(area, current.firstOrNull { it.area == area }?.strength) }
+            BodyArea.entries.forEach { area -> put(area, current.firstOrNull { it.area == area }?.strength) }
         }
     }
     var colorArea by remember { mutableStateOf<BodyArea?>(null) }
@@ -467,7 +467,7 @@ private fun AreaDialog(
             Strength.FULL -> null
         }
     }
-    val sortedAreas = BodyArea.entries.filter { it.selectable }.sortedWith(
+    val sortedAreas = BodyArea.entries.sortedWith(
         compareByDescending<BodyArea> { usage[it] ?: 0 }.thenBy { it.label },
     )
     AlertDialog(

@@ -78,7 +78,7 @@ adb install -r app\build\outputs\apk\debug\app-debug.apk
 
 From the overview, open **Menu** and choose the backup action. **Download backup** creates a readable JSON file through Android's system file picker. **Upload and restore backup** replaces the app's current data after confirmation.
 
-Backups include every training plan, exercise, order, note, body-area assignment, recorded set, metric change, color, and progression-warning setting. The current backup format can also import older single-plan GymLog backups.
+Backups include every training plan, exercise, order, note, body-area assignment, recorded set, metric change, color, and progression-warning setting.
 
 ## Privacy
 
@@ -89,7 +89,6 @@ GymLog stores its data locally on the device. It does not require an account, an
 - Multiple independent training plans
   - Create, open, rename, and delete plans from the overview menu
   - Separate exercises, ordering, history, statistics, timers, and progression data per plan
-  - Automatic migration of existing data into a `Default` plan
 - Reorderable exercise overview with custom exercise names and optional title notes
 - Three exercise tracking modes
   - Weight in kilograms
@@ -149,6 +148,5 @@ GymLog stores its data locally on the device. It does not require an account, an
   - Custom colors and most-used-area sorting
 - JSON backup and restore through Android's file picker
   - All training plans included in one backup
-  - Compatible with legacy single-plan backups
   - Can be saved to local storage or a cloud provider exposed by the Android file picker
 - Fully offline operation with no account, analytics, or internet permission

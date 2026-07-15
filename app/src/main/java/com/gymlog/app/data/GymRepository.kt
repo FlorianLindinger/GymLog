@@ -107,7 +107,7 @@ class GymRepository(context: Context) {
         return machines.map { machine ->
             MachineSummary(
                 machine = machine,
-                areas = loadAreas(database, machine.id).filter { it.area.selectable },
+                areas = loadAreas(database, machine.id),
                 recentSets = loadSets(database, machine.id, null),
                 weightChanges = loadWeights(database, machine.id),
                 setsLast30Days = countRecentSets(database, machine.id),
@@ -157,7 +157,6 @@ class GymRepository(context: Context) {
     }
 
     fun loadAreaColors(): Map<BodyArea, Long> = BodyArea.entries
-        .filter { it.selectable }
         .associateWith { areaColor(db.readableDatabase, it) }
 
     fun loadHistory(): List<HistorySet> {
@@ -296,7 +295,7 @@ class GymRepository(context: Context) {
                 put("progressStaleTrainings", it.staleTrainings)
             }
             put("areaColors", JSONObject().apply {
-                BodyArea.entries.filter { it.selectable }.forEach { area -> put(area.name, areaColor(db.readableDatabase, area)) }
+                BodyArea.entries.forEach { area -> put(area.name, areaColor(db.readableDatabase, area)) }
             })
         })
         val plans = loadTrainingPlans()
@@ -342,7 +341,7 @@ class GymRepository(context: Context) {
     fun importJson(json: String) {
         val root = JSONObject(json)
         val version = root.optInt("version", -1)
-        require(version == 1 || version == 2) { "Unsupported GymLog backup version" }
+        require(version == 2) { "Unsupported GymLog backup version" }
         val machines = root.getJSONArray("machines")
         root.optJSONObject("settings")?.let { settings ->
             saveProgressionSettings(ProgressionSettings(
@@ -351,30 +350,26 @@ class GymRepository(context: Context) {
             ))
         }
         val database = db.writableDatabase
-        var targetPlanId = -1L
         val importedPlanIds = mutableMapOf<Long, Long>()
         database.transaction {
             database.delete("machines", null, null)
             database.delete("training_plans", null, null)
-            if (version == 2) {
-                val plans = root.optJSONArray("plans") ?: JSONArray()
-                for (planIndex in 0 until plans.length()) {
-                    val plan = plans.getJSONObject(planIndex)
-                    val newId = database.insertOrThrow("training_plans", null, ContentValues().apply {
-                        put("name", plan.optString("name", "Training plan"))
-                        put("sort_order", plan.optInt("sortOrder", planIndex))
-                    })
-                    importedPlanIds[plan.getLong("id")] = newId
-                }
-                targetPlanId = importedPlanIds[root.optLong("activePlanId", -1L)] ?: importedPlanIds.values.firstOrNull() ?: -1L
+            val plans = root.getJSONArray("plans")
+            for (planIndex in 0 until plans.length()) {
+                val plan = plans.getJSONObject(planIndex)
+                val newId = database.insertOrThrow("training_plans", null, ContentValues().apply {
+                    put("name", plan.getString("name"))
+                    put("sort_order", plan.getInt("sortOrder"))
+                })
+                importedPlanIds[plan.getLong("id")] = newId
             }
-            if (targetPlanId < 0) {
-                targetPlanId = database.insertOrThrow("training_plans", null, ContentValues().apply { put("name", "Default"); put("sort_order", 0) })
-            }
+            val targetPlanId = importedPlanIds[root.getLong("activePlanId")]
+                ?: importedPlanIds.values.firstOrNull()
+                ?: error("Backup contains no training plans")
             database.delete("area_colors", null, null)
             val colors = root.optJSONObject("settings")?.optJSONObject("areaColors")
             if (colors != null) {
-                BodyArea.entries.filter { it.selectable && colors.has(it.name) }.forEach { area ->
+                BodyArea.entries.filter { colors.has(it.name) }.forEach { area ->
                     database.insertOrThrow("area_colors", null, ContentValues().apply {
                         put("area", area.name)
                         put("color", colors.getLong(area.name))
@@ -384,7 +379,7 @@ class GymRepository(context: Context) {
             for (index in 0 until machines.length()) {
                 val item = machines.getJSONObject(index)
                 val id = database.insertOrThrow("machines", null, ContentValues().apply {
-                    put("plan_id", if (version == 2) importedPlanIds[item.optLong("planId", -1L)] ?: targetPlanId else targetPlanId)
+                    put("plan_id", importedPlanIds[item.getLong("planId")] ?: targetPlanId)
                     put("name", capitalizeName(item.getString("name")))
                     put("title_note", item.optString("titleNote"))
                     put("notes", item.optString("notes"))
@@ -400,7 +395,7 @@ class GymRepository(context: Context) {
                     val area = areas.getJSONObject(areaIndex)
                     database.insertOrThrow("machine_areas", null, ContentValues().apply {
                         put("machine_id", id)
-                        put("area", if (area.getString("area") == "BACK") BodyArea.UPPER_BACK.name else area.getString("area"))
+                        put("area", BodyArea.valueOf(area.getString("area")).name)
                         put("strength", area.getDouble("strength"))
                     })
                 }
@@ -422,7 +417,9 @@ class GymRepository(context: Context) {
                 if (changes.length() == 0) addWeightHistory(database, id, item.getDouble("currentWeight"), System.currentTimeMillis())
             }
         }
-        preferences.edit().putLong("active_training_plan", targetPlanId).apply()
+        val activePlanId = importedPlanIds[root.getLong("activePlanId")]
+            ?: importedPlanIds.values.first()
+        preferences.edit().putLong("active_training_plan", activePlanId).apply()
     }
 
     private fun loadAreas(database: SQLiteDatabase, id: Long): List<AreaAssignment> {
@@ -430,11 +427,10 @@ class GymRepository(context: Context) {
         database.rawQuery("SELECT area,strength FROM machine_areas WHERE machine_id=? ORDER BY area", arrayOf(id.toString())).use { cursor ->
             while (cursor.moveToNext()) {
                 val stored = runCatching { BodyArea.valueOf(cursor.getString(0)) }.getOrNull() ?: continue
-                val area = if (stored == BodyArea.BACK) BodyArea.UPPER_BACK else stored
                 result += AreaAssignment(
-                    area,
+                    stored,
                     if (cursor.getDouble(1) >= 0.75) Strength.FULL else Strength.HALF,
-                    areaColor(database, area),
+                    areaColor(database, stored),
                 )
             }
         }
@@ -528,22 +524,12 @@ private class GymDatabase(context: Context) : SQLiteOpenHelper(context, "gymlog.
     }
 
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
-        if (oldVersion < 2) db.execSQL("ALTER TABLE machines ADD COLUMN pause_time TEXT NOT NULL DEFAULT ''")
-        if (oldVersion < 3) {
-            db.execSQL("ALTER TABLE machines ADD COLUMN chart_window TEXT NOT NULL DEFAULT '3M'")
-            db.execSQL("CREATE TABLE area_colors(area TEXT PRIMARY KEY,color INTEGER NOT NULL)")
-            db.execSQL("UPDATE machine_areas SET area='UPPER_BACK' WHERE area='BACK'")
-        }
-        if (oldVersion < 4) {
-            db.execSQL("ALTER TABLE machines ADD COLUMN trailing_average INTEGER NOT NULL DEFAULT 0")
-            db.execSQL("ALTER TABLE machines ADD COLUMN tracking_mode TEXT NOT NULL DEFAULT 'WEIGHT'")
-        }
-        if (oldVersion < 5) db.execSQL("ALTER TABLE machines ADD COLUMN title_note TEXT NOT NULL DEFAULT ''")
-        if (oldVersion < 6) {
-            db.execSQL("CREATE TABLE training_plans(id INTEGER PRIMARY KEY AUTOINCREMENT,name TEXT NOT NULL UNIQUE,sort_order INTEGER NOT NULL)")
-            db.execSQL("INSERT INTO training_plans(id,name,sort_order) VALUES(1,'Default',0)")
-            db.execSQL("ALTER TABLE machines ADD COLUMN plan_id INTEGER NOT NULL DEFAULT 1")
-            db.execSQL("CREATE INDEX idx_machines_plan_order ON machines(plan_id,sort_order)")
-        }
+        db.execSQL("DROP TABLE IF EXISTS sets")
+        db.execSQL("DROP TABLE IF EXISTS weight_history")
+        db.execSQL("DROP TABLE IF EXISTS machine_areas")
+        db.execSQL("DROP TABLE IF EXISTS machines")
+        db.execSQL("DROP TABLE IF EXISTS training_plans")
+        db.execSQL("DROP TABLE IF EXISTS area_colors")
+        onCreate(db)
     }
 }
