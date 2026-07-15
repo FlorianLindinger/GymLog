@@ -12,8 +12,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.LazyRow
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Card
@@ -29,6 +27,7 @@ import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.gymlog.app.data.HistorySet
 import com.gymlog.app.data.MachineSummary
@@ -105,21 +104,22 @@ fun StatsScreen(
             FilledTonalButton(onClick = onHistory, modifier = Modifier.fillMaxWidth()) { Text("Calendar & history") }
         }
         item {
-            LazyRow(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                items(8) { index ->
-                    val preset = listOf("1W", "1M", "3M", "6M", "1Y", "2Y", "3Y", "ALL")[index]
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                listOf("1W", "1M", "3M", "6M", "1Y", "2Y", "3Y", "ALL").forEach { preset ->
                     val selected = window == preset
                     Text(
                         preset,
                         modifier = Modifier
+                            .weight(1f)
                             .background(
                                 if (selected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant,
                                 RoundedCornerShape(7.dp),
                             )
                             .clickable { window = preset }
-                            .padding(horizontal = 8.dp, vertical = 4.dp),
+                            .padding(vertical = 4.dp),
                         color = if (selected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
                         style = MaterialTheme.typography.labelSmall,
+                        textAlign = TextAlign.Center,
                     )
                 }
             }

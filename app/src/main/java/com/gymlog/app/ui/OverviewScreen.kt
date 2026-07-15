@@ -196,7 +196,7 @@ fun OverviewScreen(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 FilledTonalButton(onClick = onMenu, modifier = Modifier.weight(1f)) { Text("Menu") }
-                FilledTonalButton(onClick = onStats, modifier = Modifier.weight(1f)) { Text("Stats") }
+                FilledTonalButton(onClick = onStats, modifier = Modifier.weight(2f)) { Text("Stats") }
                 FilledTonalButton(onClick = onAdd, modifier = Modifier.weight(1f)) { Text("+ Add") }
             }
         }
@@ -234,7 +234,7 @@ private fun TrainingDurationCard(machines: List<MachineSummary>, activePlanName:
                         val startTime = Instant.ofEpochMilli(first).atZone(zone)
                         val endTime = Instant.ofEpochMilli(if (isActive) now else last!!).atZone(zone)
                         val formatter = if (startTime.toLocalDate() == endTime.toLocalDate()) clock else dateClock
-                        "${startTime.format(formatter)} - ${if (isActive) "" else endTime.format(formatter)}"
+                        "${startTime.format(formatter)} - ${if (isActive) "Now" else endTime.format(formatter)}"
                     },
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -357,7 +357,6 @@ private fun MachineCard(
 ) {
     var quickReps by remember(summary.machine.id) { mutableStateOf(false) }
     var changeMetric by remember(summary.machine.id) { mutableStateOf(false) }
-    var pendingMetric by remember(summary.machine.id) { mutableStateOf<Double?>(null) }
     val trainedInUnit = summary.recentSets.any { it.performedAt >= trainingUnitCutoff }
     val currentUnitSets = currentTrainingUnitSets(summary)
     val isChangingTrainingUnit = currentUnitSets.isNotEmpty()
@@ -455,36 +454,12 @@ private fun MachineCard(
         onDismiss = { changeMetric = false },
         onSave = {
             changeMetric = false
-            if (currentUnitSets.isEmpty()) onMetricChange(summary, it) else pendingMetric = it
+            onMetricChange(summary, it)
         },
-    )
-    pendingMetric?.let { value ->
-        MetricChangeScopeDialog(
-            onDismiss = { pendingMetric = null },
-            onNextSession = { onMetricChange(summary, value); pendingMetric = null },
-            onCurrentAndNext = { onMetricChangeForSession(summary, value); pendingMetric = null },
-        )
-    }
-}
-
-@Composable
-fun MetricChangeScopeDialog(
-    onDismiss: () -> Unit,
-    onNextSession: () -> Unit,
-    onCurrentAndNext: () -> Unit,
-) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Apply metric change") },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("This exercise already has entries in the current training session.")
-                Button(onClick = onNextSession, modifier = Modifier.fillMaxWidth()) { Text("Change for next session") }
-                FilledTonalButton(onClick = onCurrentAndNext, modifier = Modifier.fillMaxWidth()) { Text("Change this session and next") }
-            }
-        },
-        confirmButton = {},
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+        onSaveCurrentAndNext = if (currentUnitSets.isNotEmpty()) { value ->
+            onMetricChangeForSession(summary, value)
+            changeMetric = false
+        } else null,
     )
 }
 
@@ -571,7 +546,7 @@ fun QuickTrainingDialog(initialMinutes: Int, isChange: Boolean = false, onDismis
     val level = value.toIntOrNull()
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text(if (isChange) "Change training" else "Log training") },
+        title = { Text(if (isChange) "Change Training" else "Log Training") },
         text = {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedButton(onClick = { value = ((level ?: 0) - 1).coerceAtLeast(0).toString() }) { Text("−1") }
@@ -586,7 +561,7 @@ fun QuickTrainingDialog(initialMinutes: Int, isChange: Boolean = false, onDismis
                 OutlinedButton(onClick = { value = ((level ?: 0) + 1).toString() }) { Text("+1") }
             }
         },
-        confirmButton = { Button(onClick = { level?.let(onAdd) }, enabled = level != null && level > 0) { Text("Save training") } },
+        confirmButton = { Button(onClick = { level?.let(onAdd) }, enabled = level != null && level > 0) { Text(if (isChange) "Change Training" else "Save Training") } },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
     )
 }
@@ -640,7 +615,7 @@ fun QuickRepDialog(
     val reps = remember(initialReps) { mutableStateListOf<Int>().apply { addAll((initialReps + List(5) { 0 }).take(5)) } }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text(if (isChange) "Change sets" else "Log up to 5 sets") },
+        title = { Text(if (isChange) "Change Sets" else "Log Up to 5 Sets") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
@@ -666,7 +641,7 @@ fun QuickRepDialog(
                 Text("Last: ${lastReps.joinToString(",").ifEmpty { "None" }}", style = MaterialTheme.typography.labelLarge)
             }
         },
-        confirmButton = { Button(onClick = { onAdd(reps.toList()) }, enabled = isChange || reps.any { it > 0 }) { Text("Save sets") } },
+        confirmButton = { Button(onClick = { onAdd(reps.toList()) }, enabled = isChange || reps.any { it > 0 }) { Text(if (isChange) "Change Sets" else "Save Sets") } },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
     )
 }

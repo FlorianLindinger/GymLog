@@ -151,7 +151,7 @@ GymLog stores its data locally on the device. It does not require an account, an
   - Warn after a configurable number of training days without an increase
   - Set either threshold to zero to disable it
 - Simplified front/back body-area picker designed around gym machines
-  - Chest, upper back, lower back, shoulders, biceps, triceps, forearms, core, glutes, quads, hamstrings, and calves
+  - Chest, lats / upper back, lower back, traps, shoulders, biceps, triceps, forearms, core, glutes, quads, adductors, hip abductors, hamstrings, and calves
   - Half- or full-strength assignments
   - Custom colors and most-used-area sorting
 - JSON backup and restore through Android's file picker

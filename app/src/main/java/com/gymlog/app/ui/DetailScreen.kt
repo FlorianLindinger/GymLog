@@ -79,7 +79,6 @@ fun DetailScreen(
     var confirmDelete by remember { mutableStateOf(false) }
     var editingSet by remember { mutableStateOf<SetRecord?>(null) }
     var expandedBatch by remember { mutableStateOf<Long?>(null) }
-    var pendingMetric by remember { mutableStateOf<Double?>(null) }
     val machine = summary.machine
     val currentUnitSets = currentTrainingUnitSets(summary)
     val highest = summary.weightChanges.maxOfOrNull { it.weight } ?: machine.currentWeight
@@ -201,30 +200,21 @@ fun DetailScreen(
         Spacer(Modifier.height(8.dp))
     }
 
-    if (showWeight) MetricValueDialog(machine.currentWeight, machine.trackingMode, onDismiss = { showWeight = false }) {
-        showWeight = false
-        if (currentUnitSets.isEmpty()) {
+    if (showWeight) MetricValueDialog(
+        current = machine.currentWeight,
+        trackingMode = machine.trackingMode,
+        onDismiss = { showWeight = false },
+        onSave = {
             repository.changeWeight(machine.id, it)
             onChanged()
-        } else {
-            pendingMetric = it
-        }
-    }
-    pendingMetric?.let { value ->
-        MetricChangeScopeDialog(
-            onDismiss = { pendingMetric = null },
-            onNextSession = {
-                repository.changeWeight(machine.id, value)
-                pendingMetric = null
-                onChanged()
-            },
-            onCurrentAndNext = {
-                repository.changeMetricForCurrentTrainingUnit(machine.id, value)
-                pendingMetric = null
-                onChanged()
-            },
-        )
-    }
+            showWeight = false
+        },
+        onSaveCurrentAndNext = if (currentUnitSets.isNotEmpty()) { value ->
+            repository.changeMetricForCurrentTrainingUnit(machine.id, value)
+            onChanged()
+            showWeight = false
+        } else null,
+    )
     if (showNotes) TextEditDialog("Notes", machine.notes, onDismiss = { showNotes = false }) {
         repository.setMachineNotes(machine.id, it)
         onChanged()
@@ -360,14 +350,31 @@ private fun chartCutoff(window: String): Long? {
 }
 
 @Composable
-fun MetricValueDialog(current: Double, trackingMode: String, onDismiss: () -> Unit, onSave: (Double) -> Unit) {
+fun MetricValueDialog(
+    current: Double,
+    trackingMode: String,
+    onDismiss: () -> Unit,
+    onSave: (Double) -> Unit,
+    onSaveCurrentAndNext: ((Double) -> Unit)? = null,
+) {
     var value by remember { mutableStateOf(if (current % 1.0 == 0.0) current.toInt().toString() else current.toString()) }
     val parsed = value.replace(',', '.').toDoubleOrNull()
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Change ${metricName(trackingMode)}") },
-        text = { OutlinedTextField(value, { value = it.filter { char -> char.isDigit() || char == '.' || char == ',' } }, label = { Text(when (trackingMode) { "WEIGHT" -> "New weight (kg)"; "DURATION" -> "New duration (min)"; else -> "New level" }) }, singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = if (trackingMode == "WEIGHT") KeyboardType.Decimal else KeyboardType.Number)) },
-        confirmButton = { Button(onClick = { parsed?.let(onSave) }, enabled = parsed != null && parsed >= 0) { Text("Save") } },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedTextField(value, { value = it.filter { char -> char.isDigit() || char == '.' || char == ',' } }, label = { Text(when (trackingMode) { "WEIGHT" -> "New Weight (kg)"; "DURATION" -> "New Duration (min)"; else -> "New Level" }) }, singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = if (trackingMode == "WEIGHT") KeyboardType.Decimal else KeyboardType.Number))
+                if (onSaveCurrentAndNext != null) {
+                    Text("This exercise already has entries in the current training session.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Button(onClick = { parsed?.let(onSave) }, enabled = parsed != null && parsed >= 0, modifier = Modifier.fillMaxWidth()) { Text("Change for Next Session") }
+                    androidx.compose.material3.FilledTonalButton(onClick = { parsed?.let(onSaveCurrentAndNext) }, enabled = parsed != null && parsed >= 0, modifier = Modifier.fillMaxWidth()) { Text("Change This Session and Next") }
+                }
+            }
+        },
+        confirmButton = {
+            if (onSaveCurrentAndNext == null) Button(onClick = { parsed?.let(onSave) }, enabled = parsed != null && parsed >= 0) { Text("Save") }
+        },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
     )
 }
@@ -467,67 +474,38 @@ private fun BodyMapPicker(
                 }
             }
 
-            oval(BodyArea.SHOULDERS, .202f, .185f, .072f, .095f)
-            oval(BodyArea.SHOULDERS, .336f, .185f, .072f, .095f)
-            polygon(BodyArea.CHEST, .255f to .235f, .305f to .218f, .355f to .235f, .348f to .315f, .305f to .330f, .262f to .315f)
-            polygon(BodyArea.CORE, .270f to .322f, .340f to .322f, .334f to .493f, .276f to .493f)
-            oval(BodyArea.BICEPS, .185f, .270f, .045f, .125f)
-            oval(BodyArea.BICEPS, .380f, .270f, .045f, .125f)
-            polygon(BodyArea.FOREARMS, .184f to .385f, .222f to .390f, .202f to .520f, .166f to .520f)
-            polygon(BodyArea.FOREARMS, .388f to .390f, .426f to .385f, .444f to .520f, .408f to .520f)
-            polygon(BodyArea.QUADS, .268f to .525f, .303f to .535f, .294f to .725f, .252f to .725f)
-            polygon(BodyArea.QUADS, .307f to .535f, .342f to .525f, .358f to .725f, .316f to .725f)
-            polygon(BodyArea.CALVES, .252f to .735f, .294f to .735f, .278f to .900f, .244f to .900f)
-            polygon(BodyArea.CALVES, .316f to .735f, .358f to .735f, .366f to .900f, .332f to .900f)
+            oval(BodyArea.SHOULDERS, .218f, .205f, .053f, .075f)
+            oval(BodyArea.SHOULDERS, .339f, .205f, .053f, .075f)
+            polygon(BodyArea.CHEST, .263f to .238f, .305f to .220f, .347f to .238f, .343f to .315f, .305f to .333f, .267f to .315f)
+            polygon(BodyArea.CORE, .277f to .322f, .333f to .322f, .329f to .493f, .281f to .493f)
+            oval(BodyArea.BICEPS, .202f, .285f, .033f, .115f)
+            oval(BodyArea.BICEPS, .375f, .285f, .033f, .115f)
+            polygon(BodyArea.FOREARMS, .201f to .390f, .226f to .397f, .203f to .510f, .181f to .516f)
+            polygon(BodyArea.FOREARMS, .384f to .397f, .409f to .390f, .429f to .516f, .407f to .510f)
+            polygon(BodyArea.QUADS, .270f to .515f, .303f to .525f, .298f to .705f, .267f to .705f)
+            polygon(BodyArea.QUADS, .307f to .525f, .340f to .515f, .343f to .705f, .312f to .705f)
+            polygon(BodyArea.ADDUCTORS, .298f to .520f, .307f to .535f, .305f to .675f, .292f to .610f)
+            polygon(BodyArea.ADDUCTORS, .303f to .535f, .312f to .520f, .318f to .610f, .305f to .675f)
+            polygon(BodyArea.ABDUCTORS, .256f to .490f, .278f to .505f, .273f to .620f, .252f to .585f)
+            polygon(BodyArea.ABDUCTORS, .332f to .505f, .354f to .490f, .358f to .585f, .337f to .620f)
+            polygon(BodyArea.CALVES, .264f to .715f, .296f to .715f, .282f to .875f, .258f to .875f)
+            polygon(BodyArea.CALVES, .314f to .715f, .346f to .715f, .352f to .875f, .328f to .875f)
 
-            oval(BodyArea.SHOULDERS, .592f, .185f, .072f, .095f)
-            oval(BodyArea.SHOULDERS, .736f, .185f, .072f, .095f)
-            polygon(BodyArea.UPPER_BACK, .650f to .225f, .700f to .210f, .750f to .225f, .742f to .355f, .658f to .355f)
-            polygon(BodyArea.LOWER_BACK, .658f to .355f, .742f to .355f, .735f to .480f, .665f to .480f)
-            oval(BodyArea.TRICEPS, .578f, .270f, .045f, .125f)
-            oval(BodyArea.TRICEPS, .777f, .270f, .045f, .125f)
-            polygon(BodyArea.FOREARMS, .578f to .385f, .616f to .390f, .596f to .520f, .560f to .520f)
-            polygon(BodyArea.FOREARMS, .784f to .390f, .822f to .385f, .840f to .520f, .804f to .520f)
-            oval(BodyArea.GLUTES, .645f, .465f, .110f, .115f)
-            polygon(BodyArea.HAMSTRINGS, .650f to .565f, .696f to .575f, .687f to .735f, .642f to .735f)
-            polygon(BodyArea.HAMSTRINGS, .704f to .575f, .750f to .565f, .758f to .735f, .713f to .735f)
-            polygon(BodyArea.CALVES, .642f to .735f, .687f to .735f, .672f to .900f, .637f to .900f)
-            polygon(BodyArea.CALVES, .713f to .735f, .758f to .735f, .763f to .900f, .728f to .900f)
+            oval(BodyArea.SHOULDERS, .608f, .205f, .053f, .075f)
+            oval(BodyArea.SHOULDERS, .739f, .205f, .053f, .075f)
+            polygon(BodyArea.TRAPS, .685f to .180f, .715f to .180f, .742f to .270f, .700f to .315f, .658f to .270f)
+            polygon(BodyArea.UPPER_BACK, .654f to .270f, .700f to .305f, .746f to .270f, .739f to .405f, .700f to .440f, .661f to .405f)
+            polygon(BodyArea.LOWER_BACK, .674f to .400f, .726f to .400f, .728f to .490f, .672f to .490f)
+            oval(BodyArea.TRICEPS, .592f, .285f, .033f, .115f)
+            oval(BodyArea.TRICEPS, .775f, .285f, .033f, .115f)
+            polygon(BodyArea.FOREARMS, .591f to .390f, .616f to .397f, .597f to .510f, .575f to .516f)
+            polygon(BodyArea.FOREARMS, .784f to .397f, .809f to .390f, .825f to .516f, .803f to .510f)
+            oval(BodyArea.GLUTES, .650f, .475f, .100f, .105f)
+            polygon(BodyArea.HAMSTRINGS, .650f to .565f, .696f to .575f, .686f to .720f, .650f to .720f)
+            polygon(BodyArea.HAMSTRINGS, .704f to .575f, .750f to .565f, .750f to .720f, .714f to .720f)
+            polygon(BodyArea.CALVES, .650f to .720f, .686f to .720f, .673f to .875f, .647f to .875f)
+            polygon(BodyArea.CALVES, .714f to .720f, .750f to .720f, .753f to .875f, .727f to .875f)
         }
-        Row(Modifier.align(Alignment.TopCenter).fillMaxWidth().padding(top = 4.dp)) {
-            Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
-                Text("Front", Modifier.background(Color.Black.copy(alpha = .72f), RoundedCornerShape(8.dp)).padding(horizontal = 9.dp, vertical = 3.dp), color = Color.White, style = MaterialTheme.typography.labelMedium)
-            }
-            Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
-                Text("Back", Modifier.background(Color.Black.copy(alpha = .72f), RoundedCornerShape(8.dp)).padding(horizontal = 9.dp, vertical = 3.dp), color = Color.White, style = MaterialTheme.typography.labelMedium)
-            }
-        }
-    }
-}
-
-private fun areaFromBodyMap(x: Float, y: Float): BodyArea? {
-    val front = x < .5f
-    val centerX = if (front) .25f else .75f
-    val distance = kotlin.math.abs(x - centerX)
-    return if (front) when {
-        y in 0.20f..0.29f && distance in 0.07f..0.18f -> BodyArea.SHOULDERS
-        y in 0.25f..0.37f && distance < .075f -> BodyArea.CHEST
-        y in 0.29f..0.40f && distance in 0.09f..0.20f -> BodyArea.BICEPS
-        y in 0.40f..0.53f && distance in 0.09f..0.20f -> BodyArea.FOREARMS
-        y in 0.37f..0.53f && distance < .075f -> BodyArea.CORE
-        y in 0.54f..0.75f && distance < .10f -> BodyArea.QUADS
-        y in 0.75f..0.95f && distance < .11f -> BodyArea.CALVES
-        else -> null
-    } else when {
-        y in 0.20f..0.29f && distance in 0.07f..0.18f -> BodyArea.SHOULDERS
-        y in 0.25f..0.40f && distance < .075f -> BodyArea.UPPER_BACK
-        y in 0.29f..0.40f && distance in 0.09f..0.20f -> BodyArea.TRICEPS
-        y in 0.40f..0.53f && distance in 0.09f..0.20f -> BodyArea.FOREARMS
-        y in 0.40f..0.52f && distance < .07f -> BodyArea.LOWER_BACK
-        y in 0.50f..0.62f && distance < .10f -> BodyArea.GLUTES
-        y in 0.62f..0.78f && distance < .10f -> BodyArea.HAMSTRINGS
-        y in 0.78f..0.95f && distance < .11f -> BodyArea.CALVES
-        else -> null
     }
 }
 

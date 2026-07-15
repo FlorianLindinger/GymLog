@@ -15,8 +15,9 @@ data class Machine(
 
 enum class BodyArea(val label: String, val color: Long) {
     CHEST("Chest", 0xFFFF1744),
-    UPPER_BACK("Upper back", 0xFF2979FF),
+    UPPER_BACK("Lats / upper back", 0xFF2979FF),
     LOWER_BACK("Lower back", 0xFF00E5FF),
+    TRAPS("Traps", 0xFF3949AB),
     SHOULDERS("Shoulders", 0xFFFF9100),
     BICEPS("Biceps", 0xFF651FFF),
     TRICEPS("Triceps", 0xFFF500D4),
@@ -24,6 +25,8 @@ enum class BodyArea(val label: String, val color: Long) {
     CORE("Core", 0xFFFFEA00),
     GLUTES("Glutes", 0xFF00BFA5),
     QUADS("Quads", 0xFF00E676),
+    ADDUCTORS("Adductors", 0xFF8D6E63),
+    ABDUCTORS("Hip abductors", 0xFF78909C),
     HAMSTRINGS("Hamstrings", 0xFFFF6D00),
     CALVES("Calves", 0xFFAEEA00),
 }
