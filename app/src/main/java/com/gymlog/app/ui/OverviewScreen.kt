@@ -73,6 +73,7 @@ import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 import kotlin.math.abs
+import kotlinx.coroutines.delay
 
 @Composable
 fun OverviewScreen(
@@ -89,9 +90,20 @@ fun OverviewScreen(
     progressionSettings: ProgressionSettings,
     onReorder: (List<Long>) -> Unit,
 ) {
-    val today = LocalDate.now()
     val zone = ZoneId.systemDefault()
-    val lastExerciseToday = mostRecentlyTrainedToday(machines, today, zone)
+    var now by remember { mutableStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            delay(1_000)
+            now = System.currentTimeMillis()
+        }
+    }
+    val latestTrainingEntry = machines.flatMap { it.recentSets }.maxOfOrNull { it.performedAt }
+    val trainingUnitCutoff = latestTrainingEntry
+        ?.takeIf { now - it <= TRAINING_UNIT_MILLIS }
+        ?.let { now - TRAINING_UNIT_MILLIS }
+        ?: Long.MAX_VALUE
+    val lastExerciseInUnit = mostRecentlyTrainedInUnit(machines, trainingUnitCutoff)
     val listState = rememberLazyListState()
     val orderedMachines = remember(machines.map { it.machine.id }) { machines.toMutableStateList() }
     var draggedId by remember { mutableStateOf<Long?>(null) }
@@ -124,11 +136,11 @@ fun OverviewScreen(
                 contentPadding = PaddingValues(start = 8.dp, end = 8.dp, top = 6.dp, bottom = 72.dp),
                 verticalArrangement = Arrangement.spacedBy(6.dp),
             ) {
-                item(key = "training-duration") { TrainingDurationCard(machines, activePlanName, today, zone) }
+                item(key = "training-duration") { TrainingDurationCard(machines, activePlanName, now, zone) }
                 items(orderedMachines, key = { it.machine.id }) { summary ->
                     val id = summary.machine.id
                     MachineCard(
-                        summary, lastExerciseToday, today, zone, areaFrequency, onMachine, onQuickSet,
+                        summary, lastExerciseInUnit, trainingUnitCutoff, areaFrequency, onMachine, onQuickSet,
                         onMetricChange, progressionSettings,
                         modifier = Modifier.pointerInput(id, orderedMachines.map { it.machine.id }) {
                             detectDragGesturesAfterLongPress(
@@ -182,13 +194,16 @@ fun OverviewScreen(
 }
 
 @Composable
-private fun TrainingDurationCard(machines: List<MachineSummary>, activePlanName: String, today: LocalDate, zone: ZoneId) {
-    val todaySets = machines.flatMap { it.recentSets }.filter { it.performedDate(zone) == today }
-    val first = todaySets.minOfOrNull { it.performedAt }
-    val last = todaySets.maxOfOrNull { it.performedAt }
-    val durationMinutes = if (first == null || last == null) 0L else ((last - first) / 60_000L).coerceAtLeast(0L)
+private fun TrainingDurationCard(machines: List<MachineSummary>, activePlanName: String, now: Long, zone: ZoneId) {
+    val allSets = machines.flatMap { it.recentSets }
+    val last = allSets.maxOfOrNull { it.performedAt }
+    val sessionSets = last?.let { latest -> allSets.filter { it.performedAt >= latest - TRAINING_UNIT_MILLIS } }.orEmpty()
+    val first = sessionSets.minOfOrNull { it.performedAt }
+    val isActive = last != null && now - last < 10L * 60L * 1000L
+    val durationMillis = if (first == null || last == null) 0L else ((if (isActive) now else last) - first).coerceAtLeast(0L)
     val clock = DateTimeFormatter.ofPattern("HH:mm")
-    val completedExercises = machines.count { wasTrainedToday(it, today, zone) }
+    val dateClock = DateTimeFormatter.ofPattern("dd.MM HH:mm")
+    val completedExercises = machines.count { summary -> summary.recentSets.any { first != null && it.performedAt >= first } }
 
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -202,28 +217,33 @@ private fun TrainingDurationCard(machines: List<MachineSummary>, activePlanName:
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Column(Modifier.weight(1f)) {
-                Text("$activePlanName · Today's training duration", style = MaterialTheme.typography.labelLarge)
+                Text("$activePlanName · Training duration", style = MaterialTheme.typography.labelLarge)
                 Text(
                     if (first == null) "Starts with your first entry"
-                    else "${Instant.ofEpochMilli(first).atZone(zone).format(clock)} – ${Instant.ofEpochMilli(last!!).atZone(zone).format(clock)}",
+                    else {
+                        val startTime = Instant.ofEpochMilli(first).atZone(zone)
+                        val endTime = Instant.ofEpochMilli(if (isActive) now else last!!).atZone(zone)
+                        val formatter = if (startTime.toLocalDate() == endTime.toLocalDate()) clock else dateClock
+                        "${startTime.format(formatter)} – ${if (isActive) "Now" else endTime.format(formatter)}"
+                    },
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 Text(
-                    "$completedExercises of ${machines.size} exercises done today",
+                    "$completedExercises of ${machines.size} exercises completed in this session",
                     style = MaterialTheme.typography.labelSmall,
                     color = if (completedExercises == machines.size) Color(0xFF2E7D32) else MaterialTheme.colorScheme.tertiary,
                 )
             }
             Column(horizontalAlignment = Alignment.End) {
                 Text(
-                    formatHoursMinutes(durationMinutes),
+                    formatElapsed(durationMillis),
                     style = MaterialTheme.typography.headlineMedium,
                     fontWeight = FontWeight.Bold,
                     color = MaterialTheme.colorScheme.onPrimaryContainer,
                 )
                 Text(
-                    "TRAINING TIME",
+                    "Training time",
                     style = MaterialTheme.typography.labelSmall,
                     fontWeight = FontWeight.Bold,
                     color = MaterialTheme.colorScheme.secondary,
@@ -320,9 +340,8 @@ private fun progressionWarning(summary: MachineSummary, settings: ProgressionSet
 @Composable
 private fun MachineCard(
     summary: MachineSummary,
-    lastExerciseToday: MachineSummary?,
-    today: LocalDate,
-    zone: ZoneId,
+    lastExerciseInUnit: MachineSummary?,
+    trainingUnitCutoff: Long,
     areaFrequency: Map<BodyArea, Double>,
     onMachine: (Long) -> Unit,
     onQuickSet: (MachineSummary, List<Int>) -> Unit,
@@ -333,14 +352,21 @@ private fun MachineCard(
 ) {
     var quickReps by remember(summary.machine.id) { mutableStateOf(false) }
     var changeMetric by remember(summary.machine.id) { mutableStateOf(false) }
-    val trainedToday = wasTrainedToday(summary, today, zone)
+    val trainedInUnit = summary.recentSets.any { it.performedAt >= trainingUnitCutoff }
     val currentUnitSets = currentTrainingUnitSets(summary)
     val isChangingTrainingUnit = currentUnitSets.isNotEmpty()
-    val clash = if (!trainedToday && lastExerciseToday != null) strongestClash(summary, lastExerciseToday) else null
+    val clash = if (!trainedInUnit && lastExerciseInUnit != null) strongestClash(summary, lastExerciseInUnit) else null
+    val clashAreas = if (!trainedInUnit && lastExerciseInUnit != null) clashingAreas(summary, lastExerciseInUnit) else emptySet()
+    val outlineColor = when {
+        trainedInUnit -> sessionTrendColor(summary)
+        clash != null && clash >= 1.0 -> Color(0xFFE53935)
+        clash != null -> Color(0xFFFBC02D)
+        else -> Color(0xFF43A047)
+    }
     Card(
         modifier = modifier.fillMaxWidth().clickable { onMachine(summary.machine.id) },
         elevation = CardDefaults.cardElevation(defaultElevation = if (isDragging) 10.dp else 1.dp),
-        border = BorderStroke(1.5.dp, sessionTrendColor(summary)),
+        border = BorderStroke(if (trainedInUnit) 1.5.dp else 2.5.dp, outlineColor),
     ) {
         Column(Modifier.padding(horizontal = 8.dp, vertical = 3.dp), verticalArrangement = Arrangement.spacedBy(0.dp)) {
             if (summary.areas.isNotEmpty()) {
@@ -349,8 +375,11 @@ private fun MachineCard(
                         Box(
                             Modifier
                                 .width(if (assignment.strength == Strength.FULL) 38.dp else 19.dp)
-                                .height(3.dp)
-                                .background(Color(assignment.displayColor), RoundedCornerShape(8.dp)),
+                                .height(if (assignment.area in clashAreas) 7.dp else 3.dp)
+                                .background(
+                                    Color(assignment.displayColor).copy(alpha = if (clashAreas.isEmpty() || assignment.area in clashAreas) 1f else .25f),
+                                    RoundedCornerShape(8.dp),
+                                ),
                         )
                     }
                 }
@@ -362,10 +391,6 @@ private fun MachineCard(
                         Text(" · ${summary.machine.titleNote}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
-                if (!trainedToday) {
-                    TodoBadge(clash)
-                    Spacer(Modifier.width(2.dp))
-                }
             }
             progressionWarning(summary, progressionSettings)?.let { warning ->
                 Text(warning, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error)
@@ -373,9 +398,9 @@ private fun MachineCard(
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
                     when {
-                        isChangingTrainingUnit -> "CHANGE"
-                        isDirectMetric(summary.machine.trackingMode) -> "+ TRAINING"
-                        else -> "+ SETS"
+                        isChangingTrainingUnit -> "Change"
+                        isDirectMetric(summary.machine.trackingMode) -> "+ Training"
+                        else -> "+ Sets"
                     },
                     modifier = Modifier.clickable { quickReps = true }.padding(horizontal = 8.dp, vertical = 2.dp),
                     style = MaterialTheme.typography.labelLarge,
@@ -427,44 +452,13 @@ private fun MachineCard(
     )
 }
 
-@Composable
-private fun TodoBadge(clash: Double?) {
-    val label = when (clash) {
-        1.0 -> "TO DO · FULL CLASH"
-        0.5 -> "TO DO · ½ CLASH"
-        0.25 -> "TO DO · ¼ CLASH"
-        else -> "TO DO"
-    }
-    val containerColor = when (clash) {
-        1.0 -> MaterialTheme.colorScheme.errorContainer
-        0.5 -> MaterialTheme.colorScheme.tertiaryContainer
-        else -> MaterialTheme.colorScheme.secondaryContainer
-    }
-    val contentColor = when (clash) {
-        1.0 -> MaterialTheme.colorScheme.onErrorContainer
-        0.5 -> MaterialTheme.colorScheme.onTertiaryContainer
-        else -> MaterialTheme.colorScheme.onSecondaryContainer
-    }
-    Text(
-        label,
-        modifier = Modifier
-            .background(containerColor, RoundedCornerShape(6.dp))
-            .padding(horizontal = 6.dp, vertical = 2.dp),
-        style = MaterialTheme.typography.labelSmall,
-        fontWeight = FontWeight.Bold,
-        color = contentColor,
-        maxLines = 1,
-    )
-}
-
-private fun mostRecentlyTrainedToday(
+private fun mostRecentlyTrainedInUnit(
     machines: List<MachineSummary>,
-    today: LocalDate,
-    zone: ZoneId,
+    cutoff: Long,
 ): MachineSummary? = machines
     .mapNotNull { summary ->
         summary.recentSets
-            .filter { it.performedDate(zone) == today }
+            .filter { it.performedAt >= cutoff }
             .maxOfOrNull { it.performedAt }
             ?.let { latest -> summary to latest }
     }
@@ -478,8 +472,10 @@ private fun strongestClash(current: MachineSummary, previous: MachineSummary): D
     }.maxOrNull()
 }
 
-private fun wasTrainedToday(summary: MachineSummary, today: LocalDate, zone: ZoneId): Boolean =
-    summary.recentSets.any { it.performedDate(zone) == today }
+private fun clashingAreas(current: MachineSummary, previous: MachineSummary): Set<BodyArea> {
+    val previousAreas = previous.areas.mapTo(mutableSetOf()) { it.area }
+    return current.areas.mapNotNullTo(mutableSetOf()) { it.area.takeIf(previousAreas::contains) }
+}
 
 private fun SetRecord.performedDate(zone: ZoneId): LocalDate =
     Instant.ofEpochMilli(performedAt).atZone(zone).toLocalDate()
@@ -690,6 +686,14 @@ fun AddMachineDialog(onDismiss: () -> Unit, onAdd: (String, Double, String) -> U
 fun formatWeight(weight: Double): String = if (weight % 1.0 == 0.0) "${weight.toInt()} kg" else String.format(Locale.US, "%.1f kg", weight)
 
 fun formatHoursMinutes(totalMinutes: Long): String = "${totalMinutes / 60}:${(totalMinutes % 60).toString().padStart(2, '0')}"
+
+private fun formatElapsed(totalMillis: Long): String {
+    val totalSeconds = totalMillis / 1_000L
+    val hours = totalSeconds / 3_600L
+    val minutes = (totalSeconds % 3_600L) / 60L
+    val seconds = totalSeconds % 60L
+    return "$hours:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}"
+}
 
 fun isDirectMetric(trackingMode: String): Boolean = trackingMode == "STRENGTH" || trackingMode == "DURATION"
 

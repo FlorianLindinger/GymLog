@@ -71,30 +71,23 @@ fun DetailScreen(
     onChanged: () -> Unit,
     onDeleted: () -> Unit,
 ) {
-    var showQuickSet by remember { mutableStateOf(false) }
     var showWeight by remember { mutableStateOf(false) }
-    var showEdit by remember { mutableStateOf(false) }
+    var showNotes by remember { mutableStateOf(false) }
     var showAreas by remember { mutableStateOf(false) }
     var confirmDelete by remember { mutableStateOf(false) }
     var editingSet by remember { mutableStateOf<SetRecord?>(null) }
     var expandedBatch by remember { mutableStateOf<Long?>(null) }
     val machine = summary.machine
-    val currentUnitSets = currentTrainingUnitSets(summary)
-    val isChangingTrainingUnit = currentUnitSets.isNotEmpty()
     val highest = summary.weightChanges.maxOfOrNull { it.weight } ?: machine.currentWeight
     val first = summary.weightChanges.lastOrNull()?.weight ?: machine.currentWeight
-    val lastChange = summary.weightChanges.firstOrNull()?.changedAt
 
     Column(
         modifier = modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(8.dp),
         verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        Card(modifier = Modifier.fillMaxWidth()) {
+        Card(modifier = Modifier.fillMaxWidth().clickable { showNotes = true }) {
             Column(Modifier.padding(horizontal = 10.dp, vertical = 4.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("Notes", Modifier.weight(1f), style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
-                    Text("Edit", Modifier.clickable { showEdit = true }.padding(horizontal = 8.dp, vertical = 4.dp), color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelLarge)
-                }
+                Text("Notes", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
                 Text(if (machine.notes.isBlank()) "No notes yet. Add seat positions, form cues, or other reminders." else machine.notes, color = if (machine.notes.isBlank()) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface)
             }
         }
@@ -128,39 +121,6 @@ fun DetailScreen(
         }
 
         Card(modifier = Modifier.fillMaxWidth()) {
-            Column(Modifier.padding(horizontal = 10.dp, vertical = 6.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(0.dp)) {
-                        Text(if (isDirectMetric(machine.trackingMode)) "Add today's training" else "Add today's set", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
-                        Text("Pause: ${machine.pauseTime.ifBlank { "not set" }}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                    Text("Edit", Modifier.clickable { showEdit = true }.padding(horizontal = 8.dp, vertical = 4.dp), color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelLarge)
-                }
-                Button(onClick = { showQuickSet = true }, modifier = Modifier.fillMaxWidth()) {
-                    Text(when {
-                        isChangingTrainingUnit -> "Change"
-                        isDirectMetric(machine.trackingMode) -> "+ Training"
-                        else -> "+ Sets at ${formatMetric(machine.currentWeight, machine.trackingMode)}"
-                    })
-                }
-                val recentAmounts = summary.recentSets.map { it.reps }.distinct().take(3)
-                if (machine.trackingMode == "WEIGHT" && recentAmounts.isNotEmpty()) {
-                    Text("Quick repeat", style = MaterialTheme.typography.labelMedium)
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        recentAmounts.forEach { reps ->
-                            Text("$reps reps", Modifier
-                                .background(MaterialTheme.colorScheme.secondaryContainer, RoundedCornerShape(8.dp))
-                                .clickable {
-                                repository.addSet(machine.id, reps, machine.currentWeight)
-                                onChanged()
-                            }.padding(horizontal = 10.dp, vertical = 5.dp), style = MaterialTheme.typography.labelMedium)
-                        }
-                    }
-                }
-            }
-        }
-
-        Card(modifier = Modifier.fillMaxWidth()) {
             Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Text("${metricTitle(machine.trackingMode)} statistics", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
@@ -174,7 +134,7 @@ fun DetailScreen(
                         CompactChoice(
                             selected = machine.chartWindow == window,
                             onClick = { repository.setChartWindow(machine.id, window); onChanged() },
-                            label = window,
+                            label = if (window == "ALL") "All" else window,
                         )
                     }
                 }
@@ -189,14 +149,8 @@ fun DetailScreen(
                     }
                 }
                 val cutoff = chartCutoff(machine.chartWindow)
-                val visibleWeights = summary.weightChanges.filter { cutoff == null || it.changedAt >= cutoff }
                 val visibleSets = summary.recentSets.filter { cutoff == null || it.performedAt >= cutoff }
-                if (visibleWeights.size > 1) WeightChart(visibleWeights, machine.trailingAverage)
-                Text(when (machine.trackingMode) {
-                    "WEIGHT" -> "Volume (weight × reps)"
-                    else -> "Minutes logged"
-                }, style = MaterialTheme.typography.labelLarge)
-                VolumeChart(visibleSets, machine.trailingAverage, isDirectMetric(machine.trackingMode))
+                SessionMetricsChart(visibleSets, machine.trailingAverage, isDirectMetric(machine.trackingMode))
                 Text("${summary.weightChanges.size} ${metricName(machine.trackingMode)} changes · ${summary.recentSets.size} recorded sets", color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
@@ -239,46 +193,19 @@ fun DetailScreen(
             }
         }
 
-        OutlinedButton(onClick = { showEdit = true }, modifier = Modifier.fillMaxWidth()) { Text("Edit exercise details") }
         TextButton(onClick = { confirmDelete = true }, modifier = Modifier.fillMaxWidth()) { Text("Delete exercise", color = MaterialTheme.colorScheme.error) }
         Spacer(Modifier.height(8.dp))
     }
 
-    if (showQuickSet) {
-        if (isDirectMetric(machine.trackingMode)) {
-            QuickTrainingDialog(
-                initialMinutes = (currentUnitSets.firstOrNull() ?: summary.recentSets.firstOrNull())?.weight?.toInt() ?: 0,
-                isChange = isChangingTrainingUnit,
-                onDismiss = { showQuickSet = false },
-                onAdd = {
-                    repository.addTrainingMinutes(machine.id, it)
-                    onChanged()
-                    showQuickSet = false
-                },
-            )
-        } else {
-            QuickRepDialog(
-                initialReps = initialWheelReps(summary, currentUnitSets),
-                lastReps = previousTrainingUnitReps(summary, currentUnitSets),
-                isChange = isChangingTrainingUnit,
-                onDismiss = { showQuickSet = false },
-                onAdd = {
-                    repository.addSets(machine.id, it, machine.currentWeight)
-                    onChanged()
-                    showQuickSet = false
-                },
-            )
-        }
-    }
     if (showWeight) MetricValueDialog(machine.currentWeight, machine.trackingMode, onDismiss = { showWeight = false }) {
         repository.changeWeight(machine.id, it)
         onChanged()
         showWeight = false
     }
-    if (showEdit) EditMachineDialog(machine.name, machine.titleNote, machine.notes, machine.pauseTime, onDismiss = { showEdit = false }) { name, titleNote, notes, pauseTime ->
-        repository.updateMachine(machine.id, name, titleNote, notes, pauseTime)
+    if (showNotes) TextEditDialog("Notes", machine.notes, onDismiss = { showNotes = false }) {
+        repository.setMachineNotes(machine.id, it)
         onChanged()
-        showEdit = false
+        showNotes = false
     }
     if (showAreas) AreaDialog(summary.areas, areaUsage, areaColors, onAreaColor, onDismiss = { showAreas = false }) {
         repository.saveAreas(machine.id, it)
@@ -323,53 +250,60 @@ private fun CompactChoice(selected: Boolean, onClick: () -> Unit, label: String)
 }
 
 @Composable
-private fun WeightChart(changesNewestFirst: List<WeightChange>, trailingAverage: Int) {
-    val values = movingAverage(changesNewestFirst.asReversed().map { it.weight }, trailingAverage)
-    val min = values.minOrNull() ?: 0.0
-    val max = values.maxOrNull() ?: 0.0
-    val primary = MaterialTheme.colorScheme.primary
-    val grid = MaterialTheme.colorScheme.outlineVariant
-    Canvas(Modifier.fillMaxWidth().height(80.dp).padding(vertical = 4.dp)) {
-        drawLine(grid, Offset(0f, size.height), Offset(size.width, size.height), strokeWidth = 2f)
-        val range = (max - min).takeIf { it > 0 } ?: 1.0
-        val points = values.mapIndexed { index, value ->
-            Offset(
-                x = if (values.size == 1) size.width / 2 else index * size.width / (values.size - 1),
-                y = size.height - ((value - min) / range).toFloat() * (size.height - 8f) - 4f,
-            )
-        }
-        points.zipWithNext().forEach { (a, b) -> drawLine(primary, a, b, strokeWidth = 6f, cap = StrokeCap.Round) }
-        points.forEach { drawCircle(primary, radius = 7f, center = it) }
-    }
-}
-
-@Composable
-private fun VolumeChart(sets: List<SetRecord>, trailingAverage: Int, directMetric: Boolean) {
-    val daily = sets.groupBy {
-        Instant.ofEpochMilli(it.performedAt).atZone(ZoneId.systemDefault()).toLocalDate()
-    }.toSortedMap().map { (_, daySets) -> daySets.sumOf { if (directMetric) it.weight else it.weight * it.reps } }
-    if (daily.isEmpty()) {
-        Text("No volume in this window.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+private fun SessionMetricsChart(sets: List<SetRecord>, trailingAverage: Int, directMetric: Boolean) {
+    val allSessions = groupSetBatches(sets).asReversed()
+    val sessions = allSessions.takeLast(24)
+    if (sessions.isEmpty()) {
+        Text("No training data in this window.", color = MaterialTheme.colorScheme.onSurfaceVariant)
         return
     }
-    val values = movingAverage(daily, trailingAverage).takeLast(24)
-    val max = values.maxOrNull()?.takeIf { it > 0 } ?: 1.0
-    val primary = MaterialTheme.colorScheme.secondary
-    Canvas(Modifier.fillMaxWidth().height(64.dp).padding(vertical = 4.dp)) {
-        val gap = 4f
-        val width = (size.width - gap * (values.size - 1)) / values.size
-        values.forEachIndexed { index, value ->
-            val barHeight = (value / max).toFloat() * size.height
-            drawRoundRect(
-                color = primary,
-                topLeft = Offset(index * (width + gap), size.height - barHeight),
-                size = androidx.compose.ui.geometry.Size(width, barHeight),
-                cornerRadius = androidx.compose.ui.geometry.CornerRadius(5f, 5f),
-            )
+    val weight = movingAverage(sessions.map { it.first().weight }, trailingAverage)
+    val volume = movingAverage(sessions.map { session -> session.sumOf { it.weight * it.reps } }, trailingAverage)
+    val reps = movingAverage(sessions.map { session -> session.sumOf { it.reps }.toDouble() }, trailingAverage)
+    val minutes = movingAverage(sessions.map { session -> session.sumOf { it.weight } }, trailingAverage)
+    val weightColor = MaterialTheme.colorScheme.primary
+    val volumeColor = Color(0xFF00BCD4)
+    val repsColor = Color(0xFFFFA726)
+    val grid = MaterialTheme.colorScheme.outlineVariant
+    val series = if (directMetric) listOf(Triple("Minutes", minutes, weightColor)) else listOf(
+        Triple("Weight (kg)", weight, weightColor),
+        Triple("Volume (kg × reps)", volume, volumeColor),
+        Triple("Reps", reps, repsColor),
+    )
+    Text("Training session chart", style = MaterialTheme.typography.labelLarge)
+    series.forEach { (label, values, color) ->
+        val min = values.minOrNull() ?: 0.0
+        val max = values.maxOrNull() ?: 0.0
+        Text("$label axis: ${formatAxisValue(min)}–${formatAxisValue(max)}", color = color, style = MaterialTheme.typography.labelSmall)
+    }
+    Canvas(Modifier.fillMaxWidth().height(150.dp).padding(vertical = 6.dp)) {
+        repeat(3) { index ->
+            val y = index * size.height / 2f
+            drawLine(grid, Offset(0f, y), Offset(size.width, y), strokeWidth = 1f)
+        }
+        series.forEach { (_, values, color) ->
+            val min = values.minOrNull() ?: 0.0
+            val max = values.maxOrNull() ?: 0.0
+            val range = (max - min).takeIf { it > 0 } ?: 1.0
+            val points = values.mapIndexed { index, value ->
+                Offset(
+                    x = if (values.size == 1) size.width / 2f else index * size.width / (values.size - 1),
+                    y = size.height - 5f - ((value - min) / range).toFloat() * (size.height - 10f),
+                )
+            }
+            points.zipWithNext().forEach { (start, end) -> drawLine(color, start, end, strokeWidth = 5f, cap = StrokeCap.Round) }
+            points.forEach { drawCircle(color, radius = 5f, center = it) }
         }
     }
-    if (daily.size > 24) Text("Showing the most recent 24 active days", style = MaterialTheme.typography.bodySmall)
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+        Text(formatTimestamp(sessions.first().minOf { it.performedAt }), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(formatTimestamp(sessions.last().maxOf { it.performedAt }), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+    if (allSessions.size > 24) Text("Showing the 24 most recent training sessions", style = MaterialTheme.typography.bodySmall)
 }
+
+private fun formatAxisValue(value: Double): String = if (value % 1.0 == 0.0) value.toInt().toString()
+else String.format(Locale.US, "%.1f", value)
 
 private fun movingAverage(values: List<Double>, amount: Int): List<Double> {
     if (amount <= 1) return values
@@ -411,42 +345,6 @@ fun MetricValueDialog(current: Double, trackingMode: String, onDismiss: () -> Un
         title = { Text("Change ${metricName(trackingMode)}") },
         text = { OutlinedTextField(value, { value = it.filter { char -> char.isDigit() || char == '.' || char == ',' } }, label = { Text(when (trackingMode) { "WEIGHT" -> "New weight (kg)"; "DURATION" -> "New duration (min)"; else -> "New level" }) }, singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = if (trackingMode == "WEIGHT") KeyboardType.Decimal else KeyboardType.Number)) },
         confirmButton = { Button(onClick = { parsed?.let(onSave) }, enabled = parsed != null && parsed >= 0) { Text("Save") } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
-    )
-}
-
-@Composable
-private fun EditMachineDialog(currentName: String, currentTitleNote: String, currentNotes: String, currentPauseTime: String, onDismiss: () -> Unit, onSave: (String, String, String, String) -> Unit) {
-    var name by remember { mutableStateOf(currentName) }
-    var titleNote by remember { mutableStateOf(currentTitleNote) }
-    var notes by remember { mutableStateOf(currentNotes) }
-    var pauseTime by remember { mutableStateOf(currentPauseTime) }
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Edit exercise") },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                OutlinedTextField(name, { name = it }, label = { Text("Exercise name") }, singleLine = true)
-                OutlinedTextField(
-                    titleNote,
-                    { titleNote = it },
-                    label = { Text("Title note") },
-                    placeholder = { Text("e.g. Seat 4 or Heavy") },
-                    supportingText = { Text("Shown beside the exercise name.") },
-                    singleLine = true,
-                )
-                OutlinedTextField(
-                    pauseTime,
-                    { pauseTime = it },
-                    label = { Text("Pause note") },
-                    placeholder = { Text("e.g. 90 sec or 2 min") },
-                    supportingText = { Text("Saved as a note; no timer will start.") },
-                    singleLine = true,
-                )
-                OutlinedTextField(notes, { notes = it }, label = { Text("Notes") }, minLines = 4)
-            }
-        },
-        confirmButton = { Button(onClick = { onSave(name.trim(), titleNote.trim(), notes, pauseTime.trim()) }, enabled = name.isNotBlank()) { Text("Save") } },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
     )
 }
@@ -638,5 +536,5 @@ private fun timeSince(timestamp: Long): String {
     }
 }
 
-private fun formatTimestamp(timestamp: Long): String = DateTimeFormatter.ofPattern("EEE, d MMM · HH:mm")
+private fun formatTimestamp(timestamp: Long): String = DateTimeFormatter.ofPattern("dd.MM.yy")
     .format(Instant.ofEpochMilli(timestamp).atZone(ZoneId.systemDefault()))

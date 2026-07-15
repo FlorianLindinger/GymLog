@@ -42,12 +42,16 @@ class GymRepository(context: Context) {
         return BackupSyncStatus(enabled, lastBackup, lastBackup == null || databaseChangedAt > lastBackup)
     }
 
-    fun accentColor(): AccentColor = runCatching {
-        AccentColor.valueOf(preferences.getString("accent_color", AccentColor.BLUE.name)!!)
-    }.getOrDefault(AccentColor.BLUE)
+    fun accentColor(): Long {
+        if (preferences.contains("accent_color_argb")) return preferences.getLong("accent_color_argb", DEFAULT_ACCENT_COLOR)
+        return when (preferences.getString("accent_color", null)) {
+            "RED" -> 0xFFEF5350
+            else -> DEFAULT_ACCENT_COLOR
+        }
+    }
 
-    fun setAccentColor(color: AccentColor) {
-        preferences.edit().putString("accent_color", color.name).apply()
+    fun setAccentColor(color: Long) {
+        preferences.edit().putLong("accent_color_argb", color).remove("accent_color").apply()
     }
 
     fun setAutomaticBackupEnabled(enabled: Boolean) {
@@ -212,6 +216,18 @@ class GymRepository(context: Context) {
             put("notes", notes.trim())
             put("pause_time", pauseTime.trim())
         }, "id=?", arrayOf(id.toString()))
+    }
+
+    fun renameMachine(id: Long, name: String) {
+        db.writableDatabase.update("machines", ContentValues().apply { put("name", capitalizeName(name)) }, "id=?", arrayOf(id.toString()))
+    }
+
+    fun setMachineTitleNote(id: Long, note: String) {
+        db.writableDatabase.update("machines", ContentValues().apply { put("title_note", note.trim()) }, "id=?", arrayOf(id.toString()))
+    }
+
+    fun setMachineNotes(id: Long, notes: String) {
+        db.writableDatabase.update("machines", ContentValues().apply { put("notes", notes.trim()) }, "id=?", arrayOf(id.toString()))
     }
 
     fun setChartWindow(id: Long, window: String) {
@@ -623,6 +639,7 @@ class GymRepository(context: Context) {
 }
 
 private const val GYMLOG_DATABASE = "gymlog.db"
+private const val DEFAULT_ACCENT_COLOR = 0xFF64B5F6
 private const val TRAINING_UNIT_MILLIS = 6L * 60L * 60L * 1000L
 
 private class GymDatabase(context: Context) : SQLiteOpenHelper(context, GYMLOG_DATABASE, null, 7) {

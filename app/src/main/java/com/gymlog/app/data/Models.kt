@@ -53,8 +53,6 @@ data class ProgressionSettings(
     val staleTrainings: Int = 5,
 )
 
-enum class AccentColor { BLUE, RED }
-
 data class BackupSyncStatus(
     val automaticBackupEnabled: Boolean,
     val lastBackupAt: Long?,

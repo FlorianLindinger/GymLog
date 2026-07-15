@@ -1,13 +1,17 @@
 package com.gymlog.app.ui
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
@@ -35,7 +39,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import com.gymlog.app.data.BodyArea
-import com.gymlog.app.data.AccentColor
 import com.gymlog.app.data.BackupSyncStatus
 import com.gymlog.app.data.GymRepository
 import com.gymlog.app.data.HistorySet
@@ -80,7 +83,7 @@ fun GymLogApp(
     externalDataVersion: Int,
     onExport: () -> Unit,
     onImport: () -> Unit,
-    onAccentColorChanged: (AccentColor) -> Unit,
+    onAccentColorChanged: (Long) -> Unit,
 ) {
     var uiStateResult by remember(repository) { mutableStateOf(repository.loadUiStateResult()) }
     var screen by remember { mutableStateOf(Screen.OVERVIEW) }
@@ -90,6 +93,8 @@ fun GymLogApp(
     var confirmImport by remember { mutableStateOf(false) }
     var showProgressionSettings by remember { mutableStateOf(false) }
     var showAccentColor by remember { mutableStateOf(false) }
+    var showExerciseName by remember { mutableStateOf(false) }
+    var showExerciseTitleNote by remember { mutableStateOf(false) }
 
     fun refresh() {
         uiStateResult = repository.loadUiStateResult()
@@ -135,16 +140,28 @@ fun GymLogApp(
         topBar = {
             if (screen != Screen.OVERVIEW) TopAppBar(
                 title = {
-                    Text(
+                    if (screen == Screen.DETAIL && selected != null) {
+                        Column {
+                            Text(
+                                selected.machine.name,
+                                modifier = Modifier.clickable { showExerciseName = true },
+                                style = MaterialTheme.typography.titleMedium,
+                            )
+                            Text(
+                                selected.machine.titleNote.ifBlank { "Add a title note" },
+                                modifier = Modifier.clickable { showExerciseTitleNote = true },
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onPrimary.copy(alpha = if (selected.machine.titleNote.isBlank()) .7f else 1f),
+                            )
+                        }
+                    } else Text(
                         when (screen) {
                             Screen.OVERVIEW -> ""
                             Screen.STATS -> "Stats"
                             Screen.HISTORY -> "History"
                             Screen.BACKUP -> "Data & backup"
                             Screen.PLANS -> "Training plans"
-                            Screen.DETAIL -> selected?.machine?.let { machine ->
-                                machine.name + machine.titleNote.takeIf { it.isNotBlank() }?.let { " · $it" }.orEmpty()
-                            } ?: "Exercise"
+                            Screen.DETAIL -> "Exercise"
                         },
                     )
                 },
@@ -302,6 +319,35 @@ fun GymLogApp(
         },
     )
 
+    if (showExerciseName) selected?.machine?.let { machine ->
+        TextEditDialog(
+            title = "Exercise name",
+            initial = machine.name,
+            singleLine = true,
+            required = true,
+            onDismiss = { showExerciseName = false },
+            onSave = {
+                repository.renameMachine(machine.id, it)
+                refresh()
+                showExerciseName = false
+            },
+        )
+    }
+
+    if (showExerciseTitleNote) selected?.machine?.let { machine ->
+        TextEditDialog(
+            title = "Title note",
+            initial = machine.titleNote,
+            singleLine = true,
+            onDismiss = { showExerciseTitleNote = false },
+            onSave = {
+                repository.setMachineTitleNote(machine.id, it)
+                refresh()
+                showExerciseTitleNote = false
+            },
+        )
+    }
+
     if (confirmImport) AlertDialog(
         onDismissRequest = { confirmImport = false },
         title = { Text("Restore backup?") },
@@ -431,26 +477,58 @@ private fun BackupScreen(
 
 @Composable
 private fun AccentColorDialog(
-    current: AccentColor,
+    current: Long,
     onDismiss: () -> Unit,
-    onSave: (AccentColor) -> Unit,
+    onSave: (Long) -> Unit,
 ) {
-    var selected by remember(current) { mutableStateOf(current) }
+    val initialHsv = remember(current) { FloatArray(3).also { android.graphics.Color.colorToHSV(current.toInt(), it) } }
+    var hue by remember(current) { mutableStateOf(initialHsv[0]) }
+    var saturation by remember(current) { mutableStateOf(initialHsv[1]) }
+    var brightness by remember(current) { mutableStateOf(initialHsv[2]) }
+    val selected = android.graphics.Color.HSVToColor(floatArrayOf(hue, saturation, brightness)).toLong() and 0xFFFFFFFFL
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("UI color") },
         text = {
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                AccentColor.entries.forEach { color ->
-                    FilterChip(
-                        selected = selected == color,
-                        onClick = { selected = color },
-                        label = { Text(color.name.lowercase().replaceFirstChar(Char::uppercase)) },
-                    )
-                }
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Box(Modifier.fillMaxWidth().height(56.dp).background(Color(selected), androidx.compose.foundation.shape.RoundedCornerShape(12.dp)))
+                Text("Hue", style = MaterialTheme.typography.labelMedium)
+                androidx.compose.material3.Slider(value = hue, onValueChange = { hue = it }, valueRange = 0f..360f)
+                Text("Saturation", style = MaterialTheme.typography.labelMedium)
+                androidx.compose.material3.Slider(value = saturation, onValueChange = { saturation = it }, valueRange = 0f..1f)
+                Text("Brightness", style = MaterialTheme.typography.labelMedium)
+                androidx.compose.material3.Slider(value = brightness, onValueChange = { brightness = it }, valueRange = .2f..1f)
+                Text("#${selected.toString(16).takeLast(6).uppercase()}", color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         },
         confirmButton = { Button(onClick = { onSave(selected) }) { Text("Apply") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
+}
+
+@Composable
+fun TextEditDialog(
+    title: String,
+    initial: String,
+    singleLine: Boolean = false,
+    required: Boolean = false,
+    onDismiss: () -> Unit,
+    onSave: (String) -> Unit,
+) {
+    var value by remember(initial) { mutableStateOf(initial) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(title) },
+        text = {
+            androidx.compose.material3.OutlinedTextField(
+                value = value,
+                onValueChange = { value = it },
+                singleLine = singleLine,
+                minLines = if (singleLine) 1 else 5,
+                modifier = Modifier.fillMaxWidth(),
+            )
+        },
+        confirmButton = { Button(onClick = { onSave(value.trim()) }, enabled = !required || value.isNotBlank()) { Text("Save") } },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
     )
 }
