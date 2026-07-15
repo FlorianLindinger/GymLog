@@ -27,15 +27,38 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import com.gymlog.app.data.BodyArea
 import com.gymlog.app.data.GymRepository
+import com.gymlog.app.data.HistorySet
 import com.gymlog.app.data.MachineSummary
+import com.gymlog.app.data.ProgressionSettings
+import com.gymlog.app.data.TrainingPlan
 
 private enum class Screen { OVERVIEW, STATS, HISTORY, REORDER, BACKUP, PLANS, DETAIL }
+
+private data class AppUiState(
+    val machines: List<MachineSummary>,
+    val history: List<HistorySet>,
+    val areaColors: Map<BodyArea, Long>,
+    val trainingPlans: List<TrainingPlan>,
+    val activeTrainingPlanId: Long,
+    val progressionSettings: ProgressionSettings,
+    val automaticBackupEnabled: Boolean,
+)
+
+private fun GymRepository.loadUiState() = AppUiState(
+    machines = loadMachines(),
+    history = loadHistory(),
+    areaColors = loadAreaColors(),
+    trainingPlans = loadTrainingPlans(),
+    activeTrainingPlanId = activeTrainingPlanId(),
+    progressionSettings = loadProgressionSettings(),
+    automaticBackupEnabled = automaticBackupEnabled(),
+)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -45,13 +68,7 @@ fun GymLogApp(
     onExport: () -> Unit,
     onImport: () -> Unit,
 ) {
-    var machines by remember { mutableStateOf(repository.loadMachines()) }
-    var history by remember { mutableStateOf(repository.loadHistory()) }
-    var areaColors by remember { mutableStateOf(repository.loadAreaColors()) }
-    var trainingPlans by remember { mutableStateOf(repository.loadTrainingPlans()) }
-    var activeTrainingPlanId by remember { mutableLongStateOf(repository.activeTrainingPlanId()) }
-    var progressionSettings by remember { mutableStateOf(repository.loadProgressionSettings()) }
-    var automaticBackupEnabled by remember { mutableStateOf(repository.automaticBackupEnabled()) }
+    var uiState by remember(repository) { mutableStateOf(repository.loadUiState()) }
     var screen by remember { mutableStateOf(Screen.OVERVIEW) }
     var selectedId by remember { mutableStateOf<Long?>(null) }
     var showAdd by remember { mutableStateOf(false) }
@@ -59,18 +76,21 @@ fun GymLogApp(
     var confirmImport by remember { mutableStateOf(false) }
 
     fun refresh() {
-        machines = repository.loadMachines()
-        history = repository.loadHistory()
-        areaColors = repository.loadAreaColors()
-        trainingPlans = repository.loadTrainingPlans()
-        activeTrainingPlanId = repository.activeTrainingPlanId()
-        progressionSettings = repository.loadProgressionSettings()
-        automaticBackupEnabled = repository.automaticBackupEnabled()
+        uiState = repository.loadUiState()
     }
     LaunchedEffect(externalDataVersion) { refresh() }
 
-    val selected = machines.firstOrNull { it.machine.id == selectedId }
-    if (screen == Screen.DETAIL && selected == null) screen = Screen.OVERVIEW
+    val selected = uiState.machines.firstOrNull { it.machine.id == selectedId }
+    val areaFrequency = remember(uiState.machines) {
+        uiState.machines.flatMap { it.areas }.groupBy { it.area }
+            .mapValues { (_, values) -> values.sumOf { it.strength.value } }
+    }
+    val areaUsage = remember(uiState.machines) {
+        uiState.machines.flatMap { it.areas }.groupingBy { it.area }.eachCount()
+    }
+    LaunchedEffect(screen, selected) {
+        if (screen == Screen.DETAIL && selected == null) screen = Screen.OVERVIEW
+    }
 
     BackHandler(enabled = screen != Screen.OVERVIEW) {
         screen = Screen.OVERVIEW
@@ -114,8 +134,8 @@ fun GymLogApp(
     ) { padding ->
         when (screen) {
             Screen.OVERVIEW -> OverviewScreen(
-                machines = machines,
-                activePlanName = trainingPlans.firstOrNull { it.id == activeTrainingPlanId }?.name ?: "Training plan",
+                machines = uiState.machines,
+                activePlanName = uiState.trainingPlans.firstOrNull { it.id == uiState.activeTrainingPlanId }?.name ?: "Training plan",
                 modifier = Modifier.padding(padding),
                 onMachine = {
                     selectedId = it
@@ -124,7 +144,7 @@ fun GymLogApp(
                 onAdd = { showAdd = true },
                 onMenu = { showMenu = true },
                 onStats = { screen = Screen.STATS },
-                areaFrequency = machines.flatMap { it.areas }.groupBy { it.area }.mapValues { (_, values) -> values.sumOf { it.strength.value } },
+                areaFrequency = areaFrequency,
                 onQuickSet = { machine, reps ->
                     if (isDirectMetric(machine.machine.trackingMode)) {
                         reps.firstOrNull()?.let { repository.addMetricSet(machine.machine.id, it) }
@@ -137,14 +157,14 @@ fun GymLogApp(
                     repository.changeWeight(machine.machine.id, value)
                     refresh()
                 },
-                progressionSettings = progressionSettings,
+                progressionSettings = uiState.progressionSettings,
                 onProgressionSettings = {
                     repository.saveProgressionSettings(it)
-                    progressionSettings = it
+                    uiState = uiState.copy(progressionSettings = it)
                 },
             )
             Screen.HISTORY -> HistoryScreen(
-                history = history,
+                history = uiState.history,
                 modifier = Modifier.padding(padding),
                 onUpdateSet = { id, reps, weight -> repository.updateSet(id, reps, weight); refresh() },
                 onDeleteSet = { repository.deleteSet(it); refresh() },
@@ -152,12 +172,12 @@ fun GymLogApp(
                 onDeleteTrainingDay = { start, end -> repository.deleteTrainingDay(start, end); refresh() },
             )
             Screen.STATS -> StatsScreen(
-                history = history,
-                machines = machines,
+                history = uiState.history,
+                machines = uiState.machines,
                 modifier = Modifier.padding(padding),
             )
             Screen.REORDER -> ReorderScreen(
-                machines = machines,
+                machines = uiState.machines,
                 modifier = Modifier.padding(padding),
                 onMove = { id, direction ->
                     repository.moveMachine(id, direction)
@@ -165,8 +185,8 @@ fun GymLogApp(
                 },
             )
             Screen.PLANS -> TrainingPlansScreen(
-                plans = trainingPlans,
-                activePlanId = activeTrainingPlanId,
+                plans = uiState.trainingPlans,
+                activePlanId = uiState.activeTrainingPlanId,
                 modifier = Modifier.padding(padding),
                 onOpen = {
                     repository.setActiveTrainingPlan(it)
@@ -183,10 +203,10 @@ fun GymLogApp(
             )
             Screen.BACKUP -> BackupScreen(
                 modifier = Modifier.padding(padding),
-                automaticBackupEnabled = automaticBackupEnabled,
+                automaticBackupEnabled = uiState.automaticBackupEnabled,
                 onAutomaticBackupChanged = {
                     repository.setAutomaticBackupEnabled(it)
-                    automaticBackupEnabled = it
+                    uiState = uiState.copy(automaticBackupEnabled = it)
                 },
                 onExport = onExport,
                 onImport = { confirmImport = true },
@@ -194,8 +214,8 @@ fun GymLogApp(
             Screen.DETAIL -> selected?.let { summary ->
                 DetailScreen(
                     summary = summary,
-                    areaUsage = machines.flatMap { it.areas }.groupingBy { it.area }.eachCount(),
-                    areaColors = areaColors,
+                    areaUsage = areaUsage,
+                    areaColors = uiState.areaColors,
                     modifier = Modifier.padding(padding),
                     repository = repository,
                     onAreaColor = { area, color -> repository.setAreaColor(area, color); refresh() },

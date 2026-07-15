@@ -56,7 +56,6 @@ import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
-import java.time.temporal.ChronoUnit
 
 @Composable
 fun OverviewScreen(
@@ -74,7 +73,9 @@ fun OverviewScreen(
     onProgressionSettings: (ProgressionSettings) -> Unit,
 ) {
     var showProgressionSettings by remember { mutableStateOf(false) }
-    val lastExerciseToday = mostRecentlyTrainedToday(machines)
+    val today = LocalDate.now()
+    val zone = ZoneId.systemDefault()
+    val lastExerciseToday = mostRecentlyTrainedToday(machines, today, zone)
     Box(modifier.fillMaxSize()) {
         if (machines.isEmpty()) {
             Column(
@@ -92,12 +93,12 @@ fun OverviewScreen(
                 contentPadding = PaddingValues(start = 8.dp, end = 8.dp, top = 6.dp, bottom = 72.dp),
                 verticalArrangement = Arrangement.spacedBy(6.dp),
             ) {
-                item(key = "training-duration") { TrainingDurationCard(machines, activePlanName) }
+                item(key = "training-duration") { TrainingDurationCard(machines, activePlanName, today, zone) }
                 item(key = "progression-settings") {
                     ProgressionSettingsCard(progressionSettings, onEdit = { showProgressionSettings = true })
                 }
                 items(machines, key = { it.machine.id }) { summary ->
-                    MachineCard(summary, lastExerciseToday, areaFrequency, onMachine, onQuickSet, onMetricChange, progressionSettings)
+                    MachineCard(summary, lastExerciseToday, today, zone, areaFrequency, onMachine, onQuickSet, onMetricChange, progressionSettings)
                 }
             }
         }
@@ -121,17 +122,13 @@ fun OverviewScreen(
 }
 
 @Composable
-private fun TrainingDurationCard(machines: List<MachineSummary>, activePlanName: String) {
-    val zone = ZoneId.systemDefault()
-    val today = LocalDate.now()
-    val todaySets = machines.flatMap { it.recentSets }.filter {
-        Instant.ofEpochMilli(it.performedAt).atZone(zone).toLocalDate() == today
-    }
+private fun TrainingDurationCard(machines: List<MachineSummary>, activePlanName: String, today: LocalDate, zone: ZoneId) {
+    val todaySets = machines.flatMap { it.recentSets }.filter { it.performedDate(zone) == today }
     val first = todaySets.minOfOrNull { it.performedAt }
     val last = todaySets.maxOfOrNull { it.performedAt }
     val durationMinutes = if (first == null || last == null) 0L else ((last - first) / 60_000L).coerceAtLeast(0L)
     val clock = DateTimeFormatter.ofPattern("HH:mm")
-    val completedExercises = machines.count(::wasTrainedToday)
+    val completedExercises = machines.count { wasTrainedToday(it, today, zone) }
 
     Card(Modifier.fillMaxWidth()) {
         Row(
@@ -245,6 +242,8 @@ private fun progressionWarning(summary: MachineSummary, settings: ProgressionSet
 private fun MachineCard(
     summary: MachineSummary,
     lastExerciseToday: MachineSummary?,
+    today: LocalDate,
+    zone: ZoneId,
     areaFrequency: Map<BodyArea, Double>,
     onMachine: (Long) -> Unit,
     onQuickSet: (MachineSummary, List<Int>) -> Unit,
@@ -253,7 +252,7 @@ private fun MachineCard(
 ) {
     var quickReps by remember(summary.machine.id) { mutableStateOf(false) }
     var changeMetric by remember(summary.machine.id) { mutableStateOf(false) }
-    val trainedToday = wasTrainedToday(summary)
+    val trainedToday = wasTrainedToday(summary, today, zone)
     val clash = if (!trainedToday && lastExerciseToday != null) strongestClash(summary, lastExerciseToday) else null
     Card(
         modifier = Modifier.fillMaxWidth().clickable { onMachine(summary.machine.id) },
@@ -343,7 +342,7 @@ private fun MachineCard(
 @Composable
 private fun TodoBadge(clash: Double?) {
     val label = when (clash) {
-        1.0 -> "TO DO · 1 CLASH"
+        1.0 -> "TO DO · FULL CLASH"
         0.5 -> "TO DO · ½ CLASH"
         0.25 -> "TO DO · ¼ CLASH"
         else -> "TO DO"
@@ -370,43 +369,32 @@ private fun TodoBadge(clash: Double?) {
     )
 }
 
-private fun mostRecentlyTrainedToday(machines: List<MachineSummary>): MachineSummary? {
-    val today = LocalDate.now()
-    val zone = ZoneId.systemDefault()
-    return machines.maxByOrNull { summary ->
+private fun mostRecentlyTrainedToday(
+    machines: List<MachineSummary>,
+    today: LocalDate,
+    zone: ZoneId,
+): MachineSummary? = machines
+    .mapNotNull { summary ->
         summary.recentSets
-            .filter { Instant.ofEpochMilli(it.performedAt).atZone(zone).toLocalDate() == today }
+            .filter { it.performedDate(zone) == today }
             .maxOfOrNull { it.performedAt }
-            ?: Long.MIN_VALUE
-    }?.takeIf(::wasTrainedToday)
+            ?.let { latest -> summary to latest }
+    }
+    .maxByOrNull { (_, latest) -> latest }
+    ?.first
+
+private fun strongestClash(current: MachineSummary, previous: MachineSummary): Double? {
+    val previousStrengths = previous.areas.associate { it.area to it.strength.value }
+    return current.areas.mapNotNull { area ->
+        previousStrengths[area.area]?.let { area.strength.value * it }
+    }.maxOrNull()
 }
 
-private fun strongestClash(current: MachineSummary, previous: MachineSummary): Double? = current.areas
-    .mapNotNull { currentArea ->
-        previous.areas
-            .filter { it.area == currentArea.area }
-            .maxOfOrNull { previousArea -> currentArea.strength.value * previousArea.strength.value }
-    }
-    .maxOrNull()
+private fun wasTrainedToday(summary: MachineSummary, today: LocalDate, zone: ZoneId): Boolean =
+    summary.recentSets.any { it.performedDate(zone) == today }
 
-private fun wasTrainedToday(summary: MachineSummary): Boolean {
-    val today = LocalDate.now()
-    val zone = ZoneId.systemDefault()
-    return summary.recentSets.any {
-        Instant.ofEpochMilli(it.performedAt).atZone(zone).toLocalDate() == today
-    }
-}
-
-private fun lastTrained(summary: MachineSummary): String {
-    val timestamp = summary.recentSets.firstOrNull()?.performedAt ?: return "Never trained"
-    val date = Instant.ofEpochMilli(timestamp).atZone(ZoneId.systemDefault()).toLocalDate()
-    val days = ChronoUnit.DAYS.between(date, LocalDate.now()).coerceAtLeast(0)
-    return when (days) {
-        0L -> "Last trained today"
-        1L -> "Last trained yesterday"
-        else -> "Last trained $days days ago"
-    }
-}
+private fun SetRecord.performedDate(zone: ZoneId): LocalDate =
+    Instant.ofEpochMilli(performedAt).atZone(zone).toLocalDate()
 
 private fun sessionPatternText(summary: MachineSummary): String {
     val batches = groupSetBatches(summary.recentSets)
@@ -458,9 +446,8 @@ fun QuickMetricDialog(initialValue: Int, trackingMode: String, onDismiss: () -> 
 }
 
 private fun sessionTrendColor(summary: MachineSummary): Color {
-    val sessions = summary.recentSets.groupBy {
-        Instant.ofEpochMilli(it.performedAt).atZone(ZoneId.systemDefault()).toLocalDate()
-    }.values.toList()
+    val zone = ZoneId.systemDefault()
+    val sessions = summary.recentSets.groupBy { it.performedDate(zone) }.values.toList()
     val latest = sessions.getOrNull(0)?.map { it.weight }?.average() ?: return Color(0xFF444444)
     val before = sessions.getOrNull(1)?.map { it.weight }?.average() ?: return Color(0xFF444444)
     return when {
@@ -472,9 +459,10 @@ private fun sessionTrendColor(summary: MachineSummary): Color {
 
 fun previousReps(summary: MachineSummary): List<Int> {
     val newest = summary.recentSets.firstOrNull() ?: return emptyList()
-    val date = Instant.ofEpochMilli(newest.performedAt).atZone(ZoneId.systemDefault()).toLocalDate()
+    val zone = ZoneId.systemDefault()
+    val date = newest.performedDate(zone)
     return summary.recentSets
-        .filter { Instant.ofEpochMilli(it.performedAt).atZone(ZoneId.systemDefault()).toLocalDate() == date }
+        .filter { it.performedDate(zone) == date }
         .sortedBy { it.performedAt }
         .map { it.reps }
         .takeLast(5)

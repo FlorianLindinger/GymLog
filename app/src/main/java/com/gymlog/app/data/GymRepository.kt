@@ -4,6 +4,7 @@ import android.content.ContentValues
 import android.content.Context
 import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteOpenHelper
+import androidx.core.database.sqlite.transaction
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -69,13 +70,9 @@ class GymRepository(context: Context) {
         val database = db.writableDatabase
         val plans = loadTrainingPlans()
         if (plans.size <= 1 || plans.none { it.id == id }) return false
-        database.beginTransaction()
-        try {
+        database.transaction {
             database.delete("machines", "plan_id=?", arrayOf(id.toString()))
             database.delete("training_plans", "id=?", arrayOf(id.toString()))
-            database.setTransactionSuccessful()
-        } finally {
-            database.endTransaction()
         }
         if (preferences.getLong("active_training_plan", -1L) == id) {
             preferences.edit().putLong("active_training_plan", plans.first { it.id != id }.id).apply()
@@ -179,13 +176,9 @@ class GymRepository(context: Context) {
 
     fun changeWeight(id: Long, weight: Double) {
         val database = db.writableDatabase
-        database.beginTransaction()
-        try {
+        database.transaction {
             database.update("machines", ContentValues().apply { put("current_weight", weight) }, "id=?", arrayOf(id.toString()))
             addWeightHistory(database, id, weight, System.currentTimeMillis())
-            database.setTransactionSuccessful()
-        } finally {
-            database.endTransaction()
         }
     }
 
@@ -201,8 +194,7 @@ class GymRepository(context: Context) {
     fun addMetricSet(machineId: Long, value: Int) {
         val database = db.writableDatabase
         val now = System.currentTimeMillis()
-        database.beginTransaction()
-        try {
+        database.transaction {
             val previous = database.rawQuery("SELECT current_weight FROM machines WHERE id=?", arrayOf(machineId.toString()))
                 .use { cursor -> if (cursor.moveToFirst()) cursor.getDouble(0) else value.toDouble() }
             database.update("machines", ContentValues().apply { put("current_weight", value.toDouble()) }, "id=?", arrayOf(machineId.toString()))
@@ -213,17 +205,13 @@ class GymRepository(context: Context) {
                 put("performed_at", now)
             })
             if (previous != value.toDouble()) addWeightHistory(database, machineId, value.toDouble(), now)
-            database.setTransactionSuccessful()
-        } finally {
-            database.endTransaction()
         }
     }
 
     fun addSets(machineId: Long, reps: List<Int>, weight: Double) {
         val database = db.writableDatabase
         val now = System.currentTimeMillis()
-        database.beginTransaction()
-        try {
+        database.transaction {
             reps.filter { it > 0 }.forEachIndexed { index, amount ->
                 database.insertOrThrow("sets", null, ContentValues().apply {
                     put("machine_id", machineId)
@@ -232,9 +220,6 @@ class GymRepository(context: Context) {
                     put("performed_at", now + index)
                 })
             }
-            database.setTransactionSuccessful()
-        } finally {
-            database.endTransaction()
         }
     }
 
@@ -268,8 +253,7 @@ class GymRepository(context: Context) {
 
     fun saveAreas(machineId: Long, assignments: List<AreaAssignment>) {
         val database = db.writableDatabase
-        database.beginTransaction()
-        try {
+        database.transaction {
             database.delete("machine_areas", "machine_id=?", arrayOf(machineId.toString()))
             assignments.forEach { assignment ->
                 database.insertOrThrow("machine_areas", null, ContentValues().apply {
@@ -278,9 +262,6 @@ class GymRepository(context: Context) {
                     put("strength", assignment.strength.value)
                 })
             }
-            database.setTransactionSuccessful()
-        } finally {
-            database.endTransaction()
         }
     }
 
@@ -292,14 +273,10 @@ class GymRepository(context: Context) {
         val moved = ordered.removeAt(from)
         ordered.add(to, moved)
         val database = db.writableDatabase
-        database.beginTransaction()
-        try {
+        database.transaction {
             ordered.forEachIndexed { index, machine ->
                 database.update("machines", ContentValues().apply { put("sort_order", index) }, "id=?", arrayOf(machine.id.toString()))
             }
-            database.setTransactionSuccessful()
-        } finally {
-            database.endTransaction()
         }
     }
 
@@ -376,8 +353,7 @@ class GymRepository(context: Context) {
         val database = db.writableDatabase
         var targetPlanId = -1L
         val importedPlanIds = mutableMapOf<Long, Long>()
-        database.beginTransaction()
-        try {
+        database.transaction {
             database.delete("machines", null, null)
             database.delete("training_plans", null, null)
             if (version == 2) {
@@ -445,9 +421,6 @@ class GymRepository(context: Context) {
                 }
                 if (changes.length() == 0) addWeightHistory(database, id, item.getDouble("currentWeight"), System.currentTimeMillis())
             }
-            database.setTransactionSuccessful()
-        } finally {
-            database.endTransaction()
         }
         preferences.edit().putLong("active_training_plan", targetPlanId).apply()
     }
