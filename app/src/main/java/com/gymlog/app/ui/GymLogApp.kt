@@ -171,7 +171,7 @@ fun GymLogApp(
                 areaFrequency = areaFrequency,
                 onQuickSet = { machine, reps ->
                     if (isDirectMetric(machine.machine.trackingMode)) {
-                        reps.firstOrNull()?.let { repository.addMetricSet(machine.machine.id, it) }
+                        reps.firstOrNull()?.let { repository.addTrainingMinutes(machine.machine.id, it) }
                     } else {
                         repository.addSets(machine.machine.id, reps, machine.machine.currentWeight)
                     }

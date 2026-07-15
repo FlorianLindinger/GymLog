@@ -126,15 +126,14 @@ fun DetailScreen(
             Column(Modifier.padding(horizontal = 10.dp, vertical = 6.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(0.dp)) {
-                        Text("Add today's set", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+                        Text(if (isDirectMetric(machine.trackingMode)) "Add today's training" else "Add today's set", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
                         Text("Pause: ${machine.pauseTime.ifBlank { "not set" }}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                     Text("Edit", Modifier.clickable { showEdit = true }.padding(horizontal = 8.dp, vertical = 4.dp), color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelLarge)
                 }
                 Button(onClick = { showQuickSet = true }, modifier = Modifier.fillMaxWidth()) {
                     Text(when (machine.trackingMode) {
-                        "STRENGTH" -> "+ Log level"
-                        "DURATION" -> "+ Log minutes"
+                        "STRENGTH", "DURATION" -> "+ Training"
                         else -> "+ Log reps at ${formatMetric(machine.currentWeight, machine.trackingMode)}"
                     })
                 }
@@ -189,10 +188,9 @@ fun DetailScreen(
                 if (visibleWeights.size > 1) WeightChart(visibleWeights, machine.trailingAverage)
                 Text(when (machine.trackingMode) {
                     "WEIGHT" -> "Volume (weight × reps)"
-                    "DURATION" -> "Minutes logged"
-                    else -> "Levels logged"
+                    else -> "Minutes logged"
                 }, style = MaterialTheme.typography.labelLarge)
-                VolumeChart(visibleSets, machine.trailingAverage)
+                VolumeChart(visibleSets, machine.trailingAverage, isDirectMetric(machine.trackingMode))
                 Text("${summary.weightChanges.size} ${metricName(machine.trackingMode)} changes · ${summary.recentSets.size} recorded sets", color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
@@ -207,7 +205,7 @@ fun DetailScreen(
                     if (index > 0) HorizontalDivider()
                     Row(Modifier.fillMaxWidth().padding(vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
                         Text(
-                            if (isDirectMetric(machine.trackingMode)) "${formatMetric(ordered.first().weight, machine.trackingMode)} - ${formatTimestamp(batchKey)}"
+                            if (isDirectMetric(machine.trackingMode)) "${formatTrainingEntry(ordered.first().weight, machine.trackingMode)} - ${formatTimestamp(batchKey)}"
                             else "${formatMetric(ordered.first().weight, machine.trackingMode)} - ${ordered.joinToString(",") { it.reps.toString() }} - ${formatTimestamp(batchKey)}",
                             modifier = Modifier.weight(1f),
                             fontWeight = FontWeight.Medium,
@@ -221,7 +219,7 @@ fun DetailScreen(
                     if (expandedBatch == batchKey) ordered.forEachIndexed { setIndex, set ->
                         Row(Modifier.fillMaxWidth().padding(start = 12.dp, top = 1.dp, bottom = 1.dp), verticalAlignment = Alignment.CenterVertically) {
                             Text(
-                                if (isDirectMetric(machine.trackingMode)) "Entry ${setIndex + 1}: ${formatMetric(set.weight, machine.trackingMode)}"
+                                if (isDirectMetric(machine.trackingMode)) "Entry ${setIndex + 1}: ${formatTrainingEntry(set.weight, machine.trackingMode)}"
                                 else "Set ${setIndex + 1}: ${set.reps} reps",
                                 Modifier.weight(1f),
                                 style = MaterialTheme.typography.bodySmall,
@@ -242,12 +240,11 @@ fun DetailScreen(
 
     if (showQuickSet) {
         if (isDirectMetric(machine.trackingMode)) {
-            QuickMetricDialog(
-                initialValue = (summary.recentSets.firstOrNull()?.weight ?: machine.currentWeight).toInt(),
-                trackingMode = machine.trackingMode,
+            QuickTrainingDialog(
+                initialMinutes = (summary.recentSets.firstOrNull()?.weight ?: 0.0).toInt(),
                 onDismiss = { showQuickSet = false },
                 onAdd = {
-                    repository.addMetricSet(machine.id, it)
+                    repository.addTrainingMinutes(machine.id, it)
                     onChanged()
                     showQuickSet = false
                 },
@@ -338,10 +335,10 @@ private fun WeightChart(changesNewestFirst: List<WeightChange>, trailingAverage:
 }
 
 @Composable
-private fun VolumeChart(sets: List<SetRecord>, trailingAverage: Int) {
+private fun VolumeChart(sets: List<SetRecord>, trailingAverage: Int, directMetric: Boolean) {
     val daily = sets.groupBy {
         Instant.ofEpochMilli(it.performedAt).atZone(ZoneId.systemDefault()).toLocalDate()
-    }.toSortedMap().map { (_, daySets) -> daySets.sumOf { it.weight * it.reps } }
+    }.toSortedMap().map { (_, daySets) -> daySets.sumOf { if (directMetric) it.weight else it.weight * it.reps } }
     if (daily.isEmpty()) {
         Text("No volume in this window.", color = MaterialTheme.colorScheme.onSurfaceVariant)
         return

@@ -39,10 +39,14 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import android.widget.NumberPicker
@@ -302,9 +306,8 @@ private fun MachineCard(
                     TodoBadge(clash)
                     Spacer(Modifier.width(2.dp))
                 }
-                val overviewValue = if (isDirectMetric(summary.machine.trackingMode)) summary.recentSets.firstOrNull()?.weight ?: summary.machine.currentWeight else summary.machine.currentWeight
                 Text(
-                    formatMetric(overviewValue, summary.machine.trackingMode),
+                    formatMetric(summary.machine.currentWeight, summary.machine.trackingMode),
                     modifier = Modifier.clickable { changeMetric = true }.padding(horizontal = 6.dp, vertical = 4.dp),
                     style = MaterialTheme.typography.titleSmall,
                     color = MaterialTheme.colorScheme.primary,
@@ -323,7 +326,7 @@ private fun MachineCard(
                     overflow = TextOverflow.Ellipsis,
                 )
                 Text(
-                    "+ SET",
+                    if (isDirectMetric(summary.machine.trackingMode)) "+ TRAINING" else "+ SET",
                     modifier = Modifier.clickable { quickReps = true }.padding(horizontal = 8.dp, vertical = 2.dp),
                     style = MaterialTheme.typography.labelLarge,
                     color = MaterialTheme.colorScheme.primary,
@@ -333,9 +336,8 @@ private fun MachineCard(
     }
     if (quickReps) {
         if (isDirectMetric(summary.machine.trackingMode)) {
-            QuickMetricDialog(
-                initialValue = (summary.recentSets.firstOrNull()?.weight ?: summary.machine.currentWeight).toInt(),
-                trackingMode = summary.machine.trackingMode,
+            QuickTrainingDialog(
+                initialMinutes = (summary.recentSets.firstOrNull()?.weight ?: 0.0).toInt(),
                 onDismiss = { quickReps = false },
                 onAdd = { onQuickSet(summary, listOf(it)); quickReps = false },
             )
@@ -415,14 +417,40 @@ private fun wasTrainedToday(summary: MachineSummary, today: LocalDate, zone: Zon
 private fun SetRecord.performedDate(zone: ZoneId): LocalDate =
     Instant.ofEpochMilli(performedAt).atZone(zone).toLocalDate()
 
-private fun sessionPatternText(summary: MachineSummary): String {
+private fun sessionPatternText(summary: MachineSummary): AnnotatedString {
     val batches = groupSetBatches(summary.recentSets)
     val patterns = batches.map { batch ->
         batch.sortedBy { it.performedAt }.joinToString(",") {
-            if (isDirectMetric(summary.machine.trackingMode)) formatNumber(it.weight) else it.reps.toString()
+            if (isDirectMetric(summary.machine.trackingMode)) "${formatNumber(it.weight)}m" else it.reps.toString()
         }
     }
-    return "Last: ${patterns.joinToString(" | ").ifEmpty { "-" }}"
+    fun trend(index: Int): Int {
+        val newer = batches.getOrNull(index)?.firstOrNull() ?: return 0
+        val older = batches.getOrNull(index + 1)?.firstOrNull() ?: return 0
+        val newerMetric = if (summary.machine.trackingMode == "STRENGTH") newer.reps.toDouble() else newer.weight
+        val olderMetric = if (summary.machine.trackingMode == "STRENGTH") older.reps.toDouble() else older.weight
+        return newerMetric.compareTo(olderMetric)
+    }
+    fun AnnotatedString.Builder.appendTrendMarker(marker: String, trend: Int) {
+        when {
+            trend > 0 -> withStyle(SpanStyle(color = Color(0xFF66BB6A), fontWeight = FontWeight.Bold)) { append(marker) }
+            trend < 0 -> withStyle(SpanStyle(color = Color(0xFFEF5350), fontWeight = FontWeight.Bold)) { append(marker) }
+            else -> append(marker)
+        }
+    }
+    return buildAnnotatedString {
+        appendTrendMarker("Last", trend(0))
+        append(": ")
+        if (patterns.isEmpty()) append("-")
+        patterns.forEachIndexed { index, pattern ->
+            if (index > 0) {
+                append(" ")
+                appendTrendMarker("|", trend(index))
+                append(" ")
+            }
+            append(pattern)
+        }
+    }
 }
 
 fun groupSetBatches(sets: List<SetRecord>): List<List<SetRecord>> {
@@ -439,12 +467,12 @@ fun groupSetBatches(sets: List<SetRecord>): List<List<SetRecord>> {
 }
 
 @Composable
-fun QuickMetricDialog(initialValue: Int, trackingMode: String, onDismiss: () -> Unit, onAdd: (Int) -> Unit) {
-    var value by remember(initialValue) { mutableStateOf(initialValue.coerceAtLeast(0).toString()) }
+fun QuickTrainingDialog(initialMinutes: Int, onDismiss: () -> Unit, onAdd: (Int) -> Unit) {
+    var value by remember(initialMinutes) { mutableStateOf(initialMinutes.coerceAtLeast(0).toString()) }
     val level = value.toIntOrNull()
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text(if (trackingMode == "DURATION") "Log minutes" else "Log level") },
+        title = { Text("Log training") },
         text = {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedButton(onClick = { value = ((level ?: 0) - 1).coerceAtLeast(0).toString() }) { Text("−1") }
@@ -452,14 +480,14 @@ fun QuickMetricDialog(initialValue: Int, trackingMode: String, onDismiss: () -> 
                     value = value,
                     onValueChange = { value = it.filter(Char::isDigit) },
                     modifier = Modifier.weight(1f),
-                    label = { Text(if (trackingMode == "DURATION") "Minutes" else "Level") },
+                    label = { Text("Minutes") },
                     singleLine = true,
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                 )
                 OutlinedButton(onClick = { value = ((level ?: 0) + 1).toString() }) { Text("+1") }
             }
         },
-        confirmButton = { Button(onClick = { level?.let(onAdd) }, enabled = level != null && level >= 0) { Text("Save set") } },
+        confirmButton = { Button(onClick = { level?.let(onAdd) }, enabled = level != null && level > 0) { Text("Save training") } },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
     )
 }
@@ -467,8 +495,10 @@ fun QuickMetricDialog(initialValue: Int, trackingMode: String, onDismiss: () -> 
 private fun sessionTrendColor(summary: MachineSummary): Color {
     val zone = ZoneId.systemDefault()
     val sessions = summary.recentSets.groupBy { it.performedDate(zone) }.values.toList()
-    val latest = sessions.getOrNull(0)?.map { it.weight }?.average() ?: return Color(0xFF444444)
-    val before = sessions.getOrNull(1)?.map { it.weight }?.average() ?: return Color(0xFF444444)
+    fun List<SetRecord>.trackedMetric(): Double =
+        if (summary.machine.trackingMode == "STRENGTH") map { it.reps }.average() else map { it.weight }.average()
+    val latest = sessions.getOrNull(0)?.trackedMetric() ?: return Color(0xFF444444)
+    val before = sessions.getOrNull(1)?.trackedMetric() ?: return Color(0xFF444444)
     return when {
         latest > before -> Color(0xFF2E7D32)
         latest < before -> Color(0xFFC62828)
@@ -545,7 +575,13 @@ fun AddMachineDialog(onDismiss: () -> Unit, onAdd: (String, Double, String) -> U
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     FilterChip(selected = trackingMode == "WEIGHT", onClick = { trackingMode = "WEIGHT" }, label = { Text("kg") })
                     FilterChip(selected = trackingMode == "STRENGTH", onClick = { trackingMode = "STRENGTH" }, label = { Text("Level") })
-                    FilterChip(selected = trackingMode == "DURATION", onClick = { trackingMode = "DURATION" }, label = { Text("Minutes") })
+                }
+                if (trackingMode == "STRENGTH") {
+                    Text(
+                        "Trainings for Level exercises are recorded in minutes.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                 }
                 OutlinedTextField(
                         value = weight,
@@ -593,3 +629,6 @@ fun formatMetric(value: Double, trackingMode: String): String = when (trackingMo
     "DURATION" -> "${formatNumber(value)} min"
     else -> "Level ${formatNumber(value)}"
 }
+
+fun formatTrainingEntry(value: Double, trackingMode: String): String =
+    if (isDirectMetric(trackingMode)) "${formatNumber(value)} min" else formatMetric(value, trackingMode)

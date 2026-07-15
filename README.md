@@ -1,6 +1,6 @@
 # GymLog
 
-GymLog is a private, offline Android workout tracker built with Kotlin, Jetpack Compose, and SQLite. It supports multiple training plans, weight-, level-, and duration-based exercises, detailed history management, progression warnings, and local JSON backups.
+GymLog is a private, offline Android workout tracker built with Kotlin, Jetpack Compose, and SQLite. It supports multiple training plans, weight- and level-based exercises, detailed history management, progression warnings, and local JSON backups.
 
 ## Screenshots
 
@@ -90,17 +90,16 @@ GymLog stores its data locally on the device. It does not require an account, an
   - Create, open, rename, and delete plans from the overview menu
   - Separate exercises, ordering, history, statistics, timers, and progression data per plan
 - Reorderable exercise overview with custom exercise names and optional title notes
-- Three exercise tracking modes
+- Two exercise tracking modes
   - Weight in kilograms
-  - Machine or resistance level
-  - Duration in minutes
+  - Machine or resistance level, with each training recorded in minutes
 - Quick workout logging
   - Log up to five weight-based sets at once with 0–15 rep wheels
   - Reuse the previous rep pattern
-  - Log level and minute entries directly
+  - Log Level trainings directly by duration in minutes
   - Quick-repeat recent rep amounts
 - Compact overview cards
-  - Current kg, level, or minute value
+  - Current kg or level value
   - Tap the value to change it
   - Recent rep batches such as `Last: 10,10,10 | 12,10,10`
   - Color-coded session trend borders
@@ -111,12 +110,12 @@ GymLog stores its data locally on the device. It does not require an account, an
   - Tap the current metric card to change its value
   - Started, current, and highest metric statistics
   - Configurable chart windows and trailing averages
-  - Weight, level, duration, and volume charts
+  - Weight, level, training-duration, and volume charts
 - Grouped exercise history entries such as `80 kg - 12,12,10,10 - Date`
   - Expand a batch to edit or delete an individual set
   - Delete a complete logged batch
 - Full history management
-  - Edit reps and recorded kg, level, or minutes
+  - Edit reps, recorded kg, or training minutes
   - Delete individual entries with confirmation
   - Delete every entry for one exercise on a selected day
   - Delete an entire training day

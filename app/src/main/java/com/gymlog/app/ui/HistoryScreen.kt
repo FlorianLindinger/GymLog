@@ -74,7 +74,7 @@ fun HistoryScreen(
     ) {
         item {
             Text("Training history", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
-            Text("Daily activity across weight, level, and duration exercises", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text("Daily activity across weight and level exercises", color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         item { WeeklyVolumeCard(history) }
         item {
@@ -276,7 +276,7 @@ private fun HistorySetRow(set: HistorySet, onEdit: (HistorySet) -> Unit, onDelet
     Row(Modifier.fillMaxWidth().padding(vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
         if (showName) Text(set.machineName, Modifier.weight(1f)) else Spacer(Modifier.weight(1f))
         Text(
-            if (isDirectMetric(set.trackingMode)) formatMetric(set.weight, set.trackingMode)
+            if (isDirectMetric(set.trackingMode)) formatTrainingEntry(set.weight, set.trackingMode)
             else "${set.reps} × ${formatMetric(set.weight, set.trackingMode)}",
             fontWeight = FontWeight.Medium,
         )
@@ -328,7 +328,7 @@ fun EditSetDialog(
                 OutlinedTextField(
                     value = weight,
                     onValueChange = { weight = it.filter { char -> char.isDigit() || char == '.' || char == ',' } },
-                    label = { Text(when (trackingMode) { "WEIGHT" -> "Weight (kg)"; "DURATION" -> "Minutes"; else -> "Level" }) },
+                    label = { Text(if (trackingMode == "WEIGHT") "Weight (kg)" else "Minutes") },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                     singleLine = true,
                 )
@@ -336,7 +336,7 @@ fun EditSetDialog(
         },
         confirmButton = {
             Button(
-                onClick = { onSave(if (isDirectMetric(trackingMode)) 1 else parsedReps ?: 1, parsedWeight ?: 0.0) },
+                onClick = { onSave(if (isDirectMetric(trackingMode)) initialReps else parsedReps ?: 1, parsedWeight ?: 0.0) },
                 enabled = parsedWeight != null && parsedWeight >= 0 && (isDirectMetric(trackingMode) || parsedReps != null && parsedReps > 0),
             ) { Text("Save") }
         },
@@ -349,8 +349,7 @@ private fun formatVolume(volume: Double): String = if (volume >= 1000) "%.1f t".
 private fun formatSessionTotals(sets: List<HistorySet>): String {
     val parts = mutableListOf<String>()
     sets.filter { it.trackingMode == "WEIGHT" }.sumOf { it.volume }.takeIf { it > 0 }?.let { parts += formatVolume(it) }
-    sets.filter { it.trackingMode == "STRENGTH" }.sumOf { it.weight }.takeIf { it > 0 }?.let { parts += "${formatHistoryAmount(it)} levels" }
-    sets.filter { it.trackingMode == "DURATION" }.sumOf { it.weight }.takeIf { it > 0 }?.let { parts += "${formatHistoryAmount(it)} min" }
+    sets.filter { isDirectMetric(it.trackingMode) }.sumOf { it.weight }.takeIf { it > 0 }?.let { parts += "${formatHistoryAmount(it)} min" }
     return parts.joinToString(" · ").ifEmpty { "0" }
 }
 

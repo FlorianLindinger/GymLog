@@ -7,6 +7,7 @@ import android.database.sqlite.SQLiteOpenHelper
 import androidx.core.database.sqlite.transaction
 import org.json.JSONArray
 import org.json.JSONObject
+import kotlin.math.roundToInt
 
 class GymRepository(context: Context) {
     private val appContext = context.applicationContext
@@ -206,21 +207,22 @@ class GymRepository(context: Context) {
         })
     }
 
-    fun addMetricSet(machineId: Long, value: Int) {
+    fun addTrainingMinutes(machineId: Long, minutes: Int) {
+        require(minutes > 0) { "Training duration must be greater than zero" }
         val database = db.writableDatabase
-        val now = System.currentTimeMillis()
-        database.transaction {
-            val previous = database.rawQuery("SELECT current_weight FROM machines WHERE id=?", arrayOf(machineId.toString()))
-                .use { cursor -> if (cursor.moveToFirst()) cursor.getDouble(0) else value.toDouble() }
-            database.update("machines", ContentValues().apply { put("current_weight", value.toDouble()) }, "id=?", arrayOf(machineId.toString()))
-            database.insertOrThrow("sets", null, ContentValues().apply {
-                put("machine_id", machineId)
-                put("reps", 1)
-                put("weight", value.toDouble())
-                put("performed_at", now)
-            })
-            if (previous != value.toDouble()) addWeightHistory(database, machineId, value.toDouble(), now)
+        val recordedLevel = database.rawQuery(
+            "SELECT tracking_mode,current_weight FROM machines WHERE id=?",
+            arrayOf(machineId.toString()),
+        ).use { cursor ->
+            require(cursor.moveToFirst()) { "Exercise does not exist" }
+            if (cursor.getString(0) == "STRENGTH") cursor.getDouble(1).roundToInt().coerceAtLeast(1) else 1
         }
+        database.insertOrThrow("sets", null, ContentValues().apply {
+            put("machine_id", machineId)
+            put("reps", recordedLevel)
+            put("weight", minutes.toDouble())
+            put("performed_at", System.currentTimeMillis())
+        })
     }
 
     fun addSets(machineId: Long, reps: List<Int>, weight: Double) {
@@ -302,7 +304,7 @@ class GymRepository(context: Context) {
     fun exportJson(): String {
         val root = JSONObject()
         root.put("format", "GymLog backup")
-        root.put("version", 2)
+        root.put("version", 3)
         root.put("exportedAt", System.currentTimeMillis())
         root.put("settings", JSONObject().apply {
             put("weightUnit", "kg")
@@ -339,7 +341,16 @@ class GymRepository(context: Context) {
                     })
                     put("sets", JSONArray().apply {
                         loadSets(db.readableDatabase, summary.machine.id, null).forEach {
-                            put(JSONObject().put("reps", it.reps).put("weight", it.weight).put("performedAt", it.performedAt))
+                            put(JSONObject().apply {
+                                if (summary.machine.trackingMode == "STRENGTH") {
+                                    put("recordedLevel", it.reps)
+                                    put("trainingMinutes", it.weight)
+                                } else {
+                                    put("reps", it.reps)
+                                    put("weight", it.weight)
+                                }
+                                put("performedAt", it.performedAt)
+                            })
                         }
                     })
                     put("weightChanges", JSONArray().apply {
@@ -357,7 +368,7 @@ class GymRepository(context: Context) {
     fun importJson(json: String) {
         val root = JSONObject(json)
         val version = root.optInt("version", -1)
-        require(version == 2) { "Unsupported GymLog backup version" }
+        require(version == 3) { "Unsupported GymLog backup version" }
         val machines = root.getJSONArray("machines")
         root.optJSONObject("settings")?.let { settings ->
             saveProgressionSettings(ProgressionSettings(
@@ -394,6 +405,7 @@ class GymRepository(context: Context) {
             }
             for (index in 0 until machines.length()) {
                 val item = machines.getJSONObject(index)
+                val trackingMode = item.getString("trackingMode")
                 val id = database.insertOrThrow("machines", null, ContentValues().apply {
                     put("plan_id", importedPlanIds[item.getLong("planId")] ?: targetPlanId)
                     put("name", capitalizeName(item.getString("name")))
@@ -402,7 +414,7 @@ class GymRepository(context: Context) {
                     put("pause_time", item.optString("pauseTime"))
                     put("chart_window", item.optString("chartWindow", "3M"))
                     put("trailing_average", item.optInt("trailingAverage", 0))
-                    put("tracking_mode", item.optString("trackingMode", "WEIGHT"))
+                    put("tracking_mode", trackingMode)
                     put("current_weight", item.getDouble("currentWeight"))
                     put("sort_order", item.optInt("sortOrder", index))
                 })
@@ -420,8 +432,8 @@ class GymRepository(context: Context) {
                     val set = sets.getJSONObject(setIndex)
                     database.insertOrThrow("sets", null, ContentValues().apply {
                         put("machine_id", id)
-                        put("reps", set.getInt("reps"))
-                        put("weight", set.getDouble("weight"))
+                        put("reps", if (trackingMode == "STRENGTH") set.getInt("recordedLevel") else set.getInt("reps"))
+                        put("weight", if (trackingMode == "STRENGTH") set.getDouble("trainingMinutes") else set.getDouble("weight"))
                         put("performed_at", set.getLong("performedAt"))
                     })
                 }
@@ -523,7 +535,7 @@ class GymRepository(context: Context) {
 
 private const val GYMLOG_DATABASE = "gymlog.db"
 
-private class GymDatabase(context: Context) : SQLiteOpenHelper(context, GYMLOG_DATABASE, null, 6) {
+private class GymDatabase(context: Context) : SQLiteOpenHelper(context, GYMLOG_DATABASE, null, 7) {
     override fun onCreate(db: SQLiteDatabase) {
         db.execSQL("CREATE TABLE training_plans(id INTEGER PRIMARY KEY AUTOINCREMENT,name TEXT NOT NULL UNIQUE,sort_order INTEGER NOT NULL)")
         db.execSQL("INSERT INTO training_plans(name,sort_order) VALUES('Default',0)")
