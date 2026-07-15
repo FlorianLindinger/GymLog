@@ -5,6 +5,7 @@ import android.content.Context
 
 const val GYMLOG_PREFERENCES = "gymlog_settings"
 const val AUTOMATIC_BACKUP_ENABLED = "automatic_backup_enabled"
+const val LAST_AUTOMATIC_BACKUP_AT = "last_automatic_backup_at"
 
 fun automaticBackupEnabled(context: Context): Boolean =
     context.getSharedPreferences(GYMLOG_PREFERENCES, Context.MODE_PRIVATE)
@@ -16,4 +17,11 @@ fun setAutomaticBackupEnabled(context: Context, enabled: Boolean) {
         .putBoolean(AUTOMATIC_BACKUP_ENABLED, enabled)
         .apply()
     BackupManager(context).dataChanged()
+}
+
+fun recordAutomaticBackup(context: Context) {
+    context.getSharedPreferences(GYMLOG_PREFERENCES, Context.MODE_PRIVATE)
+        .edit()
+        .putLong(LAST_AUTOMATIC_BACKUP_AT, System.currentTimeMillis())
+        .apply()
 }

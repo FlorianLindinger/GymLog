@@ -35,6 +35,7 @@ fun TrainingPlansScreen(
     onCreate: (String) -> Unit,
     onRename: (Long, String) -> Unit,
     onDelete: (Long) -> Unit,
+    onDuplicate: (Long) -> Unit,
 ) {
     var creating by remember { mutableStateOf(false) }
     var renaming by remember { mutableStateOf<TrainingPlan?>(null) }
@@ -58,6 +59,7 @@ fun TrainingPlansScreen(
                         TextButton(onClick = { onOpen(plan.id) }, enabled = plan.id != activePlanId) { Text("Open") }
                     }
                     Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        TextButton(onClick = { onDuplicate(plan.id) }) { Text("Duplicate") }
                         TextButton(onClick = { renaming = plan }) { Text("Rename") }
                         TextButton(onClick = { deleting = plan }, enabled = plans.size > 1) { Text("Delete") }
                     }

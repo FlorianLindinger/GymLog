@@ -2,6 +2,7 @@ package com.gymlog.app.ui
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -16,6 +17,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.AlertDialog
@@ -31,13 +33,22 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.toMutableStateList
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
@@ -60,6 +71,8 @@ import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
+import java.util.Locale
+import kotlin.math.abs
 
 @Composable
 fun OverviewScreen(
@@ -74,12 +87,25 @@ fun OverviewScreen(
     onQuickSet: (MachineSummary, List<Int>) -> Unit,
     onMetricChange: (MachineSummary, Double) -> Unit,
     progressionSettings: ProgressionSettings,
-    onProgressionSettings: (ProgressionSettings) -> Unit,
+    onReorder: (List<Long>) -> Unit,
 ) {
-    var showProgressionSettings by remember { mutableStateOf(false) }
     val today = LocalDate.now()
     val zone = ZoneId.systemDefault()
     val lastExerciseToday = mostRecentlyTrainedToday(machines, today, zone)
+    val listState = rememberLazyListState()
+    val orderedMachines = remember(machines.map { it.machine.id }) { machines.toMutableStateList() }
+    var draggedId by remember { mutableStateOf<Long?>(null) }
+    var dragOffset by remember { mutableStateOf(0f) }
+    var footerVisible by remember { mutableStateOf(true) }
+    LaunchedEffect(listState) {
+        var previous = 0
+        snapshotFlow { listState.firstVisibleItemIndex * 100_000 + listState.firstVisibleItemScrollOffset }
+            .collect { position ->
+                if (position > previous + 4) footerVisible = false
+                if (position < previous - 4 || position == 0) footerVisible = true
+                previous = position
+            }
+    }
     Box(modifier.fillMaxSize()) {
         if (machines.isEmpty()) {
             Column(
@@ -94,35 +120,65 @@ fun OverviewScreen(
             }
         } else {
             LazyColumn(
+                state = listState,
                 contentPadding = PaddingValues(start = 8.dp, end = 8.dp, top = 6.dp, bottom = 72.dp),
                 verticalArrangement = Arrangement.spacedBy(6.dp),
             ) {
                 item(key = "training-duration") { TrainingDurationCard(machines, activePlanName, today, zone) }
-                item(key = "progression-settings") {
-                    ProgressionSettingsCard(progressionSettings, onEdit = { showProgressionSettings = true })
-                }
-                items(machines, key = { it.machine.id }) { summary ->
-                    MachineCard(summary, lastExerciseToday, today, zone, areaFrequency, onMachine, onQuickSet, onMetricChange, progressionSettings)
+                items(orderedMachines, key = { it.machine.id }) { summary ->
+                    val id = summary.machine.id
+                    MachineCard(
+                        summary, lastExerciseToday, today, zone, areaFrequency, onMachine, onQuickSet,
+                        onMetricChange, progressionSettings,
+                        modifier = Modifier.pointerInput(id, orderedMachines.map { it.machine.id }) {
+                            detectDragGesturesAfterLongPress(
+                                onDragStart = { draggedId = id; dragOffset = 0f },
+                                onDragCancel = { draggedId = null; dragOffset = 0f },
+                                onDragEnd = {
+                                    onReorder(orderedMachines.map { it.machine.id })
+                                    draggedId = null
+                                    dragOffset = 0f
+                                },
+                                onDrag = { change, amount ->
+                                    change.consume()
+                                    dragOffset += amount.y
+                                    val currentInfo = listState.layoutInfo.visibleItemsInfo.firstOrNull { it.key == id }
+                                        ?: return@detectDragGesturesAfterLongPress
+                                    val draggedCenter = currentInfo.offset + currentInfo.size / 2f + dragOffset
+                                    val targetId = listState.layoutInfo.visibleItemsInfo
+                                        .filter { it.key is Long }
+                                        .minByOrNull { abs((it.offset + it.size / 2f) - draggedCenter) }
+                                        ?.key as? Long
+                                    val from = orderedMachines.indexOfFirst { it.machine.id == id }
+                                    val to = orderedMachines.indexOfFirst { it.machine.id == targetId }
+                                    if (from >= 0 && to >= 0 && from != to) {
+                                        orderedMachines.add(to, orderedMachines.removeAt(from))
+                                        dragOffset = 0f
+                                    }
+                                },
+                            )
+                        },
+                        isDragging = draggedId == id,
+                    )
                 }
             }
         }
-        Row(
-            modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth().background(MaterialTheme.colorScheme.surface).padding(8.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        AnimatedVisibility(
+            visible = footerVisible,
+            modifier = Modifier.align(Alignment.BottomCenter),
+            enter = slideInVertically { it } + fadeIn(),
+            exit = slideOutVertically { it } + fadeOut(),
         ) {
-            FilledTonalButton(onClick = onMenu, modifier = Modifier.weight(1f)) { Text("Menu") }
-            FilledTonalButton(onClick = onStats, modifier = Modifier.weight(1f)) { Text("Stats") }
-            Button(onClick = onAdd, modifier = Modifier.weight(1f)) { Text("+ Add") }
+            Row(
+                modifier = Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surface).padding(8.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                FilledTonalButton(onClick = onMenu, modifier = Modifier.weight(1f)) { Text("Menu") }
+                FilledTonalButton(onClick = onStats, modifier = Modifier.weight(1f)) { Text("Stats") }
+                Button(onClick = onAdd, modifier = Modifier.weight(1f)) { Text("+ Add") }
+            }
         }
     }
-    if (showProgressionSettings) ProgressionSettingsDialog(
-        current = progressionSettings,
-        onDismiss = { showProgressionSettings = false },
-        onSave = {
-            onProgressionSettings(it)
-            showProgressionSettings = false
-        },
-    )
 }
 
 @Composable
@@ -200,7 +256,7 @@ private fun ProgressionSettingsCard(settings: ProgressionSettings, onEdit: () ->
 private fun settingSummary(value: Int, unit: String): String = if (value <= 0) "$unit off" else "$value $unit"
 
 @Composable
-private fun ProgressionSettingsDialog(
+fun ProgressionSettingsDialog(
     current: ProgressionSettings,
     onDismiss: () -> Unit,
     onSave: (ProgressionSettings) -> Unit,
@@ -272,14 +328,16 @@ private fun MachineCard(
     onQuickSet: (MachineSummary, List<Int>) -> Unit,
     onMetricChange: (MachineSummary, Double) -> Unit,
     progressionSettings: ProgressionSettings,
+    modifier: Modifier = Modifier,
+    isDragging: Boolean = false,
 ) {
     var quickReps by remember(summary.machine.id) { mutableStateOf(false) }
     var changeMetric by remember(summary.machine.id) { mutableStateOf(false) }
     val trainedToday = wasTrainedToday(summary, today, zone)
     val clash = if (!trainedToday && lastExerciseToday != null) strongestClash(summary, lastExerciseToday) else null
     Card(
-        modifier = Modifier.fillMaxWidth().clickable { onMachine(summary.machine.id) },
-        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
+        modifier = modifier.fillMaxWidth().clickable { onMachine(summary.machine.id) },
+        elevation = CardDefaults.cardElevation(defaultElevation = if (isDragging) 10.dp else 1.dp),
         border = BorderStroke(1.5.dp, sessionTrendColor(summary)),
     ) {
         Column(Modifier.padding(horizontal = 8.dp, vertical = 3.dp), verticalArrangement = Arrangement.spacedBy(0.dp)) {
@@ -306,17 +364,17 @@ private fun MachineCard(
                     TodoBadge(clash)
                     Spacer(Modifier.width(2.dp))
                 }
-                Text(
-                    formatMetric(summary.machine.currentWeight, summary.machine.trackingMode),
-                    modifier = Modifier.clickable { changeMetric = true }.padding(horizontal = 6.dp, vertical = 4.dp),
-                    style = MaterialTheme.typography.titleSmall,
-                    color = MaterialTheme.colorScheme.primary,
-                )
             }
             progressionWarning(summary, progressionSettings)?.let { warning ->
                 Text(warning, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error)
             }
             Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    if (isDirectMetric(summary.machine.trackingMode)) "+ TRAINING" else "+ SET",
+                    modifier = Modifier.clickable { quickReps = true }.padding(horizontal = 8.dp, vertical = 2.dp),
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.primary,
+                )
                 Text(
                     sessionPatternText(summary),
                     modifier = Modifier.weight(1f),
@@ -326,9 +384,9 @@ private fun MachineCard(
                     overflow = TextOverflow.Ellipsis,
                 )
                 Text(
-                    if (isDirectMetric(summary.machine.trackingMode)) "+ TRAINING" else "+ SET",
-                    modifier = Modifier.clickable { quickReps = true }.padding(horizontal = 8.dp, vertical = 2.dp),
-                    style = MaterialTheme.typography.labelLarge,
+                    formatMetric(summary.machine.currentWeight, summary.machine.trackingMode),
+                    modifier = Modifier.clickable { changeMetric = true }.padding(horizontal = 6.dp, vertical = 4.dp),
+                    style = MaterialTheme.typography.titleSmall,
                     color = MaterialTheme.colorScheme.primary,
                 )
             }
@@ -602,7 +660,7 @@ fun AddMachineDialog(onDismiss: () -> Unit, onAdd: (String, Double, String) -> U
     )
 }
 
-fun formatWeight(weight: Double): String = if (weight % 1.0 == 0.0) "${weight.toInt()} kg" else "%.1f kg".format(weight)
+fun formatWeight(weight: Double): String = if (weight % 1.0 == 0.0) "${weight.toInt()} kg" else String.format(Locale.US, "%.1f kg", weight)
 
 fun formatHoursMinutes(totalMinutes: Long): String = "${totalMinutes / 60}:${(totalMinutes % 60).toString().padStart(2, '0')}"
 
@@ -622,7 +680,7 @@ fun currentMetricLabel(trackingMode: String): String = when (trackingMode) {
     else -> "Current level"
 }
 
-private fun formatNumber(value: Double): String = if (value % 1.0 == 0.0) value.toInt().toString() else "%.1f".format(value)
+private fun formatNumber(value: Double): String = if (value % 1.0 == 0.0) value.toInt().toString() else String.format(Locale.US, "%.1f", value)
 
 fun formatMetric(value: Double, trackingMode: String): String = when (trackingMode) {
     "WEIGHT" -> formatWeight(value)

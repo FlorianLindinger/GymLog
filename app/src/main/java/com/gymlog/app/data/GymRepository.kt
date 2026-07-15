@@ -32,6 +32,24 @@ class GymRepository(context: Context) {
 
     fun automaticBackupEnabled(): Boolean = automaticBackupEnabled(appContext)
 
+    fun backupSyncStatus(): BackupSyncStatus {
+        val enabled = automaticBackupEnabled()
+        val lastBackup = preferences.getLong(LAST_AUTOMATIC_BACKUP_AT, 0L).takeIf { it > 0L }
+        val databaseChangedAt = listOf(
+            appContext.getDatabasePath(GYMLOG_DATABASE),
+            appContext.getDatabasePath("$GYMLOG_DATABASE-wal"),
+        ).maxOfOrNull { it.lastModified() } ?: 0L
+        return BackupSyncStatus(enabled, lastBackup, lastBackup == null || databaseChangedAt > lastBackup)
+    }
+
+    fun accentColor(): AccentColor = runCatching {
+        AccentColor.valueOf(preferences.getString("accent_color", AccentColor.BLUE.name)!!)
+    }.getOrDefault(AccentColor.BLUE)
+
+    fun setAccentColor(color: AccentColor) {
+        preferences.edit().putString("accent_color", color.name).apply()
+    }
+
     fun setAutomaticBackupEnabled(enabled: Boolean) {
         setAutomaticBackupEnabled(appContext, enabled)
     }
@@ -76,6 +94,43 @@ class GymRepository(context: Context) {
         })
         setActiveTrainingPlan(id)
         return id
+    }
+
+    fun duplicateTrainingPlan(id: Long): Long {
+        val database = db.writableDatabase
+        val source = loadTrainingPlans().firstOrNull { it.id == id } ?: error("Training plan does not exist")
+        val nextOrder = database.rawQuery("SELECT COALESCE(MAX(sort_order),-1)+1 FROM training_plans", null)
+            .use { it.moveToFirst(); it.getInt(0) }
+        return database.transaction {
+            val newPlanId = database.insertOrThrow("training_plans", null, ContentValues().apply {
+                put("name", uniquePlanName(database, "${source.name} - Copy"))
+                put("sort_order", nextOrder)
+            })
+            loadMachinesForPlan(id).forEach { summary ->
+                val machine = summary.machine
+                val newMachineId = database.insertOrThrow("machines", null, ContentValues().apply {
+                    put("plan_id", newPlanId)
+                    put("name", machine.name)
+                    put("title_note", machine.titleNote)
+                    put("notes", machine.notes)
+                    put("pause_time", machine.pauseTime)
+                    put("chart_window", machine.chartWindow)
+                    put("trailing_average", machine.trailingAverage)
+                    put("tracking_mode", machine.trackingMode)
+                    put("current_weight", machine.currentWeight)
+                    put("sort_order", machine.sortOrder)
+                })
+                summary.areas.forEach { assignment ->
+                    database.insertOrThrow("machine_areas", null, ContentValues().apply {
+                        put("machine_id", newMachineId)
+                        put("area", assignment.area.name)
+                        put("strength", assignment.strength.value)
+                    })
+                }
+                addWeightHistory(database, newMachineId, machine.currentWeight, System.currentTimeMillis())
+            }
+            newPlanId
+        }
     }
 
     fun renameTrainingPlan(id: Long, name: String) {
@@ -293,6 +348,17 @@ class GymRepository(context: Context) {
         database.transaction {
             ordered.forEachIndexed { index, machine ->
                 database.update("machines", ContentValues().apply { put("sort_order", index) }, "id=?", arrayOf(machine.id.toString()))
+            }
+        }
+    }
+
+    fun reorderMachines(machineIds: List<Long>) {
+        val currentIds = loadMachines().map { it.machine.id }
+        if (machineIds.size != currentIds.size || machineIds.toSet() != currentIds.toSet()) return
+        val database = db.writableDatabase
+        database.transaction {
+            machineIds.forEachIndexed { index, id ->
+                database.update("machines", ContentValues().apply { put("sort_order", index) }, "id=?", arrayOf(id.toString()))
             }
         }
     }

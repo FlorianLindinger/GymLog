@@ -44,6 +44,7 @@ import java.time.LocalDate
 import java.time.YearMonth
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
+import java.util.Locale
 import kotlin.math.ceil
 
 @Composable
@@ -344,7 +345,7 @@ fun EditSetDialog(
     )
 }
 
-private fun formatVolume(volume: Double): String = if (volume >= 1000) "%.1f t".format(volume / 1000) else "${volume.toInt()} kg"
+private fun formatVolume(volume: Double): String = if (volume >= 1000) String.format(Locale.US, "%.1f t", volume / 1000) else "${volume.toInt()} kg"
 
 private fun formatSessionTotals(sets: List<HistorySet>): String {
     val parts = mutableListOf<String>()
@@ -353,4 +354,4 @@ private fun formatSessionTotals(sets: List<HistorySet>): String {
     return parts.joinToString(" · ").ifEmpty { "0" }
 }
 
-private fun formatHistoryAmount(value: Double): String = if (value % 1.0 == 0.0) value.toInt().toString() else "%.1f".format(value)
+private fun formatHistoryAmount(value: Double): String = if (value % 1.0 == 0.0) value.toInt().toString() else String.format(Locale.US, "%.1f", value)

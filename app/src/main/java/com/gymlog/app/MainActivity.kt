@@ -8,6 +8,7 @@ import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import com.gymlog.app.data.GymRepository
@@ -21,6 +22,7 @@ class MainActivity : ComponentActivity() {
         val repository = GymRepository(this)
         setContent {
             var dataVersion by remember { mutableIntStateOf(0) }
+            var accentColor by remember { mutableStateOf(repository.accentColor()) }
             val exportLauncher = rememberLauncherForActivityResult(
                 ActivityResultContracts.CreateDocument("application/json"),
             ) { uri ->
@@ -52,12 +54,16 @@ class MainActivity : ComponentActivity() {
                 }
             }
 
-            GymLogTheme {
+            GymLogTheme(accentColor) {
                 GymLogApp(
                     repository = repository,
                     externalDataVersion = dataVersion,
                     onExport = { exportLauncher.launch("GymLog-${LocalDate.now()}.json") },
                     onImport = { importLauncher.launch(arrayOf("application/json", "text/plain")) },
+                    onAccentColorChanged = {
+                        repository.setAccentColor(it)
+                        accentColor = it
+                    },
                 )
             }
         }

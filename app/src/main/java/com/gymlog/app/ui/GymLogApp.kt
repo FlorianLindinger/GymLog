@@ -15,7 +15,9 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Card
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Switch
@@ -30,15 +32,18 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import com.gymlog.app.data.BodyArea
+import com.gymlog.app.data.AccentColor
+import com.gymlog.app.data.BackupSyncStatus
 import com.gymlog.app.data.GymRepository
 import com.gymlog.app.data.HistorySet
 import com.gymlog.app.data.MachineSummary
 import com.gymlog.app.data.ProgressionSettings
 import com.gymlog.app.data.TrainingPlan
 
-private enum class Screen { OVERVIEW, STATS, HISTORY, REORDER, BACKUP, PLANS, DETAIL }
+private enum class Screen { OVERVIEW, STATS, HISTORY, BACKUP, PLANS, DETAIL }
 
 private data class AppUiState(
     val machines: List<MachineSummary>,
@@ -48,6 +53,7 @@ private data class AppUiState(
     val activeTrainingPlanId: Long,
     val progressionSettings: ProgressionSettings,
     val automaticBackupEnabled: Boolean,
+    val backupSyncStatus: BackupSyncStatus,
 )
 
 private fun GymRepository.loadUiState() = AppUiState(
@@ -58,6 +64,7 @@ private fun GymRepository.loadUiState() = AppUiState(
     activeTrainingPlanId = activeTrainingPlanId(),
     progressionSettings = loadProgressionSettings(),
     automaticBackupEnabled = automaticBackupEnabled(),
+    backupSyncStatus = backupSyncStatus(),
 )
 
 private fun GymRepository.loadUiStateResult(): Result<AppUiState> = try {
@@ -73,6 +80,7 @@ fun GymLogApp(
     externalDataVersion: Int,
     onExport: () -> Unit,
     onImport: () -> Unit,
+    onAccentColorChanged: (AccentColor) -> Unit,
 ) {
     var uiStateResult by remember(repository) { mutableStateOf(repository.loadUiStateResult()) }
     var screen by remember { mutableStateOf(Screen.OVERVIEW) }
@@ -80,6 +88,8 @@ fun GymLogApp(
     var showAdd by remember { mutableStateOf(false) }
     var showMenu by remember { mutableStateOf(false) }
     var confirmImport by remember { mutableStateOf(false) }
+    var showProgressionSettings by remember { mutableStateOf(false) }
+    var showAccentColor by remember { mutableStateOf(false) }
 
     fun refresh() {
         uiStateResult = repository.loadUiStateResult()
@@ -130,7 +140,6 @@ fun GymLogApp(
                             Screen.OVERVIEW -> ""
                             Screen.STATS -> "Stats"
                             Screen.HISTORY -> "History"
-                            Screen.REORDER -> "Change order"
                             Screen.BACKUP -> "Data & backup"
                             Screen.PLANS -> "Training plans"
                             Screen.DETAIL -> selected?.machine?.let { machine ->
@@ -182,9 +191,9 @@ fun GymLogApp(
                     refresh()
                 },
                 progressionSettings = uiState.progressionSettings,
-                onProgressionSettings = {
-                    repository.saveProgressionSettings(it)
-                    uiStateResult = Result.success(uiState.copy(progressionSettings = it))
+                onReorder = { orderedIds ->
+                    repository.reorderMachines(orderedIds)
+                    refresh()
                 },
             )
             Screen.HISTORY -> HistoryScreen(
@@ -199,14 +208,7 @@ fun GymLogApp(
                 history = uiState.history,
                 machines = uiState.machines,
                 modifier = Modifier.padding(padding),
-            )
-            Screen.REORDER -> ReorderScreen(
-                machines = uiState.machines,
-                modifier = Modifier.padding(padding),
-                onMove = { id, direction ->
-                    repository.moveMachine(id, direction)
-                    refresh()
-                },
+                onHistory = { screen = Screen.HISTORY },
             )
             Screen.PLANS -> TrainingPlansScreen(
                 plans = uiState.trainingPlans,
@@ -224,13 +226,15 @@ fun GymLogApp(
                 },
                 onRename = { id, name -> repository.renameTrainingPlan(id, name); refresh() },
                 onDelete = { repository.deleteTrainingPlan(it); refresh() },
+                onDuplicate = { repository.duplicateTrainingPlan(it); refresh() },
             )
             Screen.BACKUP -> BackupScreen(
                 modifier = Modifier.padding(padding),
                 automaticBackupEnabled = uiState.automaticBackupEnabled,
+                syncStatus = uiState.backupSyncStatus,
                 onAutomaticBackupChanged = {
                     repository.setAutomaticBackupEnabled(it)
-                    uiStateResult = Result.success(uiState.copy(automaticBackupEnabled = it))
+                    refresh()
                 },
                 onExport = onExport,
                 onImport = { confirmImport = true },
@@ -270,13 +274,32 @@ fun GymLogApp(
         title = { Text("Menu") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                TextButton(onClick = { showMenu = false; screen = Screen.HISTORY }) { Text("Calendar & history") }
-                TextButton(onClick = { showMenu = false; screen = Screen.REORDER }) { Text("Change exercise order") }
+                TextButton(onClick = { showMenu = false; showAccentColor = true }) { Text("UI color") }
+                TextButton(onClick = { showMenu = false; showProgressionSettings = true }) { Text("Progress warnings") }
                 TextButton(onClick = { showMenu = false; screen = Screen.PLANS }) { Text("Training plans") }
                 TextButton(onClick = { showMenu = false; screen = Screen.BACKUP }) { Text("Data, backup & sync") }
             }
         },
         confirmButton = { TextButton(onClick = { showMenu = false }) { Text("Close") } },
+    )
+
+    if (showProgressionSettings) ProgressionSettingsDialog(
+        current = uiState.progressionSettings,
+        onDismiss = { showProgressionSettings = false },
+        onSave = {
+            repository.saveProgressionSettings(it)
+            uiStateResult = Result.success(uiState.copy(progressionSettings = it))
+            showProgressionSettings = false
+        },
+    )
+
+    if (showAccentColor) AccentColorDialog(
+        current = repository.accentColor(),
+        onDismiss = { showAccentColor = false },
+        onSave = {
+            onAccentColorChanged(it)
+            showAccentColor = false
+        },
     )
 
     if (confirmImport) AlertDialog(
@@ -349,6 +372,7 @@ private fun ReorderScreen(
 private fun BackupScreen(
     modifier: Modifier = Modifier,
     automaticBackupEnabled: Boolean,
+    syncStatus: BackupSyncStatus,
     onAutomaticBackupChanged: (Boolean) -> Unit,
     onExport: () -> Unit,
     onImport: () -> Unit,
@@ -358,6 +382,30 @@ private fun BackupScreen(
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
         Text("Backup & sync", style = MaterialTheme.typography.headlineSmall)
+        Card(Modifier.fillMaxWidth()) {
+            Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                Text(
+                    when {
+                        !syncStatus.automaticBackupEnabled -> "Not synced"
+                        syncStatus.lastBackupAt == null -> "Waiting for first Android backup"
+                        syncStatus.hasChangesSinceBackup -> "Changes waiting for backup"
+                        else -> "Backed up"
+                    },
+                    style = MaterialTheme.typography.titleMedium,
+                    color = when {
+                        !syncStatus.automaticBackupEnabled -> MaterialTheme.colorScheme.error
+                        syncStatus.hasChangesSinceBackup -> MaterialTheme.colorScheme.tertiary
+                        else -> Color(0xFF66BB6A)
+                    },
+                )
+                Text(
+                    syncStatus.lastBackupAt?.let { "Last Android backup: ${formatTimestamp(it)}" }
+                        ?: "No completed Android backup has been recorded yet.",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
+        }
         Row(Modifier.fillMaxWidth(), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
                 Text("Android automatic backup", style = MaterialTheme.typography.titleMedium)
@@ -380,3 +428,32 @@ private fun BackupScreen(
         Text("Restoring a manual file replaces the data currently on this phone. Automatic Android backup is unaffected by manual export and restore.", color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
+
+@Composable
+private fun AccentColorDialog(
+    current: AccentColor,
+    onDismiss: () -> Unit,
+    onSave: (AccentColor) -> Unit,
+) {
+    var selected by remember(current) { mutableStateOf(current) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("UI color") },
+        text = {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                AccentColor.entries.forEach { color ->
+                    FilterChip(
+                        selected = selected == color,
+                        onClick = { selected = color },
+                        label = { Text(color.name.lowercase().replaceFirstChar(Char::uppercase)) },
+                    )
+                }
+            }
+        },
+        confirmButton = { Button(onClick = { onSave(selected) }) { Text("Apply") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
+}
+
+private fun formatTimestamp(timestamp: Long): String = java.time.format.DateTimeFormatter.ofPattern("d MMM yyyy, HH:mm")
+    .format(java.time.Instant.ofEpochMilli(timestamp).atZone(java.time.ZoneId.systemDefault()))

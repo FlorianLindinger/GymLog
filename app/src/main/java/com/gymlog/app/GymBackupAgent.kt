@@ -6,10 +6,14 @@ import android.app.backup.BackupDataOutput
 import android.app.backup.FullBackupDataOutput
 import android.os.ParcelFileDescriptor
 import com.gymlog.app.data.automaticBackupEnabled
+import com.gymlog.app.data.recordAutomaticBackup
 
 class GymBackupAgent : BackupAgent() {
     override fun onFullBackup(data: FullBackupDataOutput) {
-        if (automaticBackupEnabled(this)) super.onFullBackup(data)
+        if (automaticBackupEnabled(this)) {
+            super.onFullBackup(data)
+            recordAutomaticBackup(this)
+        }
     }
 
     override fun onBackup(

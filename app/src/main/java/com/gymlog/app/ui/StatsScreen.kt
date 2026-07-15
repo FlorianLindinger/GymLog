@@ -10,6 +10,9 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Card
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
@@ -33,9 +36,15 @@ import java.time.Instant
 import java.time.LocalDate
 import java.time.YearMonth
 import java.time.ZoneId
+import java.util.Locale
 
 @Composable
-fun StatsScreen(history: List<HistorySet>, machines: List<MachineSummary>, modifier: Modifier = Modifier) {
+fun StatsScreen(
+    history: List<HistorySet>,
+    machines: List<MachineSummary>,
+    modifier: Modifier = Modifier,
+    onHistory: () -> Unit,
+) {
     var window by remember { mutableStateOf("3M") }
     val cutoff = statsCutoff(window)
     val visible = history.filter { cutoff == null || it.performedAt >= cutoff }
@@ -71,7 +80,15 @@ fun StatsScreen(history: List<HistorySet>, machines: List<MachineSummary>, modif
     val increasesByMonth = increases.groupingBy {
         YearMonth.from(Instant.ofEpochMilli(it.changedAt).atZone(zone))
     }.eachCount()
-    val plottedMonths = when (window) { "4W" -> 2; "3M" -> 3; "6M" -> 6; "1Y" -> 12; else -> 24 }
+    val plottedMonths = when (window) {
+        "1W", "1M" -> 2
+        "3M" -> 3
+        "6M" -> 6
+        "1Y" -> 12
+        "2Y" -> 24
+        "3Y" -> 36
+        else -> 36
+    }
     val currentMonth = YearMonth.now()
     val upgradesByMonth = (plottedMonths - 1 downTo 0).map { monthsAgo ->
         (increasesByMonth[currentMonth.minusMonths(monthsAgo.toLong())] ?: 0).toDouble()
@@ -83,23 +100,27 @@ fun StatsScreen(history: List<HistorySet>, machines: List<MachineSummary>, modif
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
         item {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                listOf("4W", "3M", "6M", "1Y", "ALL").forEach { preset ->
+            FilledTonalButton(onClick = onHistory, modifier = Modifier.fillMaxWidth()) { Text("Calendar & history") }
+        }
+        item {
+            LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                items(8) { index ->
+                    val preset = listOf("1W", "1M", "3M", "6M", "1Y", "2Y", "3Y", "ALL")[index]
                     FilterChip(selected = window == preset, onClick = { window = preset }, label = { Text(preset) })
                 }
             }
         }
         item {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                StatCard("Gym / week", "%.1f".format(sessions.size / periodWeeks), Modifier.weight(1f))
+                StatCard("Gym / week", String.format(Locale.US, "%.1f", sessions.size / periodWeeks), Modifier.weight(1f))
                 StatCard("Sessions", sessions.size.toString(), Modifier.weight(1f))
                 StatCard("Sets", visible.size.toString(), Modifier.weight(1f))
             }
         }
         item {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                StatCard("Avg upgrades / gym day", "%.2f".format(averageUpgradesPerGymDay), Modifier.weight(1f))
-                StatCard("Avg upgrades / month", "%.2f".format(averageUpgradesPerMonth), Modifier.weight(1f))
+                StatCard("Avg upgrades / gym day", String.format(Locale.US, "%.2f", averageUpgradesPerGymDay), Modifier.weight(1f))
+                StatCard("Avg upgrades / month", String.format(Locale.US, "%.2f", averageUpgradesPerMonth), Modifier.weight(1f))
             }
         }
         item {
@@ -111,7 +132,7 @@ fun StatsScreen(history: List<HistorySet>, machines: List<MachineSummary>, modif
         item {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 StatCard("Weight increases", increases.size.toString(), Modifier.weight(1f))
-                StatCard("Increases / week", "%.2f".format(increases.size / periodWeeks), Modifier.weight(1f))
+                StatCard("Increases / week", String.format(Locale.US, "%.2f", increases.size / periodWeeks), Modifier.weight(1f))
                 StatCard("Exercises progressed", increases.map { it.machineId }.distinct().size.toString(), Modifier.weight(1f))
             }
         }
@@ -143,7 +164,7 @@ private fun ProgressionByExerciseCard(machines: List<MachineSummary>, cutoff: Lo
                 val count = summary.weightIncreases().count { cutoff == null || it.changedAt >= cutoff }
                 Row(Modifier.fillMaxWidth()) {
                     Text(summary.machine.name, Modifier.weight(1f))
-                    Text("$count · %.2f/week".format(count / periodWeeks), color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text("$count · ${String.format(Locale.US, "%.2f", count / periodWeeks)}/week", color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
         }
@@ -186,7 +207,16 @@ private fun StatsChart(title: String, values: List<Double>, unit: String) {
 }
 
 private fun statsCutoff(window: String): Long? {
-    val days = when (window) { "4W" -> 28L; "3M" -> 90L; "6M" -> 182L; "1Y" -> 365L; else -> return null }
+    val days = when (window) {
+        "1W" -> 7L
+        "1M" -> 30L
+        "3M" -> 90L
+        "6M" -> 182L
+        "1Y" -> 365L
+        "2Y" -> 730L
+        "3Y" -> 1_095L
+        else -> return null
+    }
     return Instant.now().minus(Duration.ofDays(days)).toEpochMilli()
 }
 

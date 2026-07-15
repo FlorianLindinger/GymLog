@@ -56,6 +56,7 @@ import java.time.Duration
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
+import java.util.Locale
 
 @Composable
 fun DetailScreen(
@@ -372,7 +373,7 @@ private fun weightChangeDescription(changes: List<WeightChange>, trackingMode: S
     val latest = changes.firstOrNull() ?: return "No $metric changes yet"
     val previous = changes.getOrNull(1) ?: return "Initial $metric set ${timeSince(latest.changedAt)} ago"
     val delta = latest.weight - previous.weight
-    val amount = if (delta % 1.0 == 0.0) delta.toInt().toString() else "%.1f".format(delta)
+    val amount = if (delta % 1.0 == 0.0) delta.toInt().toString() else String.format(Locale.US, "%.1f", delta)
     val signed = if (delta > 0) "+$amount" else amount
     val unit = when (trackingMode) {
         "WEIGHT" -> "kg"
