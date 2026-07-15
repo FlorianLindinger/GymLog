@@ -10,8 +10,24 @@ import org.json.JSONObject
 
 class GymRepository(context: Context) {
     private val appContext = context.applicationContext
-    private val db = GymDatabase(appContext)
+    private var db = GymDatabase(appContext)
     private val preferences = appContext.getSharedPreferences(GYMLOG_PREFERENCES, Context.MODE_PRIVATE)
+
+    fun createFreshDatabase() {
+        runCatching { db.close() }
+        check(appContext.deleteDatabase(GYMLOG_DATABASE) || !appContext.getDatabasePath(GYMLOG_DATABASE).exists()) {
+            "The old GymLog database could not be removed"
+        }
+        check(
+            preferences.edit()
+                .remove("active_training_plan")
+                .remove("progress_stale_weeks")
+                .remove("progress_stale_trainings")
+                .commit(),
+        ) { "GymLog settings could not be reset" }
+        db = GymDatabase(appContext)
+        db.writableDatabase
+    }
 
     fun automaticBackupEnabled(): Boolean = automaticBackupEnabled(appContext)
 
@@ -505,7 +521,9 @@ class GymRepository(context: Context) {
     }
 }
 
-private class GymDatabase(context: Context) : SQLiteOpenHelper(context, "gymlog.db", null, 6) {
+private const val GYMLOG_DATABASE = "gymlog.db"
+
+private class GymDatabase(context: Context) : SQLiteOpenHelper(context, GYMLOG_DATABASE, null, 6) {
     override fun onCreate(db: SQLiteDatabase) {
         db.execSQL("CREATE TABLE training_plans(id INTEGER PRIMARY KEY AUTOINCREMENT,name TEXT NOT NULL UNIQUE,sort_order INTEGER NOT NULL)")
         db.execSQL("INSERT INTO training_plans(name,sort_order) VALUES('Default',0)")
@@ -524,12 +542,10 @@ private class GymDatabase(context: Context) : SQLiteOpenHelper(context, "gymlog.
     }
 
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
-        db.execSQL("DROP TABLE IF EXISTS sets")
-        db.execSQL("DROP TABLE IF EXISTS weight_history")
-        db.execSQL("DROP TABLE IF EXISTS machine_areas")
-        db.execSQL("DROP TABLE IF EXISTS machines")
-        db.execSQL("DROP TABLE IF EXISTS training_plans")
-        db.execSQL("DROP TABLE IF EXISTS area_colors")
-        onCreate(db)
+        error("This database uses GymLog schema $oldVersion, but this app requires schema $newVersion")
+    }
+
+    override fun onDowngrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
+        error("This database uses GymLog schema $oldVersion, but this app requires schema $newVersion")
     }
 }

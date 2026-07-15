@@ -60,6 +60,12 @@ private fun GymRepository.loadUiState() = AppUiState(
     automaticBackupEnabled = automaticBackupEnabled(),
 )
 
+private fun GymRepository.loadUiStateResult(): Result<AppUiState> = try {
+    Result.success(loadUiState())
+} catch (exception: Exception) {
+    Result.failure(exception)
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun GymLogApp(
@@ -68,7 +74,7 @@ fun GymLogApp(
     onExport: () -> Unit,
     onImport: () -> Unit,
 ) {
-    var uiState by remember(repository) { mutableStateOf(repository.loadUiState()) }
+    var uiStateResult by remember(repository) { mutableStateOf(repository.loadUiStateResult()) }
     var screen by remember { mutableStateOf(Screen.OVERVIEW) }
     var selectedId by remember { mutableStateOf<Long?>(null) }
     var showAdd by remember { mutableStateOf(false) }
@@ -76,9 +82,27 @@ fun GymLogApp(
     var confirmImport by remember { mutableStateOf(false) }
 
     fun refresh() {
-        uiState = repository.loadUiState()
+        uiStateResult = repository.loadUiStateResult()
     }
     LaunchedEffect(externalDataVersion) { refresh() }
+
+    val loadError = uiStateResult.exceptionOrNull()
+    if (loadError != null) {
+        DataRecoveryDialog(
+            error = loadError,
+            onRetry = ::refresh,
+            onCreateFresh = {
+                uiStateResult = try {
+                    repository.createFreshDatabase()
+                    Result.success(repository.loadUiState())
+                } catch (exception: Exception) {
+                    Result.failure(exception)
+                }
+            },
+        )
+        return
+    }
+    val uiState = uiStateResult.getOrThrow()
 
     val selected = uiState.machines.firstOrNull { it.machine.id == selectedId }
     val areaFrequency = remember(uiState.machines) {
@@ -160,7 +184,7 @@ fun GymLogApp(
                 progressionSettings = uiState.progressionSettings,
                 onProgressionSettings = {
                     repository.saveProgressionSettings(it)
-                    uiState = uiState.copy(progressionSettings = it)
+                    uiStateResult = Result.success(uiState.copy(progressionSettings = it))
                 },
             )
             Screen.HISTORY -> HistoryScreen(
@@ -206,7 +230,7 @@ fun GymLogApp(
                 automaticBackupEnabled = uiState.automaticBackupEnabled,
                 onAutomaticBackupChanged = {
                     repository.setAutomaticBackupEnabled(it)
-                    uiState = uiState.copy(automaticBackupEnabled = it)
+                    uiStateResult = Result.success(uiState.copy(automaticBackupEnabled = it))
                 },
                 onExport = onExport,
                 onImport = { confirmImport = true },
@@ -266,6 +290,33 @@ fun GymLogApp(
             }) { Text("Choose backup") }
         },
         dismissButton = { TextButton(onClick = { confirmImport = false }) { Text("Cancel") } },
+    )
+}
+
+@Composable
+private fun DataRecoveryDialog(
+    error: Throwable,
+    onRetry: () -> Unit,
+    onCreateFresh: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = {},
+        title = { Text("GymLog data could not be opened") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("The local database may be from an incompatible app version or may be damaged.")
+                Text("Creating a new database permanently removes the GymLog data stored in this app. Manual JSON backup files are not deleted.")
+                error.message?.takeIf { it.isNotBlank() }?.let {
+                    Text(
+                        text = "Technical details: ${it.take(240)}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+        },
+        confirmButton = { Button(onClick = onCreateFresh) { Text("Create new database") } },
+        dismissButton = { TextButton(onClick = onRetry) { Text("Try again") } },
     )
 }
 
