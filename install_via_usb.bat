@@ -1,10 +1,27 @@
 @echo off
 setlocal
 
+rem GymLog USB installation manual:
+rem 1. On the phone, tap Build number seven times to enable Developer options.
+rem 2. Enable USB debugging in Developer options.
+rem 3. Connect and unlock the phone, then approve the USB debugging prompt.
+rem 4. Run build.bat after changing the app, then run this installer.
+
 cd /d "%~dp0"
 
 set "APK=%~dp0app\build\outputs\apk\debug\app-debug.apk"
 set "ADB=%LOCALAPPDATA%\Android\Sdk\platform-tools\adb.exe"
+
+echo ============================================================
+echo                  GymLog USB installation
+echo ============================================================
+echo 1. Enable Developer options by tapping Build number 7 times.
+echo 2. Enable USB debugging in Developer options.
+echo 3. Connect the unlocked phone with a USB data cable.
+echo 4. Approve the USB debugging prompt on the phone.
+echo 5. Keep the phone unlocked while GymLog is installed.
+echo ============================================================
+echo.
 
 if not exist "%ADB%" (
     echo ERROR: Android Debug Bridge was not found.
