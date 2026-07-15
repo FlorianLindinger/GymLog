@@ -74,6 +74,7 @@ fun OverviewScreen(
     onProgressionSettings: (ProgressionSettings) -> Unit,
 ) {
     var showProgressionSettings by remember { mutableStateOf(false) }
+    val lastExerciseToday = mostRecentlyTrainedToday(machines)
     Box(modifier.fillMaxSize()) {
         if (machines.isEmpty()) {
             Column(
@@ -96,7 +97,7 @@ fun OverviewScreen(
                     ProgressionSettingsCard(progressionSettings, onEdit = { showProgressionSettings = true })
                 }
                 items(machines, key = { it.machine.id }) { summary ->
-                    MachineCard(summary, areaFrequency, onMachine, onQuickSet, onMetricChange, progressionSettings)
+                    MachineCard(summary, lastExerciseToday, areaFrequency, onMachine, onQuickSet, onMetricChange, progressionSettings)
                 }
             }
         }
@@ -130,6 +131,7 @@ private fun TrainingDurationCard(machines: List<MachineSummary>, activePlanName:
     val last = todaySets.maxOfOrNull { it.performedAt }
     val durationMinutes = if (first == null || last == null) 0L else ((last - first) / 60_000L).coerceAtLeast(0L)
     val clock = DateTimeFormatter.ofPattern("HH:mm")
+    val completedExercises = machines.count(::wasTrainedToday)
 
     Card(Modifier.fillMaxWidth()) {
         Row(
@@ -143,6 +145,11 @@ private fun TrainingDurationCard(machines: List<MachineSummary>, activePlanName:
                     else "${Instant.ofEpochMilli(first).atZone(zone).format(clock)} – ${Instant.ofEpochMilli(last!!).atZone(zone).format(clock)}",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Text(
+                    "$completedExercises of ${machines.size} exercises done today",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = if (completedExercises == machines.size) Color(0xFF2E7D32) else MaterialTheme.colorScheme.tertiary,
                 )
             }
             Text(formatHoursMinutes(durationMinutes), style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
@@ -237,6 +244,7 @@ private fun progressionWarning(summary: MachineSummary, settings: ProgressionSet
 @Composable
 private fun MachineCard(
     summary: MachineSummary,
+    lastExerciseToday: MachineSummary?,
     areaFrequency: Map<BodyArea, Double>,
     onMachine: (Long) -> Unit,
     onQuickSet: (MachineSummary, List<Int>) -> Unit,
@@ -245,6 +253,8 @@ private fun MachineCard(
 ) {
     var quickReps by remember(summary.machine.id) { mutableStateOf(false) }
     var changeMetric by remember(summary.machine.id) { mutableStateOf(false) }
+    val trainedToday = wasTrainedToday(summary)
+    val clash = if (!trainedToday && lastExerciseToday != null) strongestClash(summary, lastExerciseToday) else null
     Card(
         modifier = Modifier.fillMaxWidth().clickable { onMachine(summary.machine.id) },
         elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
@@ -269,6 +279,10 @@ private fun MachineCard(
                     if (summary.machine.titleNote.isNotBlank()) {
                         Text(" · ${summary.machine.titleNote}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
+                }
+                if (!trainedToday) {
+                    TodoBadge(clash)
+                    Spacer(Modifier.width(2.dp))
                 }
                 val overviewValue = if (isDirectMetric(summary.machine.trackingMode)) summary.recentSets.firstOrNull()?.weight ?: summary.machine.currentWeight else summary.machine.currentWeight
                 Text(
@@ -324,6 +338,63 @@ private fun MachineCard(
             changeMetric = false
         },
     )
+}
+
+@Composable
+private fun TodoBadge(clash: Double?) {
+    val label = when (clash) {
+        1.0 -> "TO DO · 1 CLASH"
+        0.5 -> "TO DO · ½ CLASH"
+        0.25 -> "TO DO · ¼ CLASH"
+        else -> "TO DO"
+    }
+    val containerColor = when (clash) {
+        1.0 -> MaterialTheme.colorScheme.errorContainer
+        0.5 -> MaterialTheme.colorScheme.tertiaryContainer
+        else -> MaterialTheme.colorScheme.secondaryContainer
+    }
+    val contentColor = when (clash) {
+        1.0 -> MaterialTheme.colorScheme.onErrorContainer
+        0.5 -> MaterialTheme.colorScheme.onTertiaryContainer
+        else -> MaterialTheme.colorScheme.onSecondaryContainer
+    }
+    Text(
+        label,
+        modifier = Modifier
+            .background(containerColor, RoundedCornerShape(6.dp))
+            .padding(horizontal = 6.dp, vertical = 2.dp),
+        style = MaterialTheme.typography.labelSmall,
+        fontWeight = FontWeight.Bold,
+        color = contentColor,
+        maxLines = 1,
+    )
+}
+
+private fun mostRecentlyTrainedToday(machines: List<MachineSummary>): MachineSummary? {
+    val today = LocalDate.now()
+    val zone = ZoneId.systemDefault()
+    return machines.maxByOrNull { summary ->
+        summary.recentSets
+            .filter { Instant.ofEpochMilli(it.performedAt).atZone(zone).toLocalDate() == today }
+            .maxOfOrNull { it.performedAt }
+            ?: Long.MIN_VALUE
+    }?.takeIf(::wasTrainedToday)
+}
+
+private fun strongestClash(current: MachineSummary, previous: MachineSummary): Double? = current.areas
+    .mapNotNull { currentArea ->
+        previous.areas
+            .filter { it.area == currentArea.area }
+            .maxOfOrNull { previousArea -> currentArea.strength.value * previousArea.strength.value }
+    }
+    .maxOrNull()
+
+private fun wasTrainedToday(summary: MachineSummary): Boolean {
+    val today = LocalDate.now()
+    val zone = ZoneId.systemDefault()
+    return summary.recentSets.any {
+        Instant.ofEpochMilli(it.performedAt).atZone(zone).toLocalDate() == today
+    }
 }
 
 private fun lastTrained(summary: MachineSummary): String {

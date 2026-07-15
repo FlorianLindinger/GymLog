@@ -8,8 +8,15 @@ import org.json.JSONArray
 import org.json.JSONObject
 
 class GymRepository(context: Context) {
-    private val db = GymDatabase(context.applicationContext)
-    private val preferences = context.applicationContext.getSharedPreferences("gymlog_settings", Context.MODE_PRIVATE)
+    private val appContext = context.applicationContext
+    private val db = GymDatabase(appContext)
+    private val preferences = appContext.getSharedPreferences(GYMLOG_PREFERENCES, Context.MODE_PRIVATE)
+
+    fun automaticBackupEnabled(): Boolean = automaticBackupEnabled(appContext)
+
+    fun setAutomaticBackupEnabled(enabled: Boolean) {
+        setAutomaticBackupEnabled(appContext, enabled)
+    }
 
     fun loadProgressionSettings(): ProgressionSettings = ProgressionSettings(
         staleWeeks = preferences.getInt("progress_stale_weeks", 4),

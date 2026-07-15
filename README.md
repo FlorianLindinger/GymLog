@@ -2,6 +2,18 @@
 
 GymLog is a private, offline Android workout tracker built with Kotlin, Jetpack Compose, and SQLite. It supports multiple training plans, weight-, level-, and duration-based exercises, detailed history management, progression warnings, and local JSON backups.
 
+## Screenshots
+
+| Exercise overview | Exercise details |
+| --- | --- |
+| <img src="docs/screenshots/overview.png" alt="GymLog exercise overview" width="320"> | <img src="docs/screenshots/exercise-detail.png" alt="GymLog exercise details" width="320"> |
+
+| Calendar and history | Training statistics |
+| --- | --- |
+| <img src="docs/screenshots/history.png" alt="GymLog calendar and training history" width="320"> | <img src="docs/screenshots/statistics.png" alt="GymLog training statistics" width="320"> |
+
+Screenshots use sample workout data.
+
 ## Requirements
 
 - Android Studio with Android SDK 35
@@ -26,6 +38,19 @@ $env:JAVA_HOME = "C:\Program Files\Java\jdk-21.0.10"
 ```
 
 The debug APK will be written to `app\build\outputs\apk\debug\app-debug.apk`.
+
+## Development helper scripts
+
+- `run_on_phone.bat` builds, installs, and launches GymLog on an authorized USB device.
+- `verify.bat` compiles the app, runs tests and Android lint, builds the debug APK, and checks Git whitespace.
+- `device_check.bat` lists connected devices and prints Android and installed-app versions.
+- `logcat.bat` restarts GymLog and follows only its current process logs.
+- `screenshot.bat` saves a timestamped device screenshot under `screenshots\`.
+- `release.bat VERSION` verifies and builds a signed APK and AAB, writes SHA-256 checksums, and can create a local version tag.
+
+Device scripts accept an optional ADB serial, for example `device_check.bat R3CT...`, when multiple phones or emulators are connected.
+
+Release signing is read only from the environment. Set `GYMLOG_KEYSTORE_FILE`, `GYMLOG_KEYSTORE_PASSWORD`, `GYMLOG_KEY_ALIAS`, and `GYMLOG_KEY_PASSWORD`; never commit a keystore or its passwords. Official verification also runs automatically on pushes and pull requests through GitHub Actions.
 
 ## Install it on an Android phone
 

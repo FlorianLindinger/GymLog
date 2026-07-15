@@ -4,6 +4,13 @@ plugins {
     id("org.jetbrains.kotlin.plugin.compose")
 }
 
+val releaseSigningConfigured = listOf(
+    "GYMLOG_KEYSTORE_FILE",
+    "GYMLOG_KEYSTORE_PASSWORD",
+    "GYMLOG_KEY_ALIAS",
+    "GYMLOG_KEY_PASSWORD",
+).all { !System.getenv(it).isNullOrBlank() }
+
 android {
     namespace = "com.gymlog.app"
     compileSdk = 35
@@ -23,6 +30,31 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
     kotlinOptions { jvmTarget = "17" }
+
+    signingConfigs {
+        if (releaseSigningConfigured) {
+            create("release") {
+                storeFile = file(System.getenv("GYMLOG_KEYSTORE_FILE"))
+                storePassword = System.getenv("GYMLOG_KEYSTORE_PASSWORD")
+                keyAlias = System.getenv("GYMLOG_KEY_ALIAS")
+                keyPassword = System.getenv("GYMLOG_KEY_PASSWORD")
+            }
+        }
+    }
+
+    buildTypes {
+        getByName("release") {
+            if (releaseSigningConfigured) signingConfig = signingConfigs.getByName("release")
+        }
+    }
+
+    lint {
+        abortOnError = true
+        checkReleaseBuilds = true
+        htmlReport = true
+        textReport = true
+        warningsAsErrors = false
+    }
 
     packaging {
         resources.excludes += "/META-INF/{AL2.0,LGPL2.1}"

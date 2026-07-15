@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
@@ -17,6 +18,7 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -25,6 +27,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
@@ -46,8 +49,9 @@ fun GymLogApp(
     var history by remember { mutableStateOf(repository.loadHistory()) }
     var areaColors by remember { mutableStateOf(repository.loadAreaColors()) }
     var trainingPlans by remember { mutableStateOf(repository.loadTrainingPlans()) }
-    var activeTrainingPlanId by remember { mutableStateOf(repository.activeTrainingPlanId()) }
+    var activeTrainingPlanId by remember { mutableLongStateOf(repository.activeTrainingPlanId()) }
     var progressionSettings by remember { mutableStateOf(repository.loadProgressionSettings()) }
+    var automaticBackupEnabled by remember { mutableStateOf(repository.automaticBackupEnabled()) }
     var screen by remember { mutableStateOf(Screen.OVERVIEW) }
     var selectedId by remember { mutableStateOf<Long?>(null) }
     var showAdd by remember { mutableStateOf(false) }
@@ -61,6 +65,7 @@ fun GymLogApp(
         trainingPlans = repository.loadTrainingPlans()
         activeTrainingPlanId = repository.activeTrainingPlanId()
         progressionSettings = repository.loadProgressionSettings()
+        automaticBackupEnabled = repository.automaticBackupEnabled()
     }
     LaunchedEffect(externalDataVersion) { refresh() }
 
@@ -178,6 +183,11 @@ fun GymLogApp(
             )
             Screen.BACKUP -> BackupScreen(
                 modifier = Modifier.padding(padding),
+                automaticBackupEnabled = automaticBackupEnabled,
+                onAutomaticBackupChanged = {
+                    repository.setAutomaticBackupEnabled(it)
+                    automaticBackupEnabled = it
+                },
                 onExport = onExport,
                 onImport = { confirmImport = true },
             )
@@ -219,12 +229,7 @@ fun GymLogApp(
                 TextButton(onClick = { showMenu = false; screen = Screen.HISTORY }) { Text("Calendar & history") }
                 TextButton(onClick = { showMenu = false; screen = Screen.REORDER }) { Text("Change exercise order") }
                 TextButton(onClick = { showMenu = false; screen = Screen.PLANS }) { Text("Training plans") }
-                TextButton(onClick = { showMenu = false; onExport() }) { Text("Download backup / save to Drive") }
-                TextButton(onClick = { showMenu = false; confirmImport = true }) { Text("Upload backup / open from Drive") }
-                Text(
-                    "Choose Google Drive in the Android file picker for manual cross-phone sync.",
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+                TextButton(onClick = { showMenu = false; screen = Screen.BACKUP }) { Text("Data, backup & sync") }
             }
         },
         confirmButton = { TextButton(onClick = { showMenu = false }) { Text("Close") } },
@@ -270,15 +275,37 @@ private fun ReorderScreen(
 }
 
 @Composable
-private fun BackupScreen(modifier: Modifier = Modifier, onExport: () -> Unit, onImport: () -> Unit) {
+private fun BackupScreen(
+    modifier: Modifier = Modifier,
+    automaticBackupEnabled: Boolean,
+    onAutomaticBackupChanged: (Boolean) -> Unit,
+    onExport: () -> Unit,
+    onImport: () -> Unit,
+) {
     Column(
         modifier = modifier.fillMaxSize().padding(20.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
-        Text("Keep your progress portable", style = MaterialTheme.typography.headlineSmall)
-        Text("A backup includes every training plan, exercise, order, note, body area, weight history, set history, and app setting. The file is readable JSON and stays under your control.")
+        Text("Backup & sync", style = MaterialTheme.typography.headlineSmall)
+        Row(Modifier.fillMaxWidth(), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text("Android automatic backup", style = MaterialTheme.typography.titleMedium)
+                Text(
+                    if (automaticBackupEnabled) "On · included in future Android backups" else "Off · future Android backups skip GymLog data",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
+            Switch(checked = automaticBackupEnabled, onCheckedChange = onAutomaticBackupChanged)
+        }
+        Text(
+            "This is not live sync. Android decides when an automatic backup runs and may restore it after reinstalling the app or while setting up another phone. Changes do not immediately appear on a second phone.",
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Text("Manual file backup", style = MaterialTheme.typography.titleMedium)
+        Text("Export creates a readable JSON copy containing every plan, exercise, note, body area, metric change, and set. Choose Google Drive in the file picker if you want to move it between phones yourself.")
         Button(onClick = onExport) { Text("Download backup") }
         androidx.compose.material3.OutlinedButton(onClick = onImport) { Text("Upload and restore backup") }
-        Text("Tip: save an occasional copy to cloud storage or another device. Restoring replaces the data currently on this phone.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text("Restoring a manual file replaces the data currently on this phone. Automatic Android backup is unaffected by manual export and restore.", color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }

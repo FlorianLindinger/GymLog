@@ -11,6 +11,8 @@ cd /d "%~dp0"
 
 set "APK=%~dp0app\build\outputs\apk\debug\app-debug.apk"
 set "ADB=%LOCALAPPDATA%\Android\Sdk\platform-tools\adb.exe"
+set "ADB_TARGET="
+if not "%~1"=="" set "ADB_TARGET=-s %~1"
 
 echo ============================================================
 echo                  GymLog USB installation
@@ -40,7 +42,7 @@ if not exist "%APK%" (
 
 echo Looking for an authorized Android phone...
 "%ADB%" start-server >nul 2>&1
-"%ADB%" get-state >nul 2>&1
+"%ADB%" %ADB_TARGET% get-state >nul 2>&1
 if errorlevel 1 (
     echo.
     echo No authorized phone was found.
@@ -54,7 +56,7 @@ if errorlevel 1 (
 )
 
 echo Installing GymLog without deleting existing app data...
-"%ADB%" install -r "%APK%"
+"%ADB%" %ADB_TARGET% install -r "%APK%"
 if errorlevel 1 (
     echo.
     echo INSTALL FAILED
@@ -64,7 +66,7 @@ if errorlevel 1 (
 )
 
 echo Launching GymLog...
-"%ADB%" shell am start -n com.gymlog.app/.MainActivity >nul
+"%ADB%" %ADB_TARGET% shell am start -n com.gymlog.app/.MainActivity >nul
 
 echo.
 echo INSTALL SUCCESSFUL
