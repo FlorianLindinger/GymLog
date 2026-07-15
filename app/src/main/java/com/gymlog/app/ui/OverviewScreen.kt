@@ -334,6 +334,8 @@ private fun MachineCard(
     var quickReps by remember(summary.machine.id) { mutableStateOf(false) }
     var changeMetric by remember(summary.machine.id) { mutableStateOf(false) }
     val trainedToday = wasTrainedToday(summary, today, zone)
+    val currentUnitSets = currentTrainingUnitSets(summary)
+    val isChangingTrainingUnit = currentUnitSets.isNotEmpty()
     val clash = if (!trainedToday && lastExerciseToday != null) strongestClash(summary, lastExerciseToday) else null
     Card(
         modifier = modifier.fillMaxWidth().clickable { onMachine(summary.machine.id) },
@@ -370,7 +372,11 @@ private fun MachineCard(
             }
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    if (isDirectMetric(summary.machine.trackingMode)) "+ TRAINING" else "+ SET",
+                    when {
+                        isChangingTrainingUnit -> "CHANGE"
+                        isDirectMetric(summary.machine.trackingMode) -> "+ TRAINING"
+                        else -> "+ SETS"
+                    },
                     modifier = Modifier.clickable { quickReps = true }.padding(horizontal = 8.dp, vertical = 2.dp),
                     style = MaterialTheme.typography.labelLarge,
                     color = MaterialTheme.colorScheme.primary,
@@ -395,13 +401,16 @@ private fun MachineCard(
     if (quickReps) {
         if (isDirectMetric(summary.machine.trackingMode)) {
             QuickTrainingDialog(
-                initialMinutes = (summary.recentSets.firstOrNull()?.weight ?: 0.0).toInt(),
+                initialMinutes = (currentUnitSets.firstOrNull() ?: summary.recentSets.firstOrNull())?.weight?.toInt() ?: 0,
+                isChange = isChangingTrainingUnit,
                 onDismiss = { quickReps = false },
                 onAdd = { onQuickSet(summary, listOf(it)); quickReps = false },
             )
         } else {
             QuickRepDialog(
-                previousReps = previousReps(summary),
+                initialReps = initialWheelReps(summary, currentUnitSets),
+                lastReps = previousTrainingUnitReps(summary, currentUnitSets),
+                isChange = isChangingTrainingUnit,
                 onDismiss = { quickReps = false },
                 onAdd = { onQuickSet(summary, it); quickReps = false },
             )
@@ -525,12 +534,12 @@ fun groupSetBatches(sets: List<SetRecord>): List<List<SetRecord>> {
 }
 
 @Composable
-fun QuickTrainingDialog(initialMinutes: Int, onDismiss: () -> Unit, onAdd: (Int) -> Unit) {
+fun QuickTrainingDialog(initialMinutes: Int, isChange: Boolean = false, onDismiss: () -> Unit, onAdd: (Int) -> Unit) {
     var value by remember(initialMinutes) { mutableStateOf(initialMinutes.coerceAtLeast(0).toString()) }
     val level = value.toIntOrNull()
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Log training") },
+        title = { Text(if (isChange) "Change training" else "Log training") },
         text = {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedButton(onClick = { value = ((level ?: 0) - 1).coerceAtLeast(0).toString() }) { Text("−1") }
@@ -564,36 +573,54 @@ private fun sessionTrendColor(summary: MachineSummary): Color {
     }
 }
 
-fun previousReps(summary: MachineSummary): List<Int> {
-    val newest = summary.recentSets.firstOrNull() ?: return emptyList()
-    val zone = ZoneId.systemDefault()
-    val date = newest.performedDate(zone)
+private const val TRAINING_UNIT_MILLIS = 6L * 60L * 60L * 1000L
+
+fun currentTrainingUnitSets(summary: MachineSummary, now: Long = System.currentTimeMillis()): List<SetRecord> =
+    summary.recentSets.filter { it.performedAt >= now - TRAINING_UNIT_MILLIS }.sortedBy { it.performedAt }
+
+fun previousTrainingUnitReps(summary: MachineSummary, current: List<SetRecord> = currentTrainingUnitSets(summary)): List<Int> {
+    val currentIds = current.mapTo(mutableSetOf()) { it.id }
+    val previousNewest = summary.recentSets.firstOrNull { it.id !in currentIds } ?: return emptyList()
     return summary.recentSets
-        .filter { it.performedDate(zone) == date }
+        .filter { it.id !in currentIds && it.performedAt >= previousNewest.performedAt - TRAINING_UNIT_MILLIS }
         .sortedBy { it.performedAt }
         .map { it.reps }
         .takeLast(5)
 }
 
+fun initialWheelReps(summary: MachineSummary, current: List<SetRecord> = currentTrainingUnitSets(summary)): List<Int> {
+    val base = when {
+        current.isNotEmpty() -> summary.setWheelValues ?: current.map { it.reps }
+        summary.setWheelValues != null -> summary.setWheelValues
+        else -> previousTrainingUnitReps(summary, current).ifEmpty { listOf(10, 10, 10) }
+    }
+    return (base.take(5) + List(5) { 0 }).take(5)
+}
+
 @Composable
-fun QuickRepDialog(previousReps: List<Int>, onDismiss: () -> Unit, onAdd: (List<Int>) -> Unit) {
-    val initial = if (previousReps.isEmpty()) listOf(10, 10, 10, 0, 0) else previousReps.take(5) + List((5 - previousReps.size).coerceAtLeast(0)) { 0 }
-    val reps = remember(previousReps) { mutableStateListOf<Int>().apply { addAll(initial.take(5)) } }
+fun QuickRepDialog(
+    initialReps: List<Int>,
+    lastReps: List<Int>,
+    isChange: Boolean = false,
+    onDismiss: () -> Unit,
+    onAdd: (List<Int>) -> Unit,
+) {
+    val reps = remember(initialReps) { mutableStateListOf<Int>().apply { addAll((initialReps + List(5) { 0 }).take(5)) } }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Log up to 5 sets") },
+        title = { Text(if (isChange) "Change sets" else "Log up to 5 sets") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
                     reps.indices.forEach { index ->
                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Text("${index + 1}", style = MaterialTheme.typography.labelSmall)
                             AndroidView(
                                 modifier = Modifier.width(52.dp).height(132.dp),
                                 factory = { context ->
                                     NumberPicker(context).apply {
                                         minValue = 0
                                         maxValue = 15
+                                        displayedValues = arrayOf("None") + (1..15).map(Int::toString)
                                         wrapSelectorWheel = true
                                         value = reps[index]
                                         setOnValueChangedListener { _, _, newValue -> reps[index] = newValue }
@@ -604,10 +631,10 @@ fun QuickRepDialog(previousReps: List<Int>, onDismiss: () -> Unit, onAdd: (List<
                         }
                     }
                 }
-                Text("Sets: ${reps.filter { it > 0 }.joinToString(",").ifEmpty { "none" }}", style = MaterialTheme.typography.labelLarge)
+                Text("Last: ${lastReps.joinToString(",").ifEmpty { "None" }}", style = MaterialTheme.typography.labelLarge)
             }
         },
-        confirmButton = { Button(onClick = { onAdd(reps.toList()) }, enabled = reps.any { it > 0 }) { Text("Save sets") } },
+        confirmButton = { Button(onClick = { onAdd(reps.toList()) }, enabled = isChange || reps.any { it > 0 }) { Text("Save sets") } },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
     )
 }

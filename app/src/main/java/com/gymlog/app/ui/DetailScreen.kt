@@ -1,9 +1,9 @@
 package com.gymlog.app.ui
 
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -41,7 +41,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
-import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
@@ -52,6 +53,7 @@ import com.gymlog.app.data.MachineSummary
 import com.gymlog.app.data.SetRecord
 import com.gymlog.app.data.Strength
 import com.gymlog.app.data.WeightChange
+import com.gymlog.app.R
 import java.time.Duration
 import java.time.Instant
 import java.time.ZoneId
@@ -77,6 +79,8 @@ fun DetailScreen(
     var editingSet by remember { mutableStateOf<SetRecord?>(null) }
     var expandedBatch by remember { mutableStateOf<Long?>(null) }
     val machine = summary.machine
+    val currentUnitSets = currentTrainingUnitSets(summary)
+    val isChangingTrainingUnit = currentUnitSets.isNotEmpty()
     val highest = summary.weightChanges.maxOfOrNull { it.weight } ?: machine.currentWeight
     val first = summary.weightChanges.lastOrNull()?.weight ?: machine.currentWeight
     val lastChange = summary.weightChanges.firstOrNull()?.changedAt
@@ -133,9 +137,10 @@ fun DetailScreen(
                     Text("Edit", Modifier.clickable { showEdit = true }.padding(horizontal = 8.dp, vertical = 4.dp), color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelLarge)
                 }
                 Button(onClick = { showQuickSet = true }, modifier = Modifier.fillMaxWidth()) {
-                    Text(when (machine.trackingMode) {
-                        "STRENGTH", "DURATION" -> "+ Training"
-                        else -> "+ Log reps at ${formatMetric(machine.currentWeight, machine.trackingMode)}"
+                    Text(when {
+                        isChangingTrainingUnit -> "Change"
+                        isDirectMetric(machine.trackingMode) -> "+ Training"
+                        else -> "+ Sets at ${formatMetric(machine.currentWeight, machine.trackingMode)}"
                     })
                 }
                 val recentAmounts = summary.recentSets.map { it.reps }.distinct().take(3)
@@ -242,7 +247,8 @@ fun DetailScreen(
     if (showQuickSet) {
         if (isDirectMetric(machine.trackingMode)) {
             QuickTrainingDialog(
-                initialMinutes = (summary.recentSets.firstOrNull()?.weight ?: 0.0).toInt(),
+                initialMinutes = (currentUnitSets.firstOrNull() ?: summary.recentSets.firstOrNull())?.weight?.toInt() ?: 0,
+                isChange = isChangingTrainingUnit,
                 onDismiss = { showQuickSet = false },
                 onAdd = {
                     repository.addTrainingMinutes(machine.id, it)
@@ -252,7 +258,9 @@ fun DetailScreen(
             )
         } else {
             QuickRepDialog(
-                previousReps = previousReps(summary),
+                initialReps = initialWheelReps(summary, currentUnitSets),
+                lastReps = previousTrainingUnitReps(summary, currentUnitSets),
+                isChange = isChangingTrainingUnit,
                 onDismiss = { showQuickSet = false },
                 onAdd = {
                     repository.addSets(machine.id, it, machine.currentWeight)
@@ -458,13 +466,6 @@ private fun AreaDialog(
         }
     }
     var colorArea by remember { mutableStateOf<BodyArea?>(null) }
-    fun cycle(area: BodyArea) {
-        choices[area] = when (choices[area]) {
-            null -> Strength.HALF
-            Strength.HALF -> Strength.FULL
-            Strength.FULL -> null
-        }
-    }
     val sortedAreas = BodyArea.entries.sortedWith(
         compareByDescending<BodyArea> { usage[it] ?: 0 }.thenBy { it.label },
     )
@@ -473,12 +474,11 @@ private fun AreaDialog(
         title = { Text("Training areas") },
         text = {
             Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text("Tap a colored body region to cycle: none → half → full.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("Selected areas are previewed on the anatomy image. Use the Half and Full controls below to make changes.", color = MaterialTheme.colorScheme.onSurfaceVariant)
                 BodyMapPicker(
                     choices = choices,
                     colors = colors,
-                    onArea = ::cycle,
-                    modifier = Modifier.fillMaxWidth().height(280.dp),
+                    modifier = Modifier.fillMaxWidth().aspectRatio(1.5f),
                 )
                 Text("Most-used areas appear first. Tap a color dot to change it.", style = MaterialTheme.typography.bodySmall)
                 sortedAreas.forEach { area ->
@@ -517,28 +517,18 @@ private fun AreaDialog(
 private fun BodyMapPicker(
     choices: Map<BodyArea, Strength?>,
     colors: Map<BodyArea, Long>,
-    onArea: (BodyArea) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Box(modifier, contentAlignment = Alignment.Center) {
-        val baseColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = .32f)
-        Canvas(
-            modifier = Modifier.fillMaxSize().pointerInput(Unit) {
-                detectTapGestures { position ->
-                    areaFromBodyMap(position.x / size.width, position.y / size.height)?.let(onArea)
-                }
-            },
-        ) {
-            fun drawFigure(cx: Float) {
-                drawCircle(baseColor, radius = size.width * .035f, center = Offset(size.width * cx, size.height * .12f))
-                drawRoundRect(baseColor, Offset(size.width * (cx - .065f), size.height * .19f), androidx.compose.ui.geometry.Size(size.width * .13f, size.height * .34f), androidx.compose.ui.geometry.CornerRadius(18f, 18f))
-                drawLine(baseColor, Offset(size.width * (cx - .06f), size.height * .24f), Offset(size.width * (cx - .15f), size.height * .48f), strokeWidth = size.width * .035f, cap = StrokeCap.Round)
-                drawLine(baseColor, Offset(size.width * (cx + .06f), size.height * .24f), Offset(size.width * (cx + .15f), size.height * .48f), strokeWidth = size.width * .035f, cap = StrokeCap.Round)
-                drawLine(baseColor, Offset(size.width * (cx - .035f), size.height * .50f), Offset(size.width * (cx - .07f), size.height * .92f), strokeWidth = size.width * .05f, cap = StrokeCap.Round)
-                drawLine(baseColor, Offset(size.width * (cx + .035f), size.height * .50f), Offset(size.width * (cx + .07f), size.height * .92f), strokeWidth = size.width * .05f, cap = StrokeCap.Round)
-            }
+        Image(
+            painter = painterResource(R.drawable.body_anatomy),
+            contentDescription = "Front and back muscular anatomy reference",
+            modifier = Modifier.fillMaxSize(),
+            contentScale = ContentScale.FillBounds,
+        )
+        Canvas(modifier = Modifier.fillMaxSize()) {
             fun selectedColor(area: BodyArea): Color? = choices[area]?.let { strength ->
-                Color(colors[area] ?: area.color).copy(alpha = if (strength == Strength.FULL) .95f else .55f)
+                Color(colors[area] ?: area.color).copy(alpha = if (strength == Strength.FULL) .58f else .30f)
             }
             fun region(area: BodyArea, x: Float, y: Float, width: Float, height: Float) {
                 selectedColor(area)?.let { color ->
@@ -549,28 +539,26 @@ private fun BodyMapPicker(
                 selectedColor(area)?.let { color -> drawLine(color, Offset(size.width * startX, size.height * startY), Offset(size.width * endX, size.height * endY), strokeWidth = size.width * width, cap = StrokeCap.Round) }
             }
 
-            drawFigure(.25f)
-            drawFigure(.75f)
-            region(BodyArea.CHEST, .19f, .25f, .12f, .11f)
-            region(BodyArea.CORE, .20f, .37f, .10f, .14f)
-            limb(BodyArea.SHOULDERS, .16f, .25f, .34f, .25f, .055f)
-            limb(BodyArea.BICEPS, .15f, .29f, .11f, .42f, .035f)
-            limb(BodyArea.BICEPS, .35f, .29f, .39f, .42f, .035f)
-            limb(BodyArea.QUADS, .215f, .57f, .19f, .73f, .045f)
-            limb(BodyArea.QUADS, .285f, .57f, .31f, .73f, .045f)
-            limb(BodyArea.CALVES, .19f, .76f, .18f, .90f, .035f)
-            limb(BodyArea.CALVES, .31f, .76f, .32f, .90f, .035f)
+            region(BodyArea.CHEST, .245f, .22f, .12f, .10f)
+            region(BodyArea.CORE, .265f, .33f, .08f, .15f)
+            limb(BodyArea.SHOULDERS, .215f, .22f, .395f, .22f, .052f)
+            limb(BodyArea.BICEPS, .215f, .27f, .185f, .42f, .032f)
+            limb(BodyArea.BICEPS, .395f, .27f, .425f, .42f, .032f)
+            limb(BodyArea.QUADS, .275f, .54f, .265f, .71f, .040f)
+            limb(BodyArea.QUADS, .335f, .54f, .345f, .71f, .040f)
+            limb(BodyArea.CALVES, .265f, .74f, .255f, .89f, .030f)
+            limb(BodyArea.CALVES, .345f, .74f, .355f, .89f, .030f)
 
-            limb(BodyArea.SHOULDERS, .66f, .25f, .84f, .25f, .055f)
-            region(BodyArea.UPPER_BACK, .69f, .25f, .12f, .14f)
-            region(BodyArea.LOWER_BACK, .70f, .39f, .10f, .12f)
-            limb(BodyArea.TRICEPS, .65f, .29f, .61f, .42f, .035f)
-            limb(BodyArea.TRICEPS, .85f, .29f, .89f, .42f, .035f)
-            region(BodyArea.GLUTES, .68f, .50f, .14f, .10f)
-            limb(BodyArea.HAMSTRINGS, .715f, .61f, .69f, .75f, .045f)
-            limb(BodyArea.HAMSTRINGS, .785f, .61f, .81f, .75f, .045f)
-            limb(BodyArea.CALVES, .69f, .77f, .68f, .90f, .035f)
-            limb(BodyArea.CALVES, .81f, .77f, .82f, .90f, .035f)
+            limb(BodyArea.SHOULDERS, .615f, .22f, .785f, .22f, .052f)
+            region(BodyArea.UPPER_BACK, .65f, .23f, .10f, .13f)
+            region(BodyArea.LOWER_BACK, .66f, .36f, .08f, .11f)
+            limb(BodyArea.TRICEPS, .615f, .27f, .59f, .42f, .032f)
+            limb(BodyArea.TRICEPS, .785f, .27f, .81f, .42f, .032f)
+            region(BodyArea.GLUTES, .64f, .47f, .12f, .10f)
+            limb(BodyArea.HAMSTRINGS, .665f, .59f, .655f, .73f, .040f)
+            limb(BodyArea.HAMSTRINGS, .735f, .59f, .745f, .73f, .040f)
+            limb(BodyArea.CALVES, .655f, .74f, .645f, .89f, .030f)
+            limb(BodyArea.CALVES, .745f, .74f, .755f, .89f, .030f)
         }
         Row(Modifier.align(Alignment.TopCenter).fillMaxWidth(), horizontalArrangement = Arrangement.SpaceAround) {
             Text("Front", style = MaterialTheme.typography.labelMedium)

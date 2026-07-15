@@ -183,6 +183,7 @@ class GymRepository(context: Context) {
                 recentSets = loadSets(database, machine.id, null),
                 weightChanges = loadWeights(database, machine.id),
                 setsLast30Days = countRecentSets(database, machine.id),
+                setWheelValues = loadSetWheelValues(machine.id),
             )
         }
     }
@@ -272,18 +273,31 @@ class GymRepository(context: Context) {
             require(cursor.moveToFirst()) { "Exercise does not exist" }
             if (cursor.getString(0) == "STRENGTH") cursor.getDouble(1).roundToInt().coerceAtLeast(1) else 1
         }
-        database.insertOrThrow("sets", null, ContentValues().apply {
-            put("machine_id", machineId)
-            put("reps", recordedLevel)
-            put("weight", minutes.toDouble())
-            put("performed_at", System.currentTimeMillis())
-        })
+        val now = System.currentTimeMillis()
+        database.transaction {
+            database.delete(
+                "sets",
+                "machine_id=? AND performed_at>=?",
+                arrayOf(machineId.toString(), (now - TRAINING_UNIT_MILLIS).toString()),
+            )
+            database.insertOrThrow("sets", null, ContentValues().apply {
+                put("machine_id", machineId)
+                put("reps", recordedLevel)
+                put("weight", minutes.toDouble())
+                put("performed_at", now)
+            })
+        }
     }
 
     fun addSets(machineId: Long, reps: List<Int>, weight: Double) {
         val database = db.writableDatabase
         val now = System.currentTimeMillis()
         database.transaction {
+            database.delete(
+                "sets",
+                "machine_id=? AND performed_at>=?",
+                arrayOf(machineId.toString(), (now - TRAINING_UNIT_MILLIS).toString()),
+            )
             reps.filter { it > 0 }.forEachIndexed { index, amount ->
                 database.insertOrThrow("sets", null, ContentValues().apply {
                     put("machine_id", machineId)
@@ -293,7 +307,16 @@ class GymRepository(context: Context) {
                 })
             }
         }
+        preferences.edit().putString(setWheelPreference(machineId), reps.take(5).joinToString(",")).apply()
     }
+
+    private fun loadSetWheelValues(machineId: Long): List<Int>? = preferences
+        .getString(setWheelPreference(machineId), null)
+        ?.split(',')
+        ?.mapNotNull(String::toIntOrNull)
+        ?.takeIf { it.size == 5 }
+
+    private fun setWheelPreference(machineId: Long): String = "set_wheels_$machineId"
 
     fun deleteSet(id: Long) {
         db.writableDatabase.delete("sets", "id=?", arrayOf(id.toString()))
@@ -600,6 +623,7 @@ class GymRepository(context: Context) {
 }
 
 private const val GYMLOG_DATABASE = "gymlog.db"
+private const val TRAINING_UNIT_MILLIS = 6L * 60L * 60L * 1000L
 
 private class GymDatabase(context: Context) : SQLiteOpenHelper(context, GYMLOG_DATABASE, null, 7) {
     override fun onCreate(db: SQLiteDatabase) {

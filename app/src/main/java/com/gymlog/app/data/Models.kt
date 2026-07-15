@@ -14,17 +14,17 @@ data class Machine(
 )
 
 enum class BodyArea(val label: String, val color: Long) {
-    CHEST("Chest", 0xFFE85D75),
-    UPPER_BACK("Upper back", 0xFF4D8DD6),
-    LOWER_BACK("Lower back", 0xFF2F6690),
-    SHOULDERS("Shoulders", 0xFFFFA62B),
-    BICEPS("Biceps", 0xFF9B72CF),
-    TRICEPS("Triceps", 0xFFCB6CE6),
-    CORE("Core", 0xFFF2C14E),
-    GLUTES("Glutes", 0xFFE76FAD),
-    QUADS("Quads", 0xFF43AA8B),
-    HAMSTRINGS("Hamstrings", 0xFF277DA1),
-    CALVES("Calves", 0xFF90BE6D),
+    CHEST("Chest", 0xFFFF1744),
+    UPPER_BACK("Upper back", 0xFF2979FF),
+    LOWER_BACK("Lower back", 0xFF00E5FF),
+    SHOULDERS("Shoulders", 0xFFFF9100),
+    BICEPS("Biceps", 0xFF651FFF),
+    TRICEPS("Triceps", 0xFFF500D4),
+    CORE("Core", 0xFFFFEA00),
+    GLUTES("Glutes", 0xFF00BFA5),
+    QUADS("Quads", 0xFF00E676),
+    HAMSTRINGS("Hamstrings", 0xFFFF6D00),
+    CALVES("Calves", 0xFFAEEA00),
 }
 
 enum class Strength(val label: String, val value: Double) {
@@ -81,6 +81,7 @@ data class MachineSummary(
     val recentSets: List<SetRecord>,
     val weightChanges: List<WeightChange>,
     val setsLast30Days: Int,
+    val setWheelValues: List<Int>? = null,
 )
 
 fun MachineSummary.weightIncreases(): List<WeightIncrease> = weightChanges
