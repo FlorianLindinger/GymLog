@@ -38,6 +38,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
+import com.gymlog.app.BuildConfig
 import com.gymlog.app.data.BodyArea
 import com.gymlog.app.data.BackupSyncStatus
 import com.gymlog.app.data.GymRepository
@@ -93,6 +94,7 @@ fun GymLogApp(
     var confirmImport by remember { mutableStateOf(false) }
     var showProgressionSettings by remember { mutableStateOf(false) }
     var showAccentColor by remember { mutableStateOf(false) }
+    var showPlanNotes by remember { mutableStateOf(false) }
     var showExerciseName by remember { mutableStateOf(false) }
     var showExerciseTitleNote by remember { mutableStateOf(false) }
 
@@ -118,6 +120,7 @@ fun GymLogApp(
         return
     }
     val uiState = uiStateResult.getOrThrow()
+    val activePlan = uiState.trainingPlans.firstOrNull { it.id == uiState.activeTrainingPlanId }
 
     val selected = uiState.machines.firstOrNull { it.machine.id == selectedId }
     val areaFrequency = remember(uiState.machines) {
@@ -131,9 +134,20 @@ fun GymLogApp(
         if (screen == Screen.DETAIL && selected == null) screen = Screen.OVERVIEW
     }
 
+    fun navigateBack() {
+        when (screen) {
+            Screen.HISTORY -> screen = Screen.STATS
+            Screen.PLANS, Screen.BACKUP -> {
+                screen = Screen.OVERVIEW
+                showMenu = true
+            }
+            else -> screen = Screen.OVERVIEW
+        }
+        if (screen != Screen.DETAIL) selectedId = null
+    }
+
     BackHandler(enabled = screen != Screen.OVERVIEW) {
-        screen = Screen.OVERVIEW
-        selectedId = null
+        navigateBack()
     }
 
     Scaffold(
@@ -168,10 +182,8 @@ fun GymLogApp(
                 navigationIcon = {
                     if (screen != Screen.OVERVIEW) TextButton(
                         colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.onPrimary),
-                        onClick = {
-                        screen = Screen.OVERVIEW
-                        selectedId = null
-                    }) { Text("‹ Back") }
+                        onClick = ::navigateBack,
+                    ) { Text("‹ Back") }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = MaterialTheme.colorScheme.primary,
@@ -185,7 +197,9 @@ fun GymLogApp(
         when (screen) {
             Screen.OVERVIEW -> OverviewScreen(
                 machines = uiState.machines,
-                activePlanName = uiState.trainingPlans.firstOrNull { it.id == uiState.activeTrainingPlanId }?.name ?: "Training plan",
+                activePlanName = activePlan?.name ?: "Training plan",
+                activePlanNotes = activePlan?.notes.orEmpty(),
+                activePlanNotesPinned = activePlan?.notesPinned == true,
                 modifier = Modifier.padding(padding),
                 onMachine = {
                     selectedId = it
@@ -296,12 +310,31 @@ fun GymLogApp(
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 TextButton(onClick = { showMenu = false; screen = Screen.PLANS }) { Text("Training plans") }
+                TextButton(onClick = { showMenu = false; showPlanNotes = true }) { Text("Training plan note") }
                 TextButton(onClick = { showMenu = false; showProgressionSettings = true }) { Text("Progress warnings") }
                 TextButton(onClick = { showMenu = false; screen = Screen.BACKUP }) { Text("Data, backup & sync") }
                 TextButton(onClick = { showMenu = false; showAccentColor = true }) { Text("UI color") }
+                androidx.compose.material3.HorizontalDivider()
+                Text(
+                    "Version ${BuildConfig.VERSION_NAME} · Built ${BuildConfig.BUILD_TIME}",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
         },
         confirmButton = { TextButton(onClick = { showMenu = false }) { Text("Close") } },
+    )
+
+    if (showPlanNotes && activePlan != null) TrainingPlanNotesDialog(
+        notes = activePlan.notes,
+        pinned = activePlan.notesPinned,
+        onDismiss = { showPlanNotes = false; showMenu = true },
+        onSave = { notes, pinned ->
+            repository.saveTrainingPlanNotes(activePlan.id, notes, pinned)
+            refresh()
+            showPlanNotes = false
+            showMenu = true
+        },
     )
 
     if (showProgressionSettings) ProgressionSettingsDialog(
@@ -487,27 +520,76 @@ private fun AccentColorDialog(
     onDismiss: () -> Unit,
     onSave: (Long) -> Unit,
 ) {
-    val initialHsv = remember(current) { FloatArray(3).also { android.graphics.Color.colorToHSV(current.toInt(), it) } }
-    var hue by remember(current) { mutableStateOf(initialHsv[0]) }
-    var saturation by remember(current) { mutableStateOf(initialHsv[1]) }
-    var brightness by remember(current) { mutableStateOf(initialHsv[2]) }
-    val selected = android.graphics.Color.HSVToColor(floatArrayOf(hue, saturation, brightness)).toLong() and 0xFFFFFFFFL
+    var red by remember(current) { mutableStateOf(android.graphics.Color.red(current.toInt()).toFloat()) }
+    var green by remember(current) { mutableStateOf(android.graphics.Color.green(current.toInt()).toFloat()) }
+    var blue by remember(current) { mutableStateOf(android.graphics.Color.blue(current.toInt()).toFloat()) }
+    val selected = 0xFF000000L or (red.toLong() shl 16) or (green.toLong() shl 8) or blue.toLong()
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("UI color") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Box(Modifier.fillMaxWidth().height(56.dp).background(Color(selected), androidx.compose.foundation.shape.RoundedCornerShape(12.dp)))
-                Text("Hue", style = MaterialTheme.typography.labelMedium)
-                androidx.compose.material3.Slider(value = hue, onValueChange = { hue = it }, valueRange = 0f..360f)
-                Text("Saturation", style = MaterialTheme.typography.labelMedium)
-                androidx.compose.material3.Slider(value = saturation, onValueChange = { saturation = it }, valueRange = 0f..1f)
-                Text("Brightness", style = MaterialTheme.typography.labelMedium)
-                androidx.compose.material3.Slider(value = brightness, onValueChange = { brightness = it }, valueRange = .2f..1f)
+                Text("Red ${red.toInt()}", style = MaterialTheme.typography.labelMedium)
+                androidx.compose.material3.Slider(
+                    value = red,
+                    onValueChange = { red = it },
+                    valueRange = 0f..255f,
+                    colors = androidx.compose.material3.SliderDefaults.colors(thumbColor = Color.Red, activeTrackColor = Color.Red, inactiveTrackColor = Color.Red.copy(alpha = .22f)),
+                )
+                Text("Green ${green.toInt()}", style = MaterialTheme.typography.labelMedium)
+                androidx.compose.material3.Slider(
+                    value = green,
+                    onValueChange = { green = it },
+                    valueRange = 0f..255f,
+                    colors = androidx.compose.material3.SliderDefaults.colors(thumbColor = Color(0xFF00A040), activeTrackColor = Color(0xFF00A040), inactiveTrackColor = Color(0xFF00A040).copy(alpha = .22f)),
+                )
+                Text("Blue ${blue.toInt()}", style = MaterialTheme.typography.labelMedium)
+                androidx.compose.material3.Slider(
+                    value = blue,
+                    onValueChange = { blue = it },
+                    valueRange = 0f..255f,
+                    colors = androidx.compose.material3.SliderDefaults.colors(thumbColor = Color.Blue, activeTrackColor = Color.Blue, inactiveTrackColor = Color.Blue.copy(alpha = .22f)),
+                )
                 Text("#${selected.toString(16).takeLast(6).uppercase()}", color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         },
         confirmButton = { Button(onClick = { onSave(selected) }) { Text("Apply") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
+}
+
+@Composable
+private fun TrainingPlanNotesDialog(
+    notes: String,
+    pinned: Boolean,
+    onDismiss: () -> Unit,
+    onSave: (String, Boolean) -> Unit,
+) {
+    var value by remember(notes) { mutableStateOf(notes) }
+    var isPinned by remember(pinned) { mutableStateOf(pinned) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Training plan note") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                androidx.compose.material3.OutlinedTextField(
+                    value = value,
+                    onValueChange = { value = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    minLines = 4,
+                    label = { Text("Note") },
+                )
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Pin below training time")
+                        Text("Show this note on the overview.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    Switch(checked = isPinned, onCheckedChange = { isPinned = it })
+                }
+            }
+        },
+        confirmButton = { Button(onClick = { onSave(value.trim(), isPinned) }) { Text("Save") } },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
     )
 }

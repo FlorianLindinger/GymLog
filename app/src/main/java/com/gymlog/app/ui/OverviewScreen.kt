@@ -79,6 +79,8 @@ import kotlinx.coroutines.delay
 fun OverviewScreen(
     machines: List<MachineSummary>,
     activePlanName: String,
+    activePlanNotes: String,
+    activePlanNotesPinned: Boolean,
     modifier: Modifier = Modifier,
     onMachine: (Long) -> Unit,
     onAdd: () -> Unit,
@@ -138,6 +140,13 @@ fun OverviewScreen(
                 verticalArrangement = Arrangement.spacedBy(6.dp),
             ) {
                 item(key = "training-duration") { TrainingDurationCard(machines, activePlanName, now, zone) }
+                if (activePlanNotesPinned && activePlanNotes.isNotBlank()) {
+                    item(key = "pinned-plan-notes") {
+                        Card(Modifier.fillMaxWidth()) {
+                            Text(activePlanNotes, Modifier.padding(horizontal = 12.dp, vertical = 8.dp))
+                        }
+                    }
+                }
                 items(orderedMachines, key = { it.machine.id }) { summary ->
                     val id = summary.machine.id
                     MachineCard(
@@ -218,20 +227,20 @@ private fun TrainingDurationCard(machines: List<MachineSummary>, activePlanName:
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Column(Modifier.weight(1f)) {
-                Text("$activePlanName · Training duration", style = MaterialTheme.typography.labelLarge)
+                Text(activePlanName, style = MaterialTheme.typography.labelLarge)
                 Text(
                     if (first == null) "Starts with your first entry"
                     else {
                         val startTime = Instant.ofEpochMilli(first).atZone(zone)
                         val endTime = Instant.ofEpochMilli(if (isActive) now else last!!).atZone(zone)
                         val formatter = if (startTime.toLocalDate() == endTime.toLocalDate()) clock else dateClock
-                        "${startTime.format(formatter)} – ${if (isActive) "Now" else endTime.format(formatter)}"
+                        "${startTime.format(formatter)} - ${if (isActive) "" else endTime.format(formatter)}"
                     },
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 Text(
-                    "$completedExercises of ${machines.size} exercises completed in this session",
+                    "$completedExercises/${machines.size} exercises",
                     style = MaterialTheme.typography.labelSmall,
                     color = if (completedExercises == machines.size) Color(0xFF2E7D32) else MaterialTheme.colorScheme.tertiary,
                 )
@@ -242,12 +251,6 @@ private fun TrainingDurationCard(machines: List<MachineSummary>, activePlanName:
                     style = MaterialTheme.typography.headlineMedium,
                     fontWeight = FontWeight.Bold,
                     color = MaterialTheme.colorScheme.onPrimaryContainer,
-                )
-                Text(
-                    "Training time",
-                    style = MaterialTheme.typography.labelSmall,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.secondary,
                 )
             }
         }
@@ -358,9 +361,11 @@ private fun MachineCard(
     val trainedInUnit = summary.recentSets.any { it.performedAt >= trainingUnitCutoff }
     val currentUnitSets = currentTrainingUnitSets(summary)
     val isChangingTrainingUnit = currentUnitSets.isNotEmpty()
+    val isLastDone = lastExerciseInUnit?.machine?.id == summary.machine.id
     val clash = if (!trainedInUnit && lastExerciseInUnit != null) strongestClash(summary, lastExerciseInUnit) else null
     val clashAreas = if (!trainedInUnit && lastExerciseInUnit != null) clashingAreas(summary, lastExerciseInUnit) else emptySet()
     val outlineColor = when {
+        isLastDone -> Color(0xFF1976D2)
         trainedInUnit -> sessionTrendColor(summary)
         clash != null && clash >= 1.0 -> Color(0xFFE53935)
         clash != null -> Color(0xFFFBC02D)
@@ -369,7 +374,7 @@ private fun MachineCard(
     Card(
         modifier = modifier.fillMaxWidth().clickable { onMachine(summary.machine.id) },
         elevation = CardDefaults.cardElevation(defaultElevation = if (isDragging) 10.dp else 1.dp),
-        border = BorderStroke(if (trainedInUnit) 1.5.dp else 2.5.dp, outlineColor),
+        border = BorderStroke(if (isLastDone) 3.dp else if (trainedInUnit) 1.5.dp else 2.5.dp, outlineColor),
     ) {
         Column(Modifier.padding(horizontal = 8.dp, vertical = 3.dp), verticalArrangement = Arrangement.spacedBy(0.dp)) {
             if (summary.areas.isNotEmpty()) {
@@ -722,8 +727,7 @@ private fun formatElapsed(totalMillis: Long): String {
     val totalSeconds = totalMillis / 1_000L
     val hours = totalSeconds / 3_600L
     val minutes = (totalSeconds % 3_600L) / 60L
-    val seconds = totalSeconds % 60L
-    return "$hours:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}"
+    return "$hours:${minutes.toString().padStart(2, '0')}"
 }
 
 fun isDirectMetric(trackingMode: String): Boolean = trackingMode == "STRENGTH" || trackingMode == "DURATION"

@@ -74,8 +74,14 @@ class GymRepository(context: Context) {
         val database = db.writableDatabase
         ensureTrainingPlan(database)
         val result = mutableListOf<TrainingPlan>()
-        database.rawQuery("SELECT id,name,sort_order FROM training_plans ORDER BY sort_order,id", null).use { cursor ->
-            while (cursor.moveToNext()) result += TrainingPlan(cursor.getLong(0), cursor.getString(1), cursor.getInt(2))
+        database.rawQuery("SELECT id,name,sort_order,notes,notes_pinned FROM training_plans ORDER BY sort_order,id", null).use { cursor ->
+            while (cursor.moveToNext()) result += TrainingPlan(
+                cursor.getLong(0),
+                cursor.getString(1),
+                cursor.getInt(2),
+                cursor.getString(3),
+                cursor.getInt(4) != 0,
+            )
         }
         return result
     }
@@ -109,6 +115,8 @@ class GymRepository(context: Context) {
             val newPlanId = database.insertOrThrow("training_plans", null, ContentValues().apply {
                 put("name", uniquePlanName(database, "${source.name} - Copy"))
                 put("sort_order", nextOrder)
+                put("notes", source.notes)
+                put("notes_pinned", if (source.notesPinned) 1 else 0)
             })
             loadMachinesForPlan(id).forEach { summary ->
                 val machine = summary.machine
@@ -140,6 +148,18 @@ class GymRepository(context: Context) {
     fun renameTrainingPlan(id: Long, name: String) {
         val database = db.writableDatabase
         database.update("training_plans", ContentValues().apply { put("name", uniquePlanName(database, name, id)) }, "id=?", arrayOf(id.toString()))
+    }
+
+    fun saveTrainingPlanNotes(id: Long, notes: String, pinned: Boolean) {
+        db.writableDatabase.update(
+            "training_plans",
+            ContentValues().apply {
+                put("notes", notes.trim())
+                put("notes_pinned", if (pinned) 1 else 0)
+            },
+            "id=?",
+            arrayOf(id.toString()),
+        )
     }
 
     fun deleteTrainingPlan(id: Long): Boolean {
@@ -431,7 +451,7 @@ class GymRepository(context: Context) {
     fun exportJson(): String {
         val root = JSONObject()
         root.put("format", "GymLog backup")
-        root.put("version", 3)
+        root.put("version", 4)
         root.put("exportedAt", System.currentTimeMillis())
         root.put("settings", JSONObject().apply {
             put("weightUnit", "kg")
@@ -446,7 +466,16 @@ class GymRepository(context: Context) {
         val plans = loadTrainingPlans()
         root.put("activePlanId", activeTrainingPlanId())
         root.put("plans", JSONArray().apply {
-            plans.forEach { put(JSONObject().put("id", it.id).put("name", it.name).put("sortOrder", it.sortOrder)) }
+            plans.forEach {
+                put(
+                    JSONObject()
+                        .put("id", it.id)
+                        .put("name", it.name)
+                        .put("sortOrder", it.sortOrder)
+                        .put("notes", it.notes)
+                        .put("notesPinned", it.notesPinned),
+                )
+            }
         })
         root.put("machines", JSONArray().apply {
             plans.forEach { plan ->
@@ -495,7 +524,7 @@ class GymRepository(context: Context) {
     fun importJson(json: String) {
         val root = JSONObject(json)
         val version = root.optInt("version", -1)
-        require(version == 3) { "Unsupported GymLog backup version" }
+        require(version in 3..4) { "Unsupported GymLog backup version" }
         val machines = root.getJSONArray("machines")
         root.optJSONObject("settings")?.let { settings ->
             saveProgressionSettings(ProgressionSettings(
@@ -514,6 +543,8 @@ class GymRepository(context: Context) {
                 val newId = database.insertOrThrow("training_plans", null, ContentValues().apply {
                     put("name", plan.getString("name"))
                     put("sort_order", plan.getInt("sortOrder"))
+                    put("notes", plan.optString("notes"))
+                    put("notes_pinned", if (plan.optBoolean("notesPinned")) 1 else 0)
                 })
                 importedPlanIds[plan.getLong("id")] = newId
             }
@@ -664,9 +695,9 @@ private const val GYMLOG_DATABASE = "gymlog.db"
 private const val DEFAULT_ACCENT_COLOR = 0xFF64B5F6
 private const val TRAINING_UNIT_MILLIS = 6L * 60L * 60L * 1000L
 
-private class GymDatabase(context: Context) : SQLiteOpenHelper(context, GYMLOG_DATABASE, null, 7) {
+private class GymDatabase(context: Context) : SQLiteOpenHelper(context, GYMLOG_DATABASE, null, 8) {
     override fun onCreate(db: SQLiteDatabase) {
-        db.execSQL("CREATE TABLE training_plans(id INTEGER PRIMARY KEY AUTOINCREMENT,name TEXT NOT NULL UNIQUE,sort_order INTEGER NOT NULL)")
+        db.execSQL("CREATE TABLE training_plans(id INTEGER PRIMARY KEY AUTOINCREMENT,name TEXT NOT NULL UNIQUE,sort_order INTEGER NOT NULL,notes TEXT NOT NULL DEFAULT '',notes_pinned INTEGER NOT NULL DEFAULT 0)")
         db.execSQL("INSERT INTO training_plans(name,sort_order) VALUES('Default',0)")
         db.execSQL("CREATE TABLE machines(id INTEGER PRIMARY KEY AUTOINCREMENT,plan_id INTEGER NOT NULL DEFAULT 1,name TEXT NOT NULL,title_note TEXT NOT NULL DEFAULT '',notes TEXT NOT NULL DEFAULT '',pause_time TEXT NOT NULL DEFAULT '',chart_window TEXT NOT NULL DEFAULT '3M',trailing_average INTEGER NOT NULL DEFAULT 0,tracking_mode TEXT NOT NULL DEFAULT 'WEIGHT',current_weight REAL NOT NULL DEFAULT 0,sort_order INTEGER NOT NULL,FOREIGN KEY(plan_id) REFERENCES training_plans(id) ON DELETE CASCADE)")
         db.execSQL("CREATE TABLE machine_areas(machine_id INTEGER NOT NULL,area TEXT NOT NULL,strength REAL NOT NULL,PRIMARY KEY(machine_id,area),FOREIGN KEY(machine_id) REFERENCES machines(id) ON DELETE CASCADE)")
@@ -683,6 +714,11 @@ private class GymDatabase(context: Context) : SQLiteOpenHelper(context, GYMLOG_D
     }
 
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
+        if (oldVersion == 7 && newVersion >= 8) {
+            db.execSQL("ALTER TABLE training_plans ADD COLUMN notes TEXT NOT NULL DEFAULT ''")
+            db.execSQL("ALTER TABLE training_plans ADD COLUMN notes_pinned INTEGER NOT NULL DEFAULT 0")
+            return
+        }
         error("This database uses GymLog schema $oldVersion, but this app requires schema $newVersion")
     }
 

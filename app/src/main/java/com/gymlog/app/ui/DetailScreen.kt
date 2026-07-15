@@ -92,7 +92,7 @@ fun DetailScreen(
         Card(modifier = Modifier.fillMaxWidth().clickable { showNotes = true }) {
             Column(Modifier.padding(horizontal = 10.dp, vertical = 4.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 Text("Notes", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
-                Text(if (machine.notes.isBlank()) "No notes yet. Add seat positions, form cues, or other reminders." else machine.notes, color = if (machine.notes.isBlank()) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface)
+                Text(if (machine.notes.isBlank()) "Click to add note" else machine.notes, color = if (machine.notes.isBlank()) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface)
             }
         }
 

@@ -39,6 +39,13 @@ $env:JAVA_HOME = "C:\Program Files\Java\jdk-21.0.10"
 
 The debug APK will be written to `app\build\outputs\apk\debug\app-debug.apk`.
 
+Set a build's public version in `app/build.gradle.kts`:
+
+- Increase `versionCode` for every distributed build.
+- Set `versionName` to the user-facing value, such as `"1.1.0"`.
+
+GymLog shows the version name and build date/time at the bottom of Menu. For a signed release, update both values first and then run `release.bat VERSION` with the same version name.
+
 ## Development helper scripts
 
 - `run_on_phone.bat` builds, installs, and launches GymLog on an authorized USB device.
@@ -79,7 +86,7 @@ adb install -r app\build\outputs\apk\debug\app-debug.apk
 
 From the overview, open **Menu** and choose the backup action. **Download backup** creates a readable JSON file through Android's system file picker. **Upload and restore backup** replaces the app's current data after confirmation.
 
-Backups include every training plan, exercise, order, note, body-area assignment, recorded set, metric change, color, and progression-warning setting.
+Backups include every training plan and plan note, exercise, order, note, body-area assignment, recorded set, metric change, color, and progression-warning setting.
 
 ## Privacy
 
@@ -89,6 +96,7 @@ GymLog stores its data locally on the device. It does not require an account, an
 
 - Multiple independent training plans
   - Create, open, rename, and delete plans from the overview menu
+  - Add a plan note and optionally pin it below the overview training-time card
   - Separate exercises, ordering, history, statistics, timers, and progression data per plan
 - Reorderable exercise overview (long-press and drag) with custom exercise names and optional title notes
 - Two exercise tracking modes

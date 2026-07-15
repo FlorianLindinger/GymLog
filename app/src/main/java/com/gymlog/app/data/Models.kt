@@ -64,6 +64,8 @@ data class TrainingPlan(
     val id: Long,
     val name: String,
     val sortOrder: Int,
+    val notes: String,
+    val notesPinned: Boolean,
 )
 
 data class WeightIncrease(
