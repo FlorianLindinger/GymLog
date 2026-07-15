@@ -131,10 +131,10 @@ fun DetailScreen(
                     TextButton(onClick = { showEdit = true }) { Text("Edit") }
                 }
                 Button(onClick = { showQuickSet = true }, modifier = Modifier.fillMaxWidth()) {
-                    Text("+ Log reps at ${formatMetric(machine.currentWeight, machine.trackingMode)}")
+                    Text(if (machine.trackingMode == "STRENGTH") "+ Log level" else "+ Log reps at ${formatMetric(machine.currentWeight, machine.trackingMode)}")
                 }
                 val recentAmounts = summary.recentSets.map { it.reps }.distinct().take(3)
-                if (recentAmounts.isNotEmpty()) {
+                if (machine.trackingMode == "WEIGHT" && recentAmounts.isNotEmpty()) {
                     Text("Quick repeat", style = MaterialTheme.typography.labelMedium)
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         recentAmounts.forEach { reps ->
@@ -204,7 +204,7 @@ fun DetailScreen(
                     if (index > 0) HorizontalDivider()
                     Row(Modifier.fillMaxWidth().padding(vertical = 7.dp), verticalAlignment = Alignment.CenterVertically) {
                         Column(Modifier.weight(1f)) {
-                            Text("${set.reps} reps × ${formatMetric(set.weight, machine.trackingMode)}", fontWeight = FontWeight.Medium)
+                            Text(if (machine.trackingMode == "STRENGTH") formatMetric(set.weight, machine.trackingMode) else "${set.reps} reps × ${formatMetric(set.weight, machine.trackingMode)}", fontWeight = FontWeight.Medium)
                             Text(formatTimestamp(set.performedAt), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                         TextButton(onClick = {
@@ -221,22 +221,36 @@ fun DetailScreen(
         Spacer(Modifier.height(24.dp))
     }
 
-    if (showQuickSet) QuickRepDialog(
-        previousReps = previousReps(summary),
-        onDismiss = { showQuickSet = false },
-        onAdd = {
-            repository.addSets(machine.id, it, machine.currentWeight)
-            onChanged()
-            showQuickSet = false
-        },
-    )
+    if (showQuickSet) {
+        if (machine.trackingMode == "STRENGTH") {
+            QuickLevelDialog(
+                initialLevel = (summary.recentSets.firstOrNull()?.weight ?: machine.currentWeight).toInt(),
+                onDismiss = { showQuickSet = false },
+                onAdd = {
+                    repository.addLevelSet(machine.id, it)
+                    onChanged()
+                    showQuickSet = false
+                },
+            )
+        } else {
+            QuickRepDialog(
+                previousReps = previousReps(summary),
+                onDismiss = { showQuickSet = false },
+                onAdd = {
+                    repository.addSets(machine.id, it, machine.currentWeight)
+                    onChanged()
+                    showQuickSet = false
+                },
+            )
+        }
+    }
     if (showWeight) WeightDialog(machine.currentWeight, machine.trackingMode, onDismiss = { showWeight = false }) {
         repository.changeWeight(machine.id, it)
         onChanged()
         showWeight = false
     }
-    if (showEdit) EditMachineDialog(machine.name, machine.notes, machine.pauseTime, onDismiss = { showEdit = false }) { name, notes, pauseTime ->
-        repository.updateMachine(machine.id, name, notes, pauseTime)
+    if (showEdit) EditMachineDialog(machine.name, machine.titleNote, machine.notes, machine.pauseTime, onDismiss = { showEdit = false }) { name, titleNote, notes, pauseTime ->
+        repository.updateMachine(machine.id, name, titleNote, notes, pauseTime)
         onChanged()
         showEdit = false
     }
@@ -352,8 +366,9 @@ private fun WeightDialog(current: Double, trackingMode: String, onDismiss: () ->
 }
 
 @Composable
-private fun EditMachineDialog(currentName: String, currentNotes: String, currentPauseTime: String, onDismiss: () -> Unit, onSave: (String, String, String) -> Unit) {
+private fun EditMachineDialog(currentName: String, currentTitleNote: String, currentNotes: String, currentPauseTime: String, onDismiss: () -> Unit, onSave: (String, String, String, String) -> Unit) {
     var name by remember { mutableStateOf(currentName) }
+    var titleNote by remember { mutableStateOf(currentTitleNote) }
     var notes by remember { mutableStateOf(currentNotes) }
     var pauseTime by remember { mutableStateOf(currentPauseTime) }
     AlertDialog(
@@ -362,6 +377,14 @@ private fun EditMachineDialog(currentName: String, currentNotes: String, current
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 OutlinedTextField(name, { name = it }, label = { Text("Exercise name") }, singleLine = true)
+                OutlinedTextField(
+                    titleNote,
+                    { titleNote = it },
+                    label = { Text("Title note") },
+                    placeholder = { Text("e.g. Seat 4 or Heavy") },
+                    supportingText = { Text("Shown beside the exercise name.") },
+                    singleLine = true,
+                )
                 OutlinedTextField(
                     pauseTime,
                     { pauseTime = it },
@@ -373,7 +396,7 @@ private fun EditMachineDialog(currentName: String, currentNotes: String, current
                 OutlinedTextField(notes, { notes = it }, label = { Text("Notes") }, minLines = 4)
             }
         },
-        confirmButton = { Button(onClick = { onSave(name.trim(), notes, pauseTime.trim()) }, enabled = name.isNotBlank()) { Text("Save") } },
+        confirmButton = { Button(onClick = { onSave(name.trim(), titleNote.trim(), notes, pauseTime.trim()) }, enabled = name.isNotBlank()) { Text("Save") } },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
     )
 }
