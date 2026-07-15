@@ -87,6 +87,7 @@ fun OverviewScreen(
     areaFrequency: Map<BodyArea, Double>,
     onQuickSet: (MachineSummary, List<Int>) -> Unit,
     onMetricChange: (MachineSummary, Double) -> Unit,
+    onMetricChangeForSession: (MachineSummary, Double) -> Unit,
     progressionSettings: ProgressionSettings,
     onReorder: (List<Long>) -> Unit,
 ) {
@@ -105,7 +106,7 @@ fun OverviewScreen(
         ?: Long.MAX_VALUE
     val lastExerciseInUnit = mostRecentlyTrainedInUnit(machines, trainingUnitCutoff)
     val listState = rememberLazyListState()
-    val orderedMachines = remember(machines.map { it.machine.id }) { machines.toMutableStateList() }
+    val orderedMachines = remember(machines) { machines.toMutableStateList() }
     var draggedId by remember { mutableStateOf<Long?>(null) }
     var dragOffset by remember { mutableStateOf(0f) }
     var footerVisible by remember { mutableStateOf(true) }
@@ -141,7 +142,7 @@ fun OverviewScreen(
                     val id = summary.machine.id
                     MachineCard(
                         summary, lastExerciseInUnit, trainingUnitCutoff, areaFrequency, onMachine, onQuickSet,
-                        onMetricChange, progressionSettings,
+                        onMetricChange, onMetricChangeForSession, progressionSettings,
                         modifier = Modifier.pointerInput(id, orderedMachines.map { it.machine.id }) {
                             detectDragGesturesAfterLongPress(
                                 onDragStart = { draggedId = id; dragOffset = 0f },
@@ -187,7 +188,7 @@ fun OverviewScreen(
             ) {
                 FilledTonalButton(onClick = onMenu, modifier = Modifier.weight(1f)) { Text("Menu") }
                 FilledTonalButton(onClick = onStats, modifier = Modifier.weight(1f)) { Text("Stats") }
-                Button(onClick = onAdd, modifier = Modifier.weight(1f)) { Text("+ Add") }
+                FilledTonalButton(onClick = onAdd, modifier = Modifier.weight(1f)) { Text("+ Add") }
             }
         }
     }
@@ -346,12 +347,14 @@ private fun MachineCard(
     onMachine: (Long) -> Unit,
     onQuickSet: (MachineSummary, List<Int>) -> Unit,
     onMetricChange: (MachineSummary, Double) -> Unit,
+    onMetricChangeForSession: (MachineSummary, Double) -> Unit,
     progressionSettings: ProgressionSettings,
     modifier: Modifier = Modifier,
     isDragging: Boolean = false,
 ) {
     var quickReps by remember(summary.machine.id) { mutableStateOf(false) }
     var changeMetric by remember(summary.machine.id) { mutableStateOf(false) }
+    var pendingMetric by remember(summary.machine.id) { mutableStateOf<Double?>(null) }
     val trainedInUnit = summary.recentSets.any { it.performedAt >= trainingUnitCutoff }
     val currentUnitSets = currentTrainingUnitSets(summary)
     val isChangingTrainingUnit = currentUnitSets.isNotEmpty()
@@ -446,9 +449,37 @@ private fun MachineCard(
         trackingMode = summary.machine.trackingMode,
         onDismiss = { changeMetric = false },
         onSave = {
-            onMetricChange(summary, it)
             changeMetric = false
+            if (currentUnitSets.isEmpty()) onMetricChange(summary, it) else pendingMetric = it
         },
+    )
+    pendingMetric?.let { value ->
+        MetricChangeScopeDialog(
+            onDismiss = { pendingMetric = null },
+            onNextSession = { onMetricChange(summary, value); pendingMetric = null },
+            onCurrentAndNext = { onMetricChangeForSession(summary, value); pendingMetric = null },
+        )
+    }
+}
+
+@Composable
+fun MetricChangeScopeDialog(
+    onDismiss: () -> Unit,
+    onNextSession: () -> Unit,
+    onCurrentAndNext: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Apply metric change") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("This exercise already has entries in the current training session.")
+                Button(onClick = onNextSession, modifier = Modifier.fillMaxWidth()) { Text("Change for next session") }
+                FilledTonalButton(onClick = onCurrentAndNext, modifier = Modifier.fillMaxWidth()) { Text("Change this session and next") }
+            }
+        },
+        confirmButton = {},
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
     )
 }
 
@@ -484,7 +515,7 @@ private fun sessionPatternText(summary: MachineSummary): AnnotatedString {
     val batches = groupSetBatches(summary.recentSets)
     val patterns = batches.map { batch ->
         batch.sortedBy { it.performedAt }.joinToString(",") {
-            if (isDirectMetric(summary.machine.trackingMode)) "${formatNumber(it.weight)}m" else it.reps.toString()
+            if (isDirectMetric(summary.machine.trackingMode)) "${formatNumber(it.weight)} min" else it.reps.toString()
         }
     }
     fun trend(index: Int): Int {

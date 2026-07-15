@@ -270,6 +270,28 @@ class GymRepository(context: Context) {
         }
     }
 
+    fun changeMetricForCurrentTrainingUnit(id: Long, value: Double) {
+        val database = db.writableDatabase
+        val now = System.currentTimeMillis()
+        database.transaction {
+            val trackingMode = database.rawQuery(
+                "SELECT tracking_mode FROM machines WHERE id=?",
+                arrayOf(id.toString()),
+            ).use { cursor -> if (cursor.moveToFirst()) cursor.getString(0) else "WEIGHT" }
+            database.update("machines", ContentValues().apply { put("current_weight", value) }, "id=?", arrayOf(id.toString()))
+            addWeightHistory(database, id, value, now)
+            val setValues = ContentValues().apply {
+                if (trackingMode == "STRENGTH") put("reps", value.toInt().coerceAtLeast(1)) else put("weight", value)
+            }
+            database.update(
+                "sets",
+                setValues,
+                "machine_id=? AND performed_at>=?",
+                arrayOf(id.toString(), (now - TRAINING_UNIT_MILLIS).toString()),
+            )
+        }
+    }
+
     fun addSet(machineId: Long, reps: Int, weight: Double) {
         db.writableDatabase.insertOrThrow("sets", null, ContentValues().apply {
             put("machine_id", machineId)

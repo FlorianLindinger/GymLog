@@ -39,7 +39,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
@@ -77,7 +79,9 @@ fun DetailScreen(
     var confirmDelete by remember { mutableStateOf(false) }
     var editingSet by remember { mutableStateOf<SetRecord?>(null) }
     var expandedBatch by remember { mutableStateOf<Long?>(null) }
+    var pendingMetric by remember { mutableStateOf<Double?>(null) }
     val machine = summary.machine
+    val currentUnitSets = currentTrainingUnitSets(summary)
     val highest = summary.weightChanges.maxOfOrNull { it.weight } ?: machine.currentWeight
     val first = summary.weightChanges.lastOrNull()?.weight ?: machine.currentWeight
 
@@ -95,13 +99,10 @@ fun DetailScreen(
         if (summary.areas.isEmpty()) {
             OutlinedButton(onClick = { showAreas = true }, modifier = Modifier.fillMaxWidth()) { Text("+ Choose training areas") }
         } else {
-            Card(modifier = Modifier.fillMaxWidth()) {
+            Card(modifier = Modifier.fillMaxWidth().clickable { showAreas = true }) {
                 Column(Modifier.padding(8.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                        Text("Training areas", Modifier.weight(1f), style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
-                        Text("Edit", Modifier.clickable { showAreas = true }.padding(horizontal = 6.dp, vertical = 2.dp), color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelLarge)
-                    }
-                    summary.areas.forEach { assignment ->
+                    Text("Training areas", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+                    summary.areas.sortedByDescending { areaUsage[it.area] ?: 0 }.forEach { assignment ->
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Box(Modifier.width(if (assignment.strength == Strength.FULL) 34.dp else 17.dp).height(8.dp).background(Color(assignment.displayColor), RoundedCornerShape(8.dp)))
                             Spacer(Modifier.width(6.dp))
@@ -114,9 +115,12 @@ fun DetailScreen(
         }
 
         Card(modifier = Modifier.fillMaxWidth().clickable { showWeight = true }) {
-            Column(Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 6.dp), verticalArrangement = Arrangement.spacedBy(0.dp)) {
-                    Text(formatMetric(machine.currentWeight, machine.trackingMode), style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
-                    Text(weightChangeDescription(summary.weightChanges, machine.trackingMode), style = MaterialTheme.typography.bodySmall)
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(formatMetric(machine.currentWeight, machine.trackingMode), Modifier.weight(1f), style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
+                Text(weightChangeDescription(summary.weightChanges, machine.trackingMode), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
 
@@ -198,9 +202,28 @@ fun DetailScreen(
     }
 
     if (showWeight) MetricValueDialog(machine.currentWeight, machine.trackingMode, onDismiss = { showWeight = false }) {
-        repository.changeWeight(machine.id, it)
-        onChanged()
         showWeight = false
+        if (currentUnitSets.isEmpty()) {
+            repository.changeWeight(machine.id, it)
+            onChanged()
+        } else {
+            pendingMetric = it
+        }
+    }
+    pendingMetric?.let { value ->
+        MetricChangeScopeDialog(
+            onDismiss = { pendingMetric = null },
+            onNextSession = {
+                repository.changeWeight(machine.id, value)
+                pendingMetric = null
+                onChanged()
+            },
+            onCurrentAndNext = {
+                repository.changeMetricForCurrentTrainingUnit(machine.id, value)
+                pendingMetric = null
+                onChanged()
+            },
+        )
     }
     if (showNotes) TextEditDialog("Notes", machine.notes, onDismiss = { showNotes = false }) {
         repository.setMachineNotes(machine.id, it)
@@ -428,45 +451,57 @@ private fun BodyMapPicker(
             fun selectedColor(area: BodyArea): Color? = choices[area]?.let { strength ->
                 Color(colors[area] ?: area.color).copy(alpha = if (strength == Strength.FULL) .58f else .30f)
             }
-            fun region(area: BodyArea, x: Float, y: Float, width: Float, height: Float) {
+            fun oval(area: BodyArea, x: Float, y: Float, width: Float, height: Float) {
                 selectedColor(area)?.let { color ->
-                    drawRoundRect(color, Offset(size.width * x, size.height * y), androidx.compose.ui.geometry.Size(size.width * width, size.height * height), androidx.compose.ui.geometry.CornerRadius(12f, 12f))
+                    drawOval(color, Offset(size.width * x, size.height * y), Size(size.width * width, size.height * height))
                 }
             }
-            fun limb(area: BodyArea, startX: Float, startY: Float, endX: Float, endY: Float, width: Float) {
-                selectedColor(area)?.let { color -> drawLine(color, Offset(size.width * startX, size.height * startY), Offset(size.width * endX, size.height * endY), strokeWidth = size.width * width, cap = StrokeCap.Round) }
+            fun polygon(area: BodyArea, vararg points: Pair<Float, Float>) {
+                selectedColor(area)?.let { color ->
+                    val path = Path().apply {
+                        moveTo(size.width * points.first().first, size.height * points.first().second)
+                        points.drop(1).forEach { (x, y) -> lineTo(size.width * x, size.height * y) }
+                        close()
+                    }
+                    drawPath(path, color)
+                }
             }
 
-            region(BodyArea.CHEST, .245f, .22f, .12f, .10f)
-            region(BodyArea.CORE, .265f, .33f, .08f, .15f)
-            limb(BodyArea.SHOULDERS, .215f, .22f, .395f, .22f, .052f)
-            limb(BodyArea.BICEPS, .215f, .27f, .185f, .42f, .032f)
-            limb(BodyArea.BICEPS, .395f, .27f, .425f, .42f, .032f)
-            limb(BodyArea.QUADS, .275f, .54f, .265f, .71f, .040f)
-            limb(BodyArea.QUADS, .335f, .54f, .345f, .71f, .040f)
-            limb(BodyArea.CALVES, .265f, .74f, .255f, .89f, .030f)
-            limb(BodyArea.CALVES, .345f, .74f, .355f, .89f, .030f)
+            oval(BodyArea.SHOULDERS, .202f, .185f, .072f, .095f)
+            oval(BodyArea.SHOULDERS, .336f, .185f, .072f, .095f)
+            polygon(BodyArea.CHEST, .255f to .235f, .305f to .218f, .355f to .235f, .348f to .315f, .305f to .330f, .262f to .315f)
+            polygon(BodyArea.CORE, .270f to .322f, .340f to .322f, .334f to .493f, .276f to .493f)
+            oval(BodyArea.BICEPS, .185f, .270f, .045f, .125f)
+            oval(BodyArea.BICEPS, .380f, .270f, .045f, .125f)
+            polygon(BodyArea.FOREARMS, .184f to .385f, .222f to .390f, .202f to .520f, .166f to .520f)
+            polygon(BodyArea.FOREARMS, .388f to .390f, .426f to .385f, .444f to .520f, .408f to .520f)
+            polygon(BodyArea.QUADS, .268f to .525f, .303f to .535f, .294f to .725f, .252f to .725f)
+            polygon(BodyArea.QUADS, .307f to .535f, .342f to .525f, .358f to .725f, .316f to .725f)
+            polygon(BodyArea.CALVES, .252f to .735f, .294f to .735f, .278f to .900f, .244f to .900f)
+            polygon(BodyArea.CALVES, .316f to .735f, .358f to .735f, .366f to .900f, .332f to .900f)
 
-            limb(BodyArea.SHOULDERS, .615f, .22f, .785f, .22f, .052f)
-            region(BodyArea.UPPER_BACK, .65f, .23f, .10f, .13f)
-            region(BodyArea.LOWER_BACK, .66f, .36f, .08f, .11f)
-            limb(BodyArea.TRICEPS, .615f, .27f, .59f, .42f, .032f)
-            limb(BodyArea.TRICEPS, .785f, .27f, .81f, .42f, .032f)
-            region(BodyArea.GLUTES, .64f, .47f, .12f, .10f)
-            limb(BodyArea.HAMSTRINGS, .665f, .59f, .655f, .73f, .040f)
-            limb(BodyArea.HAMSTRINGS, .735f, .59f, .745f, .73f, .040f)
-            limb(BodyArea.CALVES, .655f, .74f, .645f, .89f, .030f)
-            limb(BodyArea.CALVES, .745f, .74f, .755f, .89f, .030f)
+            oval(BodyArea.SHOULDERS, .592f, .185f, .072f, .095f)
+            oval(BodyArea.SHOULDERS, .736f, .185f, .072f, .095f)
+            polygon(BodyArea.UPPER_BACK, .650f to .225f, .700f to .210f, .750f to .225f, .742f to .355f, .658f to .355f)
+            polygon(BodyArea.LOWER_BACK, .658f to .355f, .742f to .355f, .735f to .480f, .665f to .480f)
+            oval(BodyArea.TRICEPS, .578f, .270f, .045f, .125f)
+            oval(BodyArea.TRICEPS, .777f, .270f, .045f, .125f)
+            polygon(BodyArea.FOREARMS, .578f to .385f, .616f to .390f, .596f to .520f, .560f to .520f)
+            polygon(BodyArea.FOREARMS, .784f to .390f, .822f to .385f, .840f to .520f, .804f to .520f)
+            oval(BodyArea.GLUTES, .645f, .465f, .110f, .115f)
+            polygon(BodyArea.HAMSTRINGS, .650f to .565f, .696f to .575f, .687f to .735f, .642f to .735f)
+            polygon(BodyArea.HAMSTRINGS, .704f to .575f, .750f to .565f, .758f to .735f, .713f to .735f)
+            polygon(BodyArea.CALVES, .642f to .735f, .687f to .735f, .672f to .900f, .637f to .900f)
+            polygon(BodyArea.CALVES, .713f to .735f, .758f to .735f, .763f to .900f, .728f to .900f)
         }
-        Row(Modifier.align(Alignment.TopCenter).fillMaxWidth(), horizontalArrangement = Arrangement.SpaceAround) {
-            Text("Front", style = MaterialTheme.typography.labelMedium)
-            Text("Back", style = MaterialTheme.typography.labelMedium)
+        Row(Modifier.align(Alignment.TopCenter).fillMaxWidth().padding(top = 4.dp)) {
+            Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
+                Text("Front", Modifier.background(Color.Black.copy(alpha = .72f), RoundedCornerShape(8.dp)).padding(horizontal = 9.dp, vertical = 3.dp), color = Color.White, style = MaterialTheme.typography.labelMedium)
+            }
+            Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
+                Text("Back", Modifier.background(Color.Black.copy(alpha = .72f), RoundedCornerShape(8.dp)).padding(horizontal = 9.dp, vertical = 3.dp), color = Color.White, style = MaterialTheme.typography.labelMedium)
+            }
         }
-        Text(
-            "Selected: ${choices.count { it.value != null }}",
-            modifier = Modifier.align(Alignment.BottomCenter).background(MaterialTheme.colorScheme.surface.copy(alpha = .85f), RoundedCornerShape(8.dp)).padding(5.dp),
-            style = MaterialTheme.typography.labelSmall,
-        )
     }
 }
 
@@ -477,7 +512,8 @@ private fun areaFromBodyMap(x: Float, y: Float): BodyArea? {
     return if (front) when {
         y in 0.20f..0.29f && distance in 0.07f..0.18f -> BodyArea.SHOULDERS
         y in 0.25f..0.37f && distance < .075f -> BodyArea.CHEST
-        y in 0.29f..0.48f && distance in 0.09f..0.20f -> BodyArea.BICEPS
+        y in 0.29f..0.40f && distance in 0.09f..0.20f -> BodyArea.BICEPS
+        y in 0.40f..0.53f && distance in 0.09f..0.20f -> BodyArea.FOREARMS
         y in 0.37f..0.53f && distance < .075f -> BodyArea.CORE
         y in 0.54f..0.75f && distance < .10f -> BodyArea.QUADS
         y in 0.75f..0.95f && distance < .11f -> BodyArea.CALVES
@@ -485,7 +521,8 @@ private fun areaFromBodyMap(x: Float, y: Float): BodyArea? {
     } else when {
         y in 0.20f..0.29f && distance in 0.07f..0.18f -> BodyArea.SHOULDERS
         y in 0.25f..0.40f && distance < .075f -> BodyArea.UPPER_BACK
-        y in 0.29f..0.48f && distance in 0.09f..0.20f -> BodyArea.TRICEPS
+        y in 0.29f..0.40f && distance in 0.09f..0.20f -> BodyArea.TRICEPS
+        y in 0.40f..0.53f && distance in 0.09f..0.20f -> BodyArea.FOREARMS
         y in 0.40f..0.52f && distance < .07f -> BodyArea.LOWER_BACK
         y in 0.50f..0.62f && distance < .10f -> BodyArea.GLUTES
         y in 0.62f..0.78f && distance < .10f -> BodyArea.HAMSTRINGS
@@ -532,7 +569,7 @@ private fun timeSince(timestamp: Long): String {
         days >= 30 -> "${days / 30}mo ${days % 30}d"
         days > 0 -> "${days}d"
         duration.toHours() > 0 -> "${duration.toHours()}h"
-        else -> "${duration.toMinutes().coerceAtLeast(0)}m"
+        else -> "${duration.toMinutes().coerceAtLeast(0)} min"
     }
 }
 

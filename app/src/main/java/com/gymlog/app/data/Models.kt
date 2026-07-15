@@ -20,6 +20,7 @@ enum class BodyArea(val label: String, val color: Long) {
     SHOULDERS("Shoulders", 0xFFFF9100),
     BICEPS("Biceps", 0xFF651FFF),
     TRICEPS("Triceps", 0xFFF500D4),
+    FOREARMS("Forearms", 0xFF8E24AA),
     CORE("Core", 0xFFFFEA00),
     GLUTES("Glutes", 0xFF00BFA5),
     QUADS("Quads", 0xFF00E676),

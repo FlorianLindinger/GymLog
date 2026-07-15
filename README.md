@@ -42,6 +42,7 @@ The debug APK will be written to `app\build\outputs\apk\debug\app-debug.apk`.
 ## Development helper scripts
 
 - `run_on_phone.bat` builds, installs, and launches GymLog on an authorized USB device.
+- `install_via_usb.bat` installs and launches the existing debug APK without rebuilding it.
 - `verify.bat` compiles the app, runs tests and Android lint, builds the debug APK, and checks Git whitespace.
 - `device_check.bat` lists connected devices and prints Android and installed-app versions.
 - `logcat.bat` restarts GymLog and follows only its current process logs.
@@ -89,7 +90,7 @@ GymLog stores its data locally on the device. It does not require an account, an
 - Multiple independent training plans
   - Create, open, rename, and delete plans from the overview menu
   - Separate exercises, ordering, history, statistics, timers, and progression data per plan
-- Reorderable exercise overview with custom exercise names and optional title notes
+- Reorderable exercise overview (long-press and drag) with custom exercise names and optional title notes
 - Two exercise tracking modes
   - Weight in kilograms
   - Machine or resistance level, with each training recorded in minutes
@@ -101,16 +102,16 @@ GymLog stores its data locally on the device. It does not require an account, an
 - Compact overview cards
   - Current kg or level value
   - Tap the value to change it
+  - Choose whether a metric change applies from the next session or also rewrites the current six-hour session
   - Recent rep batches such as `Last: 10,10,10 | 12,10,10`
   - Color-coded session trend borders
   - Configurable progression warnings
 - Compact exercise detail screens
   - Notes shown at the top
-  - Optional pause and setup notes
   - Tap the current metric card to change its value
   - Started, current, and highest metric statistics
   - Configurable chart windows and trailing averages
-  - Weight, level, training-duration, and volume charts
+  - Combined weight, volume, and session-rep charts
 - Grouped exercise history entries such as `80 kg - 12,12,10,10 - Date`
   - Expand a batch to edit or delete an individual set
   - Delete a complete logged batch
@@ -128,7 +129,7 @@ GymLog stores its data locally on the device. It does not require an account, an
   - Today's duration displayed on the overview in `h:mm`
   - First and last entry times
   - Duration recorded in history and used in statistics
-- Statistics with selectable 4-week, 3-month, 6-month, 1-year, and all-time windows
+- Statistics with selectable 1-week, 1-month, 3-month, 6-month, 1-year, 2-year, 3-year, and all-time windows
   - Gym days per week, session count, and set count
   - Average and longest training duration
   - Session-frequency and daily-duration plots
@@ -142,10 +143,11 @@ GymLog stores its data locally on the device. It does not require an account, an
   - Warn after a configurable number of training days without an increase
   - Set either threshold to zero to disable it
 - Simplified front/back body-area picker designed around gym machines
-  - Chest, upper back, lower back, shoulders, biceps, triceps, core, glutes, quads, hamstrings, and calves
+  - Chest, upper back, lower back, shoulders, biceps, triceps, forearms, core, glutes, quads, hamstrings, and calves
   - Half- or full-strength assignments
   - Custom colors and most-used-area sorting
 - JSON backup and restore through Android's file picker
   - All training plans included in one backup
   - Can be saved to local storage or a cloud provider exposed by the Android file picker
 - Fully offline operation with no account, analytics, or internet permission
+- Freely selectable UI accent color

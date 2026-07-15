@@ -207,6 +207,10 @@ fun GymLogApp(
                     repository.changeWeight(machine.machine.id, value)
                     refresh()
                 },
+                onMetricChangeForSession = { machine, value ->
+                    repository.changeMetricForCurrentTrainingUnit(machine.machine.id, value)
+                    refresh()
+                },
                 progressionSettings = uiState.progressionSettings,
                 onReorder = { orderedIds ->
                     repository.reorderMachines(orderedIds)
@@ -291,10 +295,10 @@ fun GymLogApp(
         title = { Text("Menu") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                TextButton(onClick = { showMenu = false; showAccentColor = true }) { Text("UI color") }
-                TextButton(onClick = { showMenu = false; showProgressionSettings = true }) { Text("Progress warnings") }
                 TextButton(onClick = { showMenu = false; screen = Screen.PLANS }) { Text("Training plans") }
+                TextButton(onClick = { showMenu = false; showProgressionSettings = true }) { Text("Progress warnings") }
                 TextButton(onClick = { showMenu = false; screen = Screen.BACKUP }) { Text("Data, backup & sync") }
+                TextButton(onClick = { showMenu = false; showAccentColor = true }) { Text("UI color") }
             }
         },
         confirmButton = { TextButton(onClick = { showMenu = false }) { Text("Close") } },
@@ -302,20 +306,22 @@ fun GymLogApp(
 
     if (showProgressionSettings) ProgressionSettingsDialog(
         current = uiState.progressionSettings,
-        onDismiss = { showProgressionSettings = false },
+        onDismiss = { showProgressionSettings = false; showMenu = true },
         onSave = {
             repository.saveProgressionSettings(it)
             uiStateResult = Result.success(uiState.copy(progressionSettings = it))
             showProgressionSettings = false
+            showMenu = true
         },
     )
 
     if (showAccentColor) AccentColorDialog(
         current = repository.accentColor(),
-        onDismiss = { showAccentColor = false },
+        onDismiss = { showAccentColor = false; showMenu = true },
         onSave = {
             onAccentColorChanged(it)
             showAccentColor = false
+            showMenu = true
         },
     )
 

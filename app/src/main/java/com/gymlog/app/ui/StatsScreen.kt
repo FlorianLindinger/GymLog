@@ -1,6 +1,8 @@
 package com.gymlog.app.ui
 
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -12,9 +14,9 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Card
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -96,41 +98,53 @@ fun StatsScreen(
 
     LazyColumn(
         modifier = modifier.fillMaxSize(),
-        contentPadding = PaddingValues(12.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp),
+        contentPadding = PaddingValues(8.dp),
+        verticalArrangement = Arrangement.spacedBy(7.dp),
     ) {
         item {
             FilledTonalButton(onClick = onHistory, modifier = Modifier.fillMaxWidth()) { Text("Calendar & history") }
         }
         item {
-            LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            LazyRow(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                 items(8) { index ->
                     val preset = listOf("1W", "1M", "3M", "6M", "1Y", "2Y", "3Y", "ALL")[index]
-                    FilterChip(selected = window == preset, onClick = { window = preset }, label = { Text(preset) })
+                    val selected = window == preset
+                    Text(
+                        preset,
+                        modifier = Modifier
+                            .background(
+                                if (selected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant,
+                                RoundedCornerShape(7.dp),
+                            )
+                            .clickable { window = preset }
+                            .padding(horizontal = 8.dp, vertical = 4.dp),
+                        color = if (selected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
+                        style = MaterialTheme.typography.labelSmall,
+                    )
                 }
             }
         }
         item {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(5.dp)) {
                 StatCard("Gym / week", String.format(Locale.US, "%.1f", sessions.size / periodWeeks), Modifier.weight(1f))
                 StatCard("Sessions", sessions.size.toString(), Modifier.weight(1f))
                 StatCard("Sets", visible.size.toString(), Modifier.weight(1f))
             }
         }
         item {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(5.dp)) {
                 StatCard("Avg upgrades / gym day", String.format(Locale.US, "%.2f", averageUpgradesPerGymDay), Modifier.weight(1f))
                 StatCard("Avg upgrades / month", String.format(Locale.US, "%.2f", averageUpgradesPerMonth), Modifier.weight(1f))
             }
         }
         item {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(5.dp)) {
                 StatCard("Avg duration", formatHoursMinutes(durations.values.averageOrZero().toLong()), Modifier.weight(1f))
                 StatCard("Longest", formatHoursMinutes((durations.values.maxOrNull() ?: 0.0).toLong()), Modifier.weight(1f))
             }
         }
         item {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(5.dp)) {
                 StatCard("Weight increases", increases.size.toString(), Modifier.weight(1f))
                 StatCard("Increases / week", String.format(Locale.US, "%.2f", increases.size / periodWeeks), Modifier.weight(1f))
                 StatCard("Exercises progressed", increases.map { it.machineId }.distinct().size.toString(), Modifier.weight(1f))
@@ -174,9 +188,9 @@ private fun ProgressionByExerciseCard(machines: List<MachineSummary>, cutoff: Lo
 @Composable
 private fun StatCard(label: String, value: String, modifier: Modifier = Modifier) {
     Card(modifier) {
-        Column(Modifier.padding(10.dp)) {
-            Text(value, style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
-            Text(label, style = MaterialTheme.typography.bodySmall)
+        Column(Modifier.padding(horizontal = 7.dp, vertical = 6.dp)) {
+            Text(value, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
+            Text(label, style = MaterialTheme.typography.labelSmall)
         }
     }
 }
