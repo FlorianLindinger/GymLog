@@ -42,6 +42,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.KeyboardCapitalization
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import android.widget.NumberPicker
@@ -138,6 +139,8 @@ private fun MachineCard(
                     modifier = Modifier.weight(1f),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                 )
                 Text(
                     "+ SET",
@@ -180,12 +183,12 @@ private fun sessionPatternText(summary: MachineSummary): String {
     val sessions = summary.recentSets.groupBy {
         Instant.ofEpochMilli(it.performedAt).atZone(ZoneId.systemDefault()).toLocalDate()
     }.values.toList()
-    fun values(index: Int): String? = sessions.getOrNull(index)?.sortedByDescending { it.performedAt }?.take(3)?.joinToString(" | ") {
-        if (summary.machine.trackingMode == "STRENGTH") it.weight.toInt().toString() else it.reps.toString()
+    val patterns = sessions.map { session ->
+        session.sortedBy { it.performedAt }.joinToString(",") {
+            if (summary.machine.trackingMode == "STRENGTH") it.weight.toInt().toString() else it.reps.toString()
+        }
     }
-    val latest = values(0) ?: "-"
-    val before = values(1)
-    return "Last: $latest${before?.let { "  ($it)" } ?: ""}"
+    return "Last: ${patterns.joinToString(" | ").ifEmpty { "-" }}"
 }
 
 @Composable

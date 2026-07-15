@@ -213,7 +213,11 @@ private fun SessionCard(date: LocalDate, sets: List<HistorySet>) {
 private fun HistorySetRow(set: HistorySet) {
     Row(Modifier.fillMaxWidth().padding(vertical = 2.dp)) {
         Text(set.machineName, Modifier.weight(1f))
-        Text("${set.reps} × ${formatMetric(set.weight, set.trackingMode)}", fontWeight = FontWeight.Medium)
+        Text(
+            if (set.trackingMode == "STRENGTH") formatMetric(set.weight, set.trackingMode)
+            else "${set.reps} × ${formatMetric(set.weight, set.trackingMode)}",
+            fontWeight = FontWeight.Medium,
+        )
     }
 }
 
