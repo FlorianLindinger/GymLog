@@ -1,21 +1,12 @@
 # GymLog
 
-GymLog is a private, offline Android workout tracker built for one ordered exercise routine. It uses Kotlin, Jetpack Compose, and the phone's SQLite database.
+GymLog is a private, offline Android workout tracker built with Kotlin, Jetpack Compose, and SQLite. It supports multiple training plans, weight-, level-, and duration-based exercises, detailed history management, progression warnings, and local JSON backups.
 
-## Included
+## Requirements
 
-- A reorderable exercise list with your own names, current weights, and today's reps
-- Five 0-15 rep wheels that remember the previous set pattern; zero skips a set
-- Exercise details with notes, recent sets, weight history, a progress chart, and time since the last weight change
-- A saved pause-between-sets note per exercise (display only, with no timer)
-- Last-trained and 30-day set-frequency indicators on the routine overview
-- A calendar/history screen with daily sessions and 8-week `weight × reps` volume trends
-- A tappable front/back body guide with full or half strength
-- Separate upper/lower back, usage sorting, and customizable distinct colors
-- A distinct color for each body area; half-strength assignments use half-width markers
-- Per-exercise weight and volume charts with remembered preset time windows
-- JSON download/upload containing exercises, ordering, notes, areas, sets, weights, and settings
-- Offline storage with no account, analytics, or internet permission
+- Android Studio with Android SDK 35
+- JDK 21
+- An Android emulator or physical Android phone
 
 ## Run it on this computer
 
@@ -24,35 +15,35 @@ The simplest route is Android Studio:
 1. Install the current stable **Android Studio** from the Android developer website.
 2. Open Android Studio and choose **Open**, then select this `GymLog` folder.
 3. Let Gradle sync. If Android Studio asks to install Android SDK 35, accept it.
-4. Open **Tools > Device Manager**, choose **Create device**, select a Pixel-style phone and download a recent Android system image.
-5. Start that emulator, select it in the toolbar, and click **Run** (the green triangle).
+4. Open **Tools > Device Manager**, create a Pixel-style device, and download a recent Android system image.
+5. Start the emulator, select it in the toolbar, and click **Run**.
 
 You can also build from PowerShell after Android Studio has installed the SDK:
 
 ```powershell
 $env:JAVA_HOME = "C:\Program Files\Java\jdk-21.0.10"
-.\gradlew.bat assembleDebug
+.\gradlew.bat :app:assembleDebug
 ```
 
-The debug APK will be at `app\build\outputs\apk\debug\app-debug.apk`.
+The debug APK will be written to `app\build\outputs\apk\debug\app-debug.apk`.
 
 ## Install it on an Android phone
 
 ### Directly from Android Studio
 
-1. On the phone, enable **Developer options** by tapping **Build number** seven times in **Settings > About phone**.
+1. Enable **Developer options** by tapping **Build number** seven times in **Settings > About phone**.
 2. Enable **USB debugging** in Developer options.
-3. Connect the phone with a data-capable USB cable and approve the debugging prompt on the phone.
+3. Connect the phone with a data-capable USB cable and approve the debugging prompt.
 4. Select the phone in Android Studio and click **Run**.
 
 ### From the APK
 
 1. Build `app-debug.apk` with the command above.
-2. Copy the APK to the phone (USB, Drive, email to yourself, etc.).
-3. Open it on the phone and allow **Install unknown apps** for the file-manager/browser you used.
-4. Confirm installation. Android may warn that this is an app from outside the Play Store; that is expected for your own debug build.
+2. Copy the APK to the phone.
+3. Open it and allow **Install unknown apps** for the file manager or browser you used.
+4. Confirm installation.
 
-If Android platform tools are installed and USB debugging is enabled, this command also works:
+If Android platform tools are installed and USB debugging is enabled, you can also run:
 
 ```powershell
 adb install -r app\build\outputs\apk\debug\app-debug.apk
@@ -60,7 +51,79 @@ adb install -r app\build\outputs\apk\debug\app-debug.apk
 
 ## Backups
 
-From the overview, open **Backup**. **Download backup** creates a `.json` file using Android's system file picker. **Upload and restore backup** replaces the current database after confirmation. Export before restoring if the existing phone data matters.
+From the overview, open **Menu** and choose the backup action. **Download backup** creates a readable JSON file through Android's system file picker. **Upload and restore backup** replaces the app's current data after confirmation.
 
-## Good next additions
+Backups include every training plan, exercise, order, note, body-area assignment, recorded set, metric change, color, and progression-warning setting. The current backup format can also import older single-plan GymLog backups.
 
+## Privacy
+
+GymLog stores its data locally on the device. It does not require an account, analytics service, or internet permission. Exported backup files remain under the user's control.
+
+## Features
+
+- Multiple independent training plans
+  - Create, open, rename, and delete plans from the overview menu
+  - Separate exercises, ordering, history, statistics, timers, and progression data per plan
+  - Automatic migration of existing data into a `Default` plan
+- Reorderable exercise overview with custom exercise names and optional title notes
+- Three exercise tracking modes
+  - Weight in kilograms
+  - Machine or resistance level
+  - Duration in minutes
+- Quick workout logging
+  - Log up to five weight-based sets at once with 0–15 rep wheels
+  - Reuse the previous rep pattern
+  - Log level and minute entries directly
+  - Quick-repeat recent rep amounts
+- Compact overview cards
+  - Current kg, level, or minute value
+  - Tap the value to change it
+  - Recent rep batches such as `Last: 10,10,10 | 12,10,10`
+  - Color-coded session trend borders
+  - Configurable progression warnings
+- Compact exercise detail screens
+  - Notes shown at the top
+  - Optional pause and setup notes
+  - Tap the current metric card to change its value
+  - Started, current, and highest metric statistics
+  - Configurable chart windows and trailing averages
+  - Weight, level, duration, and volume charts
+- Grouped exercise history entries such as `80 kg - 12,12,10,10 - Date`
+  - Expand a batch to edit or delete an individual set
+  - Delete a complete logged batch
+- Full history management
+  - Edit reps and recorded kg, level, or minutes
+  - Delete individual entries with confirmation
+  - Delete every entry for one exercise on a selected day
+  - Delete an entire training day
+- Calendar and session history
+  - Daily activity intensity
+  - Recent session summaries
+  - Per-day exercise totals
+  - First-entry-to-last-entry training duration
+- Training-duration tracking
+  - Today's duration displayed on the overview in `h:mm`
+  - First and last entry times
+  - Duration recorded in history and used in statistics
+- Statistics with selectable 4-week, 3-month, 6-month, 1-year, and all-time windows
+  - Gym days per week, session count, and set count
+  - Average and longest training duration
+  - Session-frequency and daily-duration plots
+  - Weight increases and increases per week
+  - Exercises progressed
+  - Average upgrades per gym day and per month
+  - Weekly, per-gym-day, and monthly upgrade plots
+  - Per-exercise weight-increase frequency
+- Progression warnings for weight-based exercises
+  - Warn after a configurable number of weeks without an increase
+  - Warn after a configurable number of training days without an increase
+  - Set either threshold to zero to disable it
+- Simplified front/back body-area picker designed around gym machines
+  - Chest, upper back, lower back, shoulders, biceps, triceps, core, glutes, quads, hamstrings, and calves
+  - Half- or full-strength assignments
+  - Custom colors and most-used-area sorting
+- JSON backup and restore through Android's file picker
+  - All training plans included in one backup
+  - Compatible with legacy single-plan backups
+  - Can be saved to local storage or a cloud provider exposed by the Android file picker
+- Fully offline operation with no account, analytics, or internet permission

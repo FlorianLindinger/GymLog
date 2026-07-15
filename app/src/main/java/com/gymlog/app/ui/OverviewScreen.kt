@@ -48,15 +48,20 @@ import androidx.compose.ui.viewinterop.AndroidView
 import android.widget.NumberPicker
 import com.gymlog.app.data.MachineSummary
 import com.gymlog.app.data.BodyArea
+import com.gymlog.app.data.ProgressionSettings
+import com.gymlog.app.data.SetRecord
 import com.gymlog.app.data.Strength
+import com.gymlog.app.data.weightIncreases
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
+import java.time.format.DateTimeFormatter
 import java.time.temporal.ChronoUnit
 
 @Composable
 fun OverviewScreen(
     machines: List<MachineSummary>,
+    activePlanName: String,
     modifier: Modifier = Modifier,
     onMachine: (Long) -> Unit,
     onAdd: () -> Unit,
@@ -64,7 +69,11 @@ fun OverviewScreen(
     onStats: () -> Unit,
     areaFrequency: Map<BodyArea, Double>,
     onQuickSet: (MachineSummary, List<Int>) -> Unit,
+    onMetricChange: (MachineSummary, Double) -> Unit,
+    progressionSettings: ProgressionSettings,
+    onProgressionSettings: (ProgressionSettings) -> Unit,
 ) {
+    var showProgressionSettings by remember { mutableStateOf(false) }
     Box(modifier.fillMaxSize()) {
         if (machines.isEmpty()) {
             Column(
@@ -72,6 +81,7 @@ fun OverviewScreen(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
+                Text(activePlanName, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
                 Text("Build your routine", style = MaterialTheme.typography.headlineSmall)
                 Text("Add your first exercise, choose its training areas, then log each set in a couple of taps.", color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Button(onClick = onAdd) { Text("Add first exercise") }
@@ -81,8 +91,12 @@ fun OverviewScreen(
                 contentPadding = PaddingValues(start = 8.dp, end = 8.dp, top = 6.dp, bottom = 72.dp),
                 verticalArrangement = Arrangement.spacedBy(6.dp),
             ) {
+                item(key = "training-duration") { TrainingDurationCard(machines, activePlanName) }
+                item(key = "progression-settings") {
+                    ProgressionSettingsCard(progressionSettings, onEdit = { showProgressionSettings = true })
+                }
                 items(machines, key = { it.machine.id }) { summary ->
-                    MachineCard(summary, areaFrequency, onMachine, onQuickSet)
+                    MachineCard(summary, areaFrequency, onMachine, onQuickSet, onMetricChange, progressionSettings)
                 }
             }
         }
@@ -95,6 +109,129 @@ fun OverviewScreen(
             Button(onClick = onAdd, modifier = Modifier.weight(1f)) { Text("+ Add") }
         }
     }
+    if (showProgressionSettings) ProgressionSettingsDialog(
+        current = progressionSettings,
+        onDismiss = { showProgressionSettings = false },
+        onSave = {
+            onProgressionSettings(it)
+            showProgressionSettings = false
+        },
+    )
+}
+
+@Composable
+private fun TrainingDurationCard(machines: List<MachineSummary>, activePlanName: String) {
+    val zone = ZoneId.systemDefault()
+    val today = LocalDate.now()
+    val todaySets = machines.flatMap { it.recentSets }.filter {
+        Instant.ofEpochMilli(it.performedAt).atZone(zone).toLocalDate() == today
+    }
+    val first = todaySets.minOfOrNull { it.performedAt }
+    val last = todaySets.maxOfOrNull { it.performedAt }
+    val durationMinutes = if (first == null || last == null) 0L else ((last - first) / 60_000L).coerceAtLeast(0L)
+    val clock = DateTimeFormatter.ofPattern("HH:mm")
+
+    Card(Modifier.fillMaxWidth()) {
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text("$activePlanName · Today's training duration", style = MaterialTheme.typography.labelLarge)
+                Text(
+                    if (first == null) "Starts with your first entry"
+                    else "${Instant.ofEpochMilli(first).atZone(zone).format(clock)} – ${Instant.ofEpochMilli(last!!).atZone(zone).format(clock)}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Text(formatHoursMinutes(durationMinutes), style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+        }
+    }
+}
+
+@Composable
+private fun ProgressionSettingsCard(settings: ProgressionSettings, onEdit: () -> Unit) {
+    Card(Modifier.fillMaxWidth()) {
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text("Progress warnings", style = MaterialTheme.typography.labelLarge)
+                Text(
+                    "${settingSummary(settings.staleWeeks, "weeks")} · ${settingSummary(settings.staleTrainings, "trainings")}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            TextButton(onClick = onEdit) { Text("Settings") }
+        }
+    }
+}
+
+private fun settingSummary(value: Int, unit: String): String = if (value <= 0) "$unit off" else "$value $unit"
+
+@Composable
+private fun ProgressionSettingsDialog(
+    current: ProgressionSettings,
+    onDismiss: () -> Unit,
+    onSave: (ProgressionSettings) -> Unit,
+) {
+    var weeks by remember(current) { mutableStateOf(current.staleWeeks.toString()) }
+    var trainings by remember(current) { mutableStateOf(current.staleTrainings.toString()) }
+    val parsedWeeks = weeks.toIntOrNull()
+    val parsedTrainings = trainings.toIntOrNull()
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Progress warnings") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text("Warn on weight exercises when either limit is reached without an increase. Set a limit to 0 to disable it.")
+                OutlinedTextField(
+                    value = weeks,
+                    onValueChange = { weeks = it.filter(Char::isDigit) },
+                    label = { Text("Weeks without increase") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    singleLine = true,
+                )
+                OutlinedTextField(
+                    value = trainings,
+                    onValueChange = { trainings = it.filter(Char::isDigit) },
+                    label = { Text("Trainings without increase") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    singleLine = true,
+                )
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = { onSave(ProgressionSettings(parsedWeeks ?: 0, parsedTrainings ?: 0)) },
+                enabled = parsedWeeks != null && parsedTrainings != null,
+            ) { Text("Save") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
+}
+
+private fun progressionWarning(summary: MachineSummary, settings: ProgressionSettings): String? {
+    if (summary.machine.trackingMode != "WEIGHT" || summary.recentSets.isEmpty()) return null
+    val reference = summary.weightIncreases().maxOfOrNull { it.changedAt }
+        ?: summary.weightChanges.minOfOrNull { it.changedAt }
+        ?: return null
+    val weeksWithoutIncrease = ((System.currentTimeMillis() - reference).coerceAtLeast(0L) / 604_800_000L).toInt()
+    val zone = ZoneId.systemDefault()
+    val trainingsWithoutIncrease = summary.recentSets
+        .asSequence()
+        .filter { it.performedAt > reference }
+        .map { Instant.ofEpochMilli(it.performedAt).atZone(zone).toLocalDate() }
+        .distinct()
+        .count()
+    val reasons = buildList {
+        if (settings.staleWeeks > 0 && weeksWithoutIncrease >= settings.staleWeeks) add("$weeksWithoutIncrease weeks")
+        if (settings.staleTrainings > 0 && trainingsWithoutIncrease >= settings.staleTrainings) add("$trainingsWithoutIncrease trainings")
+    }
+    return reasons.takeIf { it.isNotEmpty() }?.joinToString(" · ", prefix = "No weight increase for ")
 }
 
 @Composable
@@ -103,8 +240,11 @@ private fun MachineCard(
     areaFrequency: Map<BodyArea, Double>,
     onMachine: (Long) -> Unit,
     onQuickSet: (MachineSummary, List<Int>) -> Unit,
+    onMetricChange: (MachineSummary, Double) -> Unit,
+    progressionSettings: ProgressionSettings,
 ) {
     var quickReps by remember(summary.machine.id) { mutableStateOf(false) }
+    var changeMetric by remember(summary.machine.id) { mutableStateOf(false) }
     Card(
         modifier = Modifier.fillMaxWidth().clickable { onMachine(summary.machine.id) },
         elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
@@ -130,8 +270,16 @@ private fun MachineCard(
                         Text(" · ${summary.machine.titleNote}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
-                val overviewValue = if (summary.machine.trackingMode == "STRENGTH") summary.recentSets.firstOrNull()?.weight ?: summary.machine.currentWeight else summary.machine.currentWeight
-                Text(formatMetric(overviewValue, summary.machine.trackingMode), style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
+                val overviewValue = if (isDirectMetric(summary.machine.trackingMode)) summary.recentSets.firstOrNull()?.weight ?: summary.machine.currentWeight else summary.machine.currentWeight
+                Text(
+                    formatMetric(overviewValue, summary.machine.trackingMode),
+                    modifier = Modifier.clickable { changeMetric = true }.padding(horizontal = 6.dp, vertical = 4.dp),
+                    style = MaterialTheme.typography.titleSmall,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+            }
+            progressionWarning(summary, progressionSettings)?.let { warning ->
+                Text(warning, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error)
             }
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
@@ -152,9 +300,10 @@ private fun MachineCard(
         }
     }
     if (quickReps) {
-        if (summary.machine.trackingMode == "STRENGTH") {
-            QuickLevelDialog(
-                initialLevel = (summary.recentSets.firstOrNull()?.weight ?: summary.machine.currentWeight).toInt(),
+        if (isDirectMetric(summary.machine.trackingMode)) {
+            QuickMetricDialog(
+                initialValue = (summary.recentSets.firstOrNull()?.weight ?: summary.machine.currentWeight).toInt(),
+                trackingMode = summary.machine.trackingMode,
                 onDismiss = { quickReps = false },
                 onAdd = { onQuickSet(summary, listOf(it)); quickReps = false },
             )
@@ -166,6 +315,15 @@ private fun MachineCard(
             )
         }
     }
+    if (changeMetric) MetricValueDialog(
+        current = summary.machine.currentWeight,
+        trackingMode = summary.machine.trackingMode,
+        onDismiss = { changeMetric = false },
+        onSave = {
+            onMetricChange(summary, it)
+            changeMetric = false
+        },
+    )
 }
 
 private fun lastTrained(summary: MachineSummary): String {
@@ -180,24 +338,35 @@ private fun lastTrained(summary: MachineSummary): String {
 }
 
 private fun sessionPatternText(summary: MachineSummary): String {
-    val sessions = summary.recentSets.groupBy {
-        Instant.ofEpochMilli(it.performedAt).atZone(ZoneId.systemDefault()).toLocalDate()
-    }.values.toList()
-    val patterns = sessions.map { session ->
-        session.sortedBy { it.performedAt }.joinToString(",") {
-            if (summary.machine.trackingMode == "STRENGTH") it.weight.toInt().toString() else it.reps.toString()
+    val batches = groupSetBatches(summary.recentSets)
+    val patterns = batches.map { batch ->
+        batch.sortedBy { it.performedAt }.joinToString(",") {
+            if (isDirectMetric(summary.machine.trackingMode)) formatNumber(it.weight) else it.reps.toString()
         }
     }
     return "Last: ${patterns.joinToString(" | ").ifEmpty { "-" }}"
 }
 
+fun groupSetBatches(sets: List<SetRecord>): List<List<SetRecord>> {
+    val batches = mutableListOf<MutableList<SetRecord>>()
+    sets.sortedByDescending { it.performedAt }.forEach { set ->
+        val currentBatch = batches.lastOrNull()
+        if (currentBatch == null || currentBatch.last().performedAt - set.performedAt > 100L) {
+            batches += mutableListOf(set)
+        } else {
+            currentBatch += set
+        }
+    }
+    return batches
+}
+
 @Composable
-fun QuickLevelDialog(initialLevel: Int, onDismiss: () -> Unit, onAdd: (Int) -> Unit) {
-    var value by remember(initialLevel) { mutableStateOf(initialLevel.coerceAtLeast(0).toString()) }
+fun QuickMetricDialog(initialValue: Int, trackingMode: String, onDismiss: () -> Unit, onAdd: (Int) -> Unit) {
+    var value by remember(initialValue) { mutableStateOf(initialValue.coerceAtLeast(0).toString()) }
     val level = value.toIntOrNull()
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Log level") },
+        title = { Text(if (trackingMode == "DURATION") "Log minutes" else "Log level") },
         text = {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedButton(onClick = { value = ((level ?: 0) - 1).coerceAtLeast(0).toString() }) { Text("−1") }
@@ -205,7 +374,7 @@ fun QuickLevelDialog(initialLevel: Int, onDismiss: () -> Unit, onAdd: (Int) -> U
                     value = value,
                     onValueChange = { value = it.filter(Char::isDigit) },
                     modifier = Modifier.weight(1f),
-                    label = { Text("Level") },
+                    label = { Text(if (trackingMode == "DURATION") "Minutes" else "Level") },
                     singleLine = true,
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                 )
@@ -249,7 +418,6 @@ fun QuickRepDialog(previousReps: List<Int>, onDismiss: () -> Unit, onAdd: (List<
         title = { Text("Log up to 5 sets") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text("0 means no set. Each wheel goes from 0 to 15.", color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
                     reps.indices.forEach { index ->
                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -297,13 +465,14 @@ fun AddMachineDialog(onDismiss: () -> Unit, onAdd: (String, Double, String) -> U
                     singleLine = true,
                 )
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    FilterChip(selected = trackingMode == "STRENGTH", onClick = { trackingMode = "STRENGTH" }, label = { Text("Strength") })
-                    FilterChip(selected = trackingMode == "WEIGHT", onClick = { trackingMode = "WEIGHT" }, label = { Text("Weight [kg]") })
+                    FilterChip(selected = trackingMode == "WEIGHT", onClick = { trackingMode = "WEIGHT" }, label = { Text("kg") })
+                    FilterChip(selected = trackingMode == "STRENGTH", onClick = { trackingMode = "STRENGTH" }, label = { Text("Level") })
+                    FilterChip(selected = trackingMode == "DURATION", onClick = { trackingMode = "DURATION" }, label = { Text("Minutes") })
                 }
                 OutlinedTextField(
                         value = weight,
                         onValueChange = { weight = it.filter { char -> char.isDigit() || char == '.' || char == ',' } },
-                        label = { Text(if (trackingMode == "WEIGHT") "Current weight (kg)" else "Current level") },
+                        label = { Text(currentMetricLabel(trackingMode)) },
                         keyboardOptions = KeyboardOptions(keyboardType = if (trackingMode == "WEIGHT") KeyboardType.Decimal else KeyboardType.Number),
                         singleLine = true,
                     )
@@ -321,10 +490,28 @@ fun AddMachineDialog(onDismiss: () -> Unit, onAdd: (String, Double, String) -> U
 
 fun formatWeight(weight: Double): String = if (weight % 1.0 == 0.0) "${weight.toInt()} kg" else "%.1f kg".format(weight)
 
-fun formatMetric(value: Double, trackingMode: String): String = if (trackingMode == "WEIGHT") {
-    formatWeight(value)
-} else if (value % 1.0 == 0.0) {
-    "Level ${value.toInt()}"
-} else {
-    "Level %.1f".format(value)
+fun formatHoursMinutes(totalMinutes: Long): String = "${totalMinutes / 60}:${(totalMinutes % 60).toString().padStart(2, '0')}"
+
+fun isDirectMetric(trackingMode: String): Boolean = trackingMode == "STRENGTH" || trackingMode == "DURATION"
+
+fun metricName(trackingMode: String): String = when (trackingMode) {
+    "WEIGHT" -> "weight"
+    "DURATION" -> "duration"
+    else -> "level"
+}
+
+fun metricTitle(trackingMode: String): String = metricName(trackingMode).replaceFirstChar { it.uppercase() }
+
+fun currentMetricLabel(trackingMode: String): String = when (trackingMode) {
+    "WEIGHT" -> "Current weight (kg)"
+    "DURATION" -> "Current duration (min)"
+    else -> "Current level"
+}
+
+private fun formatNumber(value: Double): String = if (value % 1.0 == 0.0) value.toInt().toString() else "%.1f".format(value)
+
+fun formatMetric(value: Double, trackingMode: String): String = when (trackingMode) {
+    "WEIGHT" -> formatWeight(value)
+    "DURATION" -> "${formatNumber(value)} min"
+    else -> "Level ${formatNumber(value)}"
 }

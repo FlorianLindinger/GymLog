@@ -17,8 +17,12 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -31,6 +35,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import com.gymlog.app.data.HistorySet
 import java.time.DayOfWeek
@@ -42,13 +47,24 @@ import java.time.format.DateTimeFormatter
 import kotlin.math.ceil
 
 @Composable
-fun HistoryScreen(history: List<HistorySet>, modifier: Modifier = Modifier) {
+fun HistoryScreen(
+    history: List<HistorySet>,
+    modifier: Modifier = Modifier,
+    onUpdateSet: (Long, Int, Double) -> Unit,
+    onDeleteSet: (Long) -> Unit,
+    onDeleteExerciseDay: (Long, Long, Long) -> Unit,
+    onDeleteTrainingDay: (Long, Long) -> Unit,
+) {
     val zone = ZoneId.systemDefault()
     val byDate = remember(history) {
         history.groupBy { Instant.ofEpochMilli(it.performedAt).atZone(zone).toLocalDate() }
     }
     var month by remember { mutableStateOf(YearMonth.now()) }
     var selectedDate by remember { mutableStateOf<LocalDate?>(null) }
+    var editing by remember { mutableStateOf<HistorySet?>(null) }
+    var deletingEntry by remember { mutableStateOf<HistorySet?>(null) }
+    var deletingExerciseDay by remember { mutableStateOf<ExerciseDayDeletion?>(null) }
+    var deletingTrainingDay by remember { mutableStateOf<LocalDate?>(null) }
     val selectedSets = selectedDate?.let { byDate[it].orEmpty() }.orEmpty()
 
     LazyColumn(
@@ -58,7 +74,7 @@ fun HistoryScreen(history: List<HistorySet>, modifier: Modifier = Modifier) {
     ) {
         item {
             Text("Training history", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
-            Text("Daily activity and total training volume (weight or level × reps)", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text("Daily activity across weight, level, and duration exercises", color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         item { WeeklyVolumeCard(history) }
         item {
@@ -73,24 +89,62 @@ fun HistoryScreen(history: List<HistorySet>, modifier: Modifier = Modifier) {
         }
         if (selectedDate != null) {
             item {
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Text(
                     selectedDate!!.format(DateTimeFormatter.ofPattern("EEEE, d MMMM")),
+                    modifier = Modifier.weight(1f),
                     style = MaterialTheme.typography.titleLarge,
                     fontWeight = FontWeight.SemiBold,
                 )
+                TextButton(onClick = { deletingTrainingDay = selectedDate }) { Text("Delete day") }
+                }
             }
             if (selectedSets.isEmpty()) item { Text("No sets recorded on this day.", color = MaterialTheme.colorScheme.onSurfaceVariant) }
-            items(selectedSets.size) { index -> HistorySetRow(selectedSets[index]) }
+            selectedSets.groupBy { it.machineId }.forEach { (machineId, exerciseSets) ->
+                item(key = "exercise-$machineId") {
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        Text(exerciseSets.first().machineName, Modifier.weight(1f), fontWeight = FontWeight.SemiBold)
+                        TextButton(onClick = { deletingExerciseDay = ExerciseDayDeletion(machineId, exerciseSets.first().machineName, selectedDate!!) }) { Text("Delete exercise day") }
+                    }
+                }
+                items(exerciseSets, key = { it.id }) { set -> HistorySetRow(set, { editing = set }, { deletingEntry = set }, showName = false) }
+            }
         } else {
             item { Text("Recent sessions", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold) }
             if (byDate.isEmpty()) item { Text("Your completed sets will appear here.", color = MaterialTheme.colorScheme.onSurfaceVariant) }
             byDate.entries.sortedByDescending { it.key }.take(12).forEach { (date, sets) ->
                 item(key = date.toEpochDay()) {
-                    SessionCard(date, sets)
+                    SessionCard(date, sets, onEdit = { editing = it }, onDelete = { deletingEntry = it }, onManage = { selectedDate = date })
                 }
             }
         }
         item { Spacer(Modifier.height(20.dp)) }
+    }
+    editing?.let { set ->
+        EditSetDialog(set.trackingMode, set.reps, set.weight, onDismiss = { editing = null }) { reps, weight ->
+            onUpdateSet(set.id, reps, weight)
+            editing = null
+        }
+    }
+    deletingEntry?.let { set ->
+        ConfirmDeleteDialog("Delete this entry?", "Only this recorded set will be removed.", onDismiss = { deletingEntry = null }) {
+            onDeleteSet(set.id)
+            deletingEntry = null
+        }
+    }
+    deletingExerciseDay?.let { target ->
+        ConfirmDeleteDialog("Delete ${target.machineName} for this day?", "Every ${target.machineName} entry on this day will be removed.", onDismiss = { deletingExerciseDay = null }) {
+            val (start, end) = dayBounds(target.date, zone)
+            onDeleteExerciseDay(target.machineId, start, end)
+            deletingExerciseDay = null
+        }
+    }
+    deletingTrainingDay?.let { date ->
+        ConfirmDeleteDialog("Delete the full training day?", "Every exercise entry on ${date.format(DateTimeFormatter.ofPattern("d MMMM"))} will be removed.", onDismiss = { deletingTrainingDay = null }) {
+            val (start, end) = dayBounds(date, zone)
+            onDeleteTrainingDay(start, end)
+            deletingTrainingDay = null
+        }
     }
 }
 
@@ -104,15 +158,15 @@ private fun WeeklyVolumeCard(history: List<HistorySet>) {
         history.filter {
             val date = Instant.ofEpochMilli(it.performedAt).atZone(ZoneId.systemDefault()).toLocalDate()
             !date.isBefore(start) && date.isBefore(end)
-        }.sumOf { it.volume }
+        }.size.toDouble()
     }
     val max = volumes.maxOrNull()?.takeIf { it > 0 } ?: 1.0
     val primary = MaterialTheme.colorScheme.primary
     val grid = MaterialTheme.colorScheme.outlineVariant
     Card(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text("8-week volume trend", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-            Text("This week: ${formatVolume(volumes.last())}", color = MaterialTheme.colorScheme.primary)
+            Text("8-week activity trend", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+            Text("This week: ${volumes.last().toInt()} logged sets", color = MaterialTheme.colorScheme.primary)
             Canvas(Modifier.fillMaxWidth().height(150.dp)) {
                 drawLine(grid, Offset(0f, size.height), Offset(size.width, size.height), strokeWidth = 2f)
                 val gap = 8f
@@ -150,7 +204,7 @@ private fun CalendarCard(
     val rows = ceil(cells / 7.0).toInt()
     val monthVolumes = (1..month.lengthOfMonth()).associate { day ->
         val date = month.atDay(day)
-        date to byDate[date].orEmpty().sumOf { it.volume }
+        date to byDate[date].orEmpty().size.toDouble()
     }
     val maxVolume = monthVolumes.values.maxOrNull()?.takeIf { it > 0 } ?: 1.0
     Card(Modifier.fillMaxWidth()) {
@@ -189,36 +243,115 @@ private fun CalendarCard(
                     }
                 }
             }
-            Text("Darker days had more total volume. Tap a date for its sets.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text("Darker days had more logged sets. Tap a date for details.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
 }
 
 @Composable
-private fun SessionCard(date: LocalDate, sets: List<HistorySet>) {
+private fun SessionCard(
+    date: LocalDate,
+    sets: List<HistorySet>,
+    onEdit: (HistorySet) -> Unit,
+    onDelete: (HistorySet) -> Unit,
+    onManage: () -> Unit,
+) {
+    val durationMinutes = if (sets.size < 2) 0L else ((sets.maxOf { it.performedAt } - sets.minOf { it.performedAt }) / 60_000L).coerceAtLeast(0L)
     Card(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(7.dp)) {
             Row(Modifier.fillMaxWidth()) {
                 Text(date.format(DateTimeFormatter.ofPattern("EEE, d MMM")), Modifier.weight(1f), fontWeight = FontWeight.SemiBold)
-                Text(formatVolume(sets.sumOf { it.volume }), color = MaterialTheme.colorScheme.primary)
+                Text(formatSessionTotals(sets), color = MaterialTheme.colorScheme.primary)
             }
-            Text("${sets.size} sets · ${sets.map { it.machineId }.distinct().size} exercises", color = MaterialTheme.colorScheme.onSurfaceVariant)
-            sets.take(4).forEach { HistorySetRow(it) }
+            Text("${sets.size} sets · ${sets.map { it.machineId }.distinct().size} exercises · ${formatHoursMinutes(durationMinutes)}", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            sets.take(4).forEach { HistorySetRow(it, onEdit, onDelete) }
             if (sets.size > 4) Text("+ ${sets.size - 4} more sets", style = MaterialTheme.typography.bodySmall)
+            TextButton(onClick = onManage) { Text("Manage entries") }
         }
     }
 }
 
 @Composable
-private fun HistorySetRow(set: HistorySet) {
-    Row(Modifier.fillMaxWidth().padding(vertical = 2.dp)) {
-        Text(set.machineName, Modifier.weight(1f))
+private fun HistorySetRow(set: HistorySet, onEdit: (HistorySet) -> Unit, onDelete: (HistorySet) -> Unit, showName: Boolean = true) {
+    Row(Modifier.fillMaxWidth().padding(vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+        if (showName) Text(set.machineName, Modifier.weight(1f)) else Spacer(Modifier.weight(1f))
         Text(
-            if (set.trackingMode == "STRENGTH") formatMetric(set.weight, set.trackingMode)
+            if (isDirectMetric(set.trackingMode)) formatMetric(set.weight, set.trackingMode)
             else "${set.reps} × ${formatMetric(set.weight, set.trackingMode)}",
             fontWeight = FontWeight.Medium,
         )
+        Text("Edit", Modifier.clickable { onEdit(set) }.padding(horizontal = 7.dp, vertical = 3.dp), color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelMedium)
+        Text("Delete", Modifier.clickable { onDelete(set) }.padding(horizontal = 5.dp, vertical = 3.dp), color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.labelMedium)
     }
 }
 
+private data class ExerciseDayDeletion(val machineId: Long, val machineName: String, val date: LocalDate)
+
+private fun dayBounds(date: LocalDate, zone: ZoneId): Pair<Long, Long> =
+    date.atStartOfDay(zone).toInstant().toEpochMilli() to date.plusDays(1).atStartOfDay(zone).toInstant().toEpochMilli()
+
+@Composable
+private fun ConfirmDeleteDialog(title: String, message: String, onDismiss: () -> Unit, onConfirm: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(title) },
+        text = { Text(message) },
+        confirmButton = { Button(onClick = onConfirm) { Text("Delete") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
+}
+
+@Composable
+fun EditSetDialog(
+    trackingMode: String,
+    initialReps: Int,
+    initialWeight: Double,
+    onDismiss: () -> Unit,
+    onSave: (Int, Double) -> Unit,
+) {
+    var reps by remember(initialReps) { mutableStateOf(initialReps.toString()) }
+    var weight by remember(initialWeight) { mutableStateOf(formatHistoryAmount(initialWeight)) }
+    val parsedReps = reps.toIntOrNull()
+    val parsedWeight = weight.replace(',', '.').toDoubleOrNull()
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Edit entry") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                if (!isDirectMetric(trackingMode)) OutlinedTextField(
+                    value = reps,
+                    onValueChange = { reps = it.filter(Char::isDigit) },
+                    label = { Text("Reps") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    singleLine = true,
+                )
+                OutlinedTextField(
+                    value = weight,
+                    onValueChange = { weight = it.filter { char -> char.isDigit() || char == '.' || char == ',' } },
+                    label = { Text(when (trackingMode) { "WEIGHT" -> "Weight (kg)"; "DURATION" -> "Minutes"; else -> "Level" }) },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                    singleLine = true,
+                )
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = { onSave(if (isDirectMetric(trackingMode)) 1 else parsedReps ?: 1, parsedWeight ?: 0.0) },
+                enabled = parsedWeight != null && parsedWeight >= 0 && (isDirectMetric(trackingMode) || parsedReps != null && parsedReps > 0),
+            ) { Text("Save") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
+}
+
 private fun formatVolume(volume: Double): String = if (volume >= 1000) "%.1f t".format(volume / 1000) else "${volume.toInt()} kg"
+
+private fun formatSessionTotals(sets: List<HistorySet>): String {
+    val parts = mutableListOf<String>()
+    sets.filter { it.trackingMode == "WEIGHT" }.sumOf { it.volume }.takeIf { it > 0 }?.let { parts += formatVolume(it) }
+    sets.filter { it.trackingMode == "STRENGTH" }.sumOf { it.weight }.takeIf { it > 0 }?.let { parts += "${formatHistoryAmount(it)} levels" }
+    sets.filter { it.trackingMode == "DURATION" }.sumOf { it.weight }.takeIf { it > 0 }?.let { parts += "${formatHistoryAmount(it)} min" }
+    return parts.joinToString(" · ").ifEmpty { "0" }
+}
+
+private fun formatHistoryAmount(value: Double): String = if (value % 1.0 == 0.0) value.toInt().toString() else "%.1f".format(value)

@@ -21,12 +21,12 @@ enum class BodyArea(val label: String, val color: Long, val selectable: Boolean 
     SHOULDERS("Shoulders", 0xFFFFA62B),
     BICEPS("Biceps", 0xFF9B72CF),
     TRICEPS("Triceps", 0xFFCB6CE6),
-    FOREARMS("Forearms", 0xFF8D6E63),
+    FOREARMS("Forearms", 0xFF8D6E63, false),
     CORE("Core", 0xFFF2C14E),
-    GLUTES("Glutes", 0xFFE76FAD, false),
-    QUADS("Quads", 0xFF43AA8B, false),
-    HAMSTRINGS("Hamstrings", 0xFF277DA1, false),
-    CALVES("Calves", 0xFF90BE6D, false),
+    GLUTES("Glutes", 0xFFE76FAD),
+    QUADS("Quads", 0xFF43AA8B),
+    HAMSTRINGS("Hamstrings", 0xFF277DA1),
+    CALVES("Calves", 0xFF90BE6D),
     FULL_BODY("Full body", 0xFF577590, false),
 }
 
@@ -51,6 +51,25 @@ data class SetRecord(
 
 data class WeightChange(val weight: Double, val changedAt: Long)
 
+data class ProgressionSettings(
+    val staleWeeks: Int = 4,
+    val staleTrainings: Int = 5,
+)
+
+data class TrainingPlan(
+    val id: Long,
+    val name: String,
+    val sortOrder: Int,
+)
+
+data class WeightIncrease(
+    val machineId: Long,
+    val machineName: String,
+    val fromWeight: Double,
+    val toWeight: Double,
+    val changedAt: Long,
+)
+
 data class MachineSummary(
     val machine: Machine,
     val areas: List<AreaAssignment>,
@@ -58,6 +77,15 @@ data class MachineSummary(
     val weightChanges: List<WeightChange>,
     val setsLast30Days: Int,
 )
+
+fun MachineSummary.weightIncreases(): List<WeightIncrease> = weightChanges
+    .sortedBy { it.changedAt }
+    .zipWithNext()
+    .mapNotNull { (previous, current) ->
+        current.takeIf { it.weight > previous.weight }?.let {
+            WeightIncrease(machine.id, machine.name, previous.weight, current.weight, current.changedAt)
+        }
+    }
 
 data class HistorySet(
     val id: Long,

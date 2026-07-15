@@ -1,7 +1,6 @@
 package com.gymlog.app.ui
 
 import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -43,13 +42,9 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.res.painterResource
-import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
-import com.gymlog.app.R
 import com.gymlog.app.data.AreaAssignment
 import com.gymlog.app.data.BodyArea
 import com.gymlog.app.data.GymRepository
@@ -78,70 +73,82 @@ fun DetailScreen(
     var showEdit by remember { mutableStateOf(false) }
     var showAreas by remember { mutableStateOf(false) }
     var confirmDelete by remember { mutableStateOf(false) }
+    var editingSet by remember { mutableStateOf<SetRecord?>(null) }
+    var expandedBatch by remember { mutableStateOf<Long?>(null) }
     val machine = summary.machine
     val highest = summary.weightChanges.maxOfOrNull { it.weight } ?: machine.currentWeight
     val first = summary.weightChanges.lastOrNull()?.weight ?: machine.currentWeight
     val lastChange = summary.weightChanges.firstOrNull()?.changedAt
 
     Column(
-        modifier = modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp),
+        modifier = modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(8.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
+        Card(modifier = Modifier.fillMaxWidth()) {
+            Column(Modifier.padding(horizontal = 10.dp, vertical = 4.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("Notes", Modifier.weight(1f), style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+                    Text("Edit", Modifier.clickable { showEdit = true }.padding(horizontal = 8.dp, vertical = 4.dp), color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelLarge)
+                }
+                Text(if (machine.notes.isBlank()) "No notes yet. Add seat positions, form cues, or other reminders." else machine.notes, color = if (machine.notes.isBlank()) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface)
+            }
+        }
+
         if (summary.areas.isEmpty()) {
             OutlinedButton(onClick = { showAreas = true }, modifier = Modifier.fillMaxWidth()) { Text("+ Choose training areas") }
         } else {
             Card(modifier = Modifier.fillMaxWidth()) {
-                Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text("Training areas", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                Column(Modifier.padding(8.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        Text("Training areas", Modifier.weight(1f), style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+                        Text("Edit", Modifier.clickable { showAreas = true }.padding(horizontal = 6.dp, vertical = 2.dp), color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelLarge)
+                    }
                     summary.areas.forEach { assignment ->
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Box(Modifier.width(if (assignment.strength == Strength.FULL) 34.dp else 17.dp).height(8.dp).background(Color(assignment.displayColor), RoundedCornerShape(8.dp)))
-                            Spacer(Modifier.width(10.dp))
+                            Spacer(Modifier.width(6.dp))
                             Text(assignment.area.label, Modifier.weight(1f))
                             Text(assignment.strength.label, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                     }
-                    TextButton(onClick = { showAreas = true }) { Text("Edit areas") }
                 }
             }
         }
 
-        Card(modifier = Modifier.fillMaxWidth()) {
-            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text(if (machine.trackingMode == "WEIGHT") "Current weight" else "Current level", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Text(formatMetric(machine.currentWeight, machine.trackingMode), style = MaterialTheme.typography.displaySmall, fontWeight = FontWeight.Bold)
-                Text(weightChangeDescription(summary.weightChanges, machine.trackingMode))
-                Button(onClick = { showWeight = true }, modifier = Modifier.fillMaxWidth()) {
-                    Text(if (machine.trackingMode == "WEIGHT") "Change current weight" else "Change current level")
-                }
+        Card(modifier = Modifier.fillMaxWidth().clickable { showWeight = true }) {
+            Column(Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 6.dp), verticalArrangement = Arrangement.spacedBy(0.dp)) {
+                    Text(formatMetric(machine.currentWeight, machine.trackingMode), style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
+                    Text(weightChangeDescription(summary.weightChanges, machine.trackingMode), style = MaterialTheme.typography.bodySmall)
             }
         }
 
         Card(modifier = Modifier.fillMaxWidth()) {
-            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text("Add today's set", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+            Column(Modifier.padding(horizontal = 10.dp, vertical = 6.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f)) {
-                        Text("Pause between sets", style = MaterialTheme.typography.labelMedium)
-                        Text(
-                            machine.pauseTime.ifBlank { "No pause note saved" },
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
+                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(0.dp)) {
+                        Text("Add today's set", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+                        Text("Pause: ${machine.pauseTime.ifBlank { "not set" }}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
-                    TextButton(onClick = { showEdit = true }) { Text("Edit") }
+                    Text("Edit", Modifier.clickable { showEdit = true }.padding(horizontal = 8.dp, vertical = 4.dp), color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelLarge)
                 }
                 Button(onClick = { showQuickSet = true }, modifier = Modifier.fillMaxWidth()) {
-                    Text(if (machine.trackingMode == "STRENGTH") "+ Log level" else "+ Log reps at ${formatMetric(machine.currentWeight, machine.trackingMode)}")
+                    Text(when (machine.trackingMode) {
+                        "STRENGTH" -> "+ Log level"
+                        "DURATION" -> "+ Log minutes"
+                        else -> "+ Log reps at ${formatMetric(machine.currentWeight, machine.trackingMode)}"
+                    })
                 }
                 val recentAmounts = summary.recentSets.map { it.reps }.distinct().take(3)
                 if (machine.trackingMode == "WEIGHT" && recentAmounts.isNotEmpty()) {
                     Text("Quick repeat", style = MaterialTheme.typography.labelMedium)
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         recentAmounts.forEach { reps ->
-                            OutlinedButton(onClick = {
+                            Text("$reps reps", Modifier
+                                .background(MaterialTheme.colorScheme.secondaryContainer, RoundedCornerShape(8.dp))
+                                .clickable {
                                 repository.addSet(machine.id, reps, machine.currentWeight)
                                 onChanged()
-                            }) { Text("$reps reps") }
+                            }.padding(horizontal = 10.dp, vertical = 5.dp), style = MaterialTheme.typography.labelMedium)
                         }
                     }
                 }
@@ -149,8 +156,8 @@ fun DetailScreen(
         }
 
         Card(modifier = Modifier.fillMaxWidth()) {
-            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text(if (machine.trackingMode == "WEIGHT") "Weight statistics" else "Level statistics", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+            Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text("${metricTitle(machine.trackingMode)} statistics", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                     Stat("Started", formatMetric(first, machine.trackingMode))
                     Stat("Current", formatMetric(machine.currentWeight, machine.trackingMode))
@@ -159,20 +166,20 @@ fun DetailScreen(
                 Text("Chart window", style = MaterialTheme.typography.labelMedium)
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                     listOf("1M", "3M", "6M", "1Y", "ALL").forEach { window ->
-                        FilterChip(
+                        CompactChoice(
                             selected = machine.chartWindow == window,
                             onClick = { repository.setChartWindow(machine.id, window); onChanged() },
-                            label = { Text(window) },
+                            label = window,
                         )
                     }
                 }
                 Text("Trailing average", style = MaterialTheme.typography.labelMedium)
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     listOf(0 to "Off", 3 to "3", 5 to "5", 10 to "10").forEach { (amount, label) ->
-                        FilterChip(
+                        CompactChoice(
                             selected = machine.trailingAverage == amount,
                             onClick = { repository.setTrailingAverage(machine.id, amount); onChanged() },
-                            label = { Text(label) },
+                            label = label,
                         )
                     }
                 }
@@ -180,37 +187,49 @@ fun DetailScreen(
                 val visibleWeights = summary.weightChanges.filter { cutoff == null || it.changedAt >= cutoff }
                 val visibleSets = summary.recentSets.filter { cutoff == null || it.performedAt >= cutoff }
                 if (visibleWeights.size > 1) WeightChart(visibleWeights, machine.trailingAverage)
-                Text(if (machine.trackingMode == "WEIGHT") "Volume (weight × reps)" else "Volume (level × reps)", style = MaterialTheme.typography.labelLarge)
+                Text(when (machine.trackingMode) {
+                    "WEIGHT" -> "Volume (weight × reps)"
+                    "DURATION" -> "Minutes logged"
+                    else -> "Levels logged"
+                }, style = MaterialTheme.typography.labelLarge)
                 VolumeChart(visibleSets, machine.trailingAverage)
-                Text("${summary.weightChanges.size} ${if (machine.trackingMode == "WEIGHT") "weight" else "level"} changes · ${summary.recentSets.size} recorded sets", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("${summary.weightChanges.size} ${metricName(machine.trackingMode)} changes · ${summary.recentSets.size} recorded sets", color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
 
         Card(modifier = Modifier.fillMaxWidth()) {
-            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("Notes", Modifier.weight(1f), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-                    TextButton(onClick = { showEdit = true }) { Text("Edit") }
-                }
-                Text(if (machine.notes.isBlank()) "No notes yet. Add seat positions, form cues, or other reminders." else machine.notes, color = if (machine.notes.isBlank()) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface)
-            }
-        }
-
-        Card(modifier = Modifier.fillMaxWidth()) {
-            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text("Recent sets", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-                if (summary.recentSets.isEmpty()) Text("No sets recorded yet.", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                summary.recentSets.take(12).forEachIndexed { index, set ->
+            Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text("Recent entries", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+                if (summary.recentSets.isEmpty()) Text("No entries recorded yet.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                groupSetBatches(summary.recentSets).take(12).forEachIndexed { index, batch ->
+                    val ordered = batch.sortedBy { it.performedAt }
+                    val batchKey = ordered.first().performedAt
                     if (index > 0) HorizontalDivider()
-                    Row(Modifier.fillMaxWidth().padding(vertical = 7.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Column(Modifier.weight(1f)) {
-                            Text(if (machine.trackingMode == "STRENGTH") formatMetric(set.weight, machine.trackingMode) else "${set.reps} reps × ${formatMetric(set.weight, machine.trackingMode)}", fontWeight = FontWeight.Medium)
-                            Text(formatTimestamp(set.performedAt), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        }
-                        TextButton(onClick = {
-                            repository.deleteSet(set.id)
+                    Row(Modifier.fillMaxWidth().padding(vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            if (isDirectMetric(machine.trackingMode)) "${formatMetric(ordered.first().weight, machine.trackingMode)} - ${formatTimestamp(batchKey)}"
+                            else "${formatMetric(ordered.first().weight, machine.trackingMode)} - ${ordered.joinToString(",") { it.reps.toString() }} - ${formatTimestamp(batchKey)}",
+                            modifier = Modifier.weight(1f),
+                            fontWeight = FontWeight.Medium,
+                        )
+                        Text(if (expandedBatch == batchKey) "Close" else "Edit", Modifier.clickable { expandedBatch = if (expandedBatch == batchKey) null else batchKey }.padding(horizontal = 6.dp, vertical = 3.dp), color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelMedium)
+                        Text("Delete", Modifier.clickable {
+                            batch.forEach { repository.deleteSet(it.id) }
                             onChanged()
-                        }) { Text("Delete") }
+                        }.padding(horizontal = 6.dp, vertical = 3.dp), color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.labelMedium)
+                    }
+                    if (expandedBatch == batchKey) ordered.forEachIndexed { setIndex, set ->
+                        Row(Modifier.fillMaxWidth().padding(start = 12.dp, top = 1.dp, bottom = 1.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                if (isDirectMetric(machine.trackingMode)) "Entry ${setIndex + 1}: ${formatMetric(set.weight, machine.trackingMode)}"
+                                else "Set ${setIndex + 1}: ${set.reps} reps",
+                                Modifier.weight(1f),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                            Text("Edit", Modifier.clickable { editingSet = set }.padding(horizontal = 6.dp, vertical = 2.dp), color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelSmall)
+                            Text("Delete", Modifier.clickable { repository.deleteSet(set.id); onChanged() }.padding(horizontal = 6.dp, vertical = 2.dp), color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.labelSmall)
+                        }
                     }
                 }
             }
@@ -218,16 +237,17 @@ fun DetailScreen(
 
         OutlinedButton(onClick = { showEdit = true }, modifier = Modifier.fillMaxWidth()) { Text("Edit exercise details") }
         TextButton(onClick = { confirmDelete = true }, modifier = Modifier.fillMaxWidth()) { Text("Delete exercise", color = MaterialTheme.colorScheme.error) }
-        Spacer(Modifier.height(24.dp))
+        Spacer(Modifier.height(8.dp))
     }
 
     if (showQuickSet) {
-        if (machine.trackingMode == "STRENGTH") {
-            QuickLevelDialog(
-                initialLevel = (summary.recentSets.firstOrNull()?.weight ?: machine.currentWeight).toInt(),
+        if (isDirectMetric(machine.trackingMode)) {
+            QuickMetricDialog(
+                initialValue = (summary.recentSets.firstOrNull()?.weight ?: machine.currentWeight).toInt(),
+                trackingMode = machine.trackingMode,
                 onDismiss = { showQuickSet = false },
                 onAdd = {
-                    repository.addLevelSet(machine.id, it)
+                    repository.addMetricSet(machine.id, it)
                     onChanged()
                     showQuickSet = false
                 },
@@ -244,7 +264,7 @@ fun DetailScreen(
             )
         }
     }
-    if (showWeight) WeightDialog(machine.currentWeight, machine.trackingMode, onDismiss = { showWeight = false }) {
+    if (showWeight) MetricValueDialog(machine.currentWeight, machine.trackingMode, onDismiss = { showWeight = false }) {
         repository.changeWeight(machine.id, it)
         onChanged()
         showWeight = false
@@ -266,6 +286,13 @@ fun DetailScreen(
         confirmButton = { Button(onClick = { repository.deleteMachine(machine.id); onDeleted() }) { Text("Delete") } },
         dismissButton = { TextButton(onClick = { confirmDelete = false }) { Text("Cancel") } },
     )
+    editingSet?.let { set ->
+        EditSetDialog(machine.trackingMode, set.reps, set.weight, onDismiss = { editingSet = null }) { reps, weight ->
+            repository.updateSet(set.id, reps, weight)
+            onChanged()
+            editingSet = null
+        }
+    }
 }
 
 @Composable
@@ -277,13 +304,26 @@ private fun Stat(label: String, value: String) {
 }
 
 @Composable
+private fun CompactChoice(selected: Boolean, onClick: () -> Unit, label: String) {
+    Text(
+        label,
+        modifier = Modifier
+            .background(if (selected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(8.dp))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 9.dp, vertical = 5.dp),
+        color = if (selected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
+        style = MaterialTheme.typography.labelMedium,
+    )
+}
+
+@Composable
 private fun WeightChart(changesNewestFirst: List<WeightChange>, trailingAverage: Int) {
     val values = movingAverage(changesNewestFirst.asReversed().map { it.weight }, trailingAverage)
     val min = values.minOrNull() ?: 0.0
     val max = values.maxOrNull() ?: 0.0
     val primary = MaterialTheme.colorScheme.primary
     val grid = MaterialTheme.colorScheme.outlineVariant
-    Canvas(Modifier.fillMaxWidth().height(120.dp).padding(vertical = 8.dp)) {
+    Canvas(Modifier.fillMaxWidth().height(80.dp).padding(vertical = 4.dp)) {
         drawLine(grid, Offset(0f, size.height), Offset(size.width, size.height), strokeWidth = 2f)
         val range = (max - min).takeIf { it > 0 } ?: 1.0
         val points = values.mapIndexed { index, value ->
@@ -309,7 +349,7 @@ private fun VolumeChart(sets: List<SetRecord>, trailingAverage: Int) {
     val values = movingAverage(daily, trailingAverage).takeLast(24)
     val max = values.maxOrNull()?.takeIf { it > 0 } ?: 1.0
     val primary = MaterialTheme.colorScheme.secondary
-    Canvas(Modifier.fillMaxWidth().height(100.dp).padding(vertical = 8.dp)) {
+    Canvas(Modifier.fillMaxWidth().height(64.dp).padding(vertical = 4.dp)) {
         val gap = 4f
         val width = (size.width - gap * (values.size - 1)) / values.size
         values.forEachIndexed { index, value ->
@@ -331,13 +371,17 @@ private fun movingAverage(values: List<Double>, amount: Int): List<Double> {
 }
 
 private fun weightChangeDescription(changes: List<WeightChange>, trackingMode: String): String {
-    val metric = if (trackingMode == "WEIGHT") "weight" else "level"
+    val metric = metricName(trackingMode)
     val latest = changes.firstOrNull() ?: return "No $metric changes yet"
     val previous = changes.getOrNull(1) ?: return "Initial $metric set ${timeSince(latest.changedAt)} ago"
     val delta = latest.weight - previous.weight
     val amount = if (delta % 1.0 == 0.0) delta.toInt().toString() else "%.1f".format(delta)
     val signed = if (delta > 0) "+$amount" else amount
-    val unit = if (trackingMode == "WEIGHT") "kg" else if (kotlin.math.abs(delta) == 1.0) "level" else "levels"
+    val unit = when (trackingMode) {
+        "WEIGHT" -> "kg"
+        "DURATION" -> "min"
+        else -> if (kotlin.math.abs(delta) == 1.0) "level" else "levels"
+    }
     return "Changed by $signed $unit ${timeSince(latest.changedAt)} ago"
 }
 
@@ -353,13 +397,13 @@ private fun chartCutoff(window: String): Long? {
 }
 
 @Composable
-private fun WeightDialog(current: Double, trackingMode: String, onDismiss: () -> Unit, onSave: (Double) -> Unit) {
+fun MetricValueDialog(current: Double, trackingMode: String, onDismiss: () -> Unit, onSave: (Double) -> Unit) {
     var value by remember { mutableStateOf(if (current % 1.0 == 0.0) current.toInt().toString() else current.toString()) }
     val parsed = value.replace(',', '.').toDoubleOrNull()
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text(if (trackingMode == "WEIGHT") "Change weight" else "Change level") },
-        text = { OutlinedTextField(value, { value = it.filter { char -> char.isDigit() || char == '.' || char == ',' } }, label = { Text(if (trackingMode == "WEIGHT") "New weight (kg)" else "New level") }, singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = if (trackingMode == "WEIGHT") KeyboardType.Decimal else KeyboardType.Number)) },
+        title = { Text("Change ${metricName(trackingMode)}") },
+        text = { OutlinedTextField(value, { value = it.filter { char -> char.isDigit() || char == '.' || char == ',' } }, label = { Text(when (trackingMode) { "WEIGHT" -> "New weight (kg)"; "DURATION" -> "New duration (min)"; else -> "New level" }) }, singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = if (trackingMode == "WEIGHT") KeyboardType.Decimal else KeyboardType.Number)) },
         confirmButton = { Button(onClick = { parsed?.let(onSave) }, enabled = parsed != null && parsed >= 0) { Text("Save") } },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
     )
@@ -434,8 +478,9 @@ private fun AreaDialog(
                 Text("Tap a colored body region to cycle: none → half → full.", color = MaterialTheme.colorScheme.onSurfaceVariant)
                 BodyMapPicker(
                     choices = choices,
+                    colors = colors,
                     onArea = ::cycle,
-                    modifier = Modifier.fillMaxWidth().height(260.dp),
+                    modifier = Modifier.fillMaxWidth().height(280.dp),
                 )
                 Text("Most-used areas appear first. Tap a color dot to change it.", style = MaterialTheme.typography.bodySmall)
                 sortedAreas.forEach { area ->
@@ -473,55 +518,95 @@ private fun AreaDialog(
 @Composable
 private fun BodyMapPicker(
     choices: Map<BodyArea, Strength?>,
+    colors: Map<BodyArea, Long>,
     onArea: (BodyArea) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val uriHandler = LocalUriHandler.current
     Box(modifier, contentAlignment = Alignment.Center) {
-        Image(
-            painter = painterResource(R.drawable.openstax_muscles),
-            contentDescription = "OpenStax front and back muscle diagram. Tap an upper-body region to select it.",
-            contentScale = ContentScale.Crop,
-            alignment = Alignment.TopCenter,
+        val baseColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = .32f)
+        Canvas(
             modifier = Modifier.fillMaxSize().pointerInput(Unit) {
                 detectTapGestures { position ->
                     areaFromBodyMap(position.x / size.width, position.y / size.height)?.let(onArea)
                 }
             },
-        )
+        ) {
+            fun drawFigure(cx: Float) {
+                drawCircle(baseColor, radius = size.width * .035f, center = Offset(size.width * cx, size.height * .12f))
+                drawRoundRect(baseColor, Offset(size.width * (cx - .065f), size.height * .19f), androidx.compose.ui.geometry.Size(size.width * .13f, size.height * .34f), androidx.compose.ui.geometry.CornerRadius(18f, 18f))
+                drawLine(baseColor, Offset(size.width * (cx - .06f), size.height * .24f), Offset(size.width * (cx - .15f), size.height * .48f), strokeWidth = size.width * .035f, cap = StrokeCap.Round)
+                drawLine(baseColor, Offset(size.width * (cx + .06f), size.height * .24f), Offset(size.width * (cx + .15f), size.height * .48f), strokeWidth = size.width * .035f, cap = StrokeCap.Round)
+                drawLine(baseColor, Offset(size.width * (cx - .035f), size.height * .50f), Offset(size.width * (cx - .07f), size.height * .92f), strokeWidth = size.width * .05f, cap = StrokeCap.Round)
+                drawLine(baseColor, Offset(size.width * (cx + .035f), size.height * .50f), Offset(size.width * (cx + .07f), size.height * .92f), strokeWidth = size.width * .05f, cap = StrokeCap.Round)
+            }
+            fun selectedColor(area: BodyArea): Color? = choices[area]?.let { strength ->
+                Color(colors[area] ?: area.color).copy(alpha = if (strength == Strength.FULL) .95f else .55f)
+            }
+            fun region(area: BodyArea, x: Float, y: Float, width: Float, height: Float) {
+                selectedColor(area)?.let { color ->
+                    drawRoundRect(color, Offset(size.width * x, size.height * y), androidx.compose.ui.geometry.Size(size.width * width, size.height * height), androidx.compose.ui.geometry.CornerRadius(12f, 12f))
+                }
+            }
+            fun limb(area: BodyArea, startX: Float, startY: Float, endX: Float, endY: Float, width: Float) {
+                selectedColor(area)?.let { color -> drawLine(color, Offset(size.width * startX, size.height * startY), Offset(size.width * endX, size.height * endY), strokeWidth = size.width * width, cap = StrokeCap.Round) }
+            }
+
+            drawFigure(.25f)
+            drawFigure(.75f)
+            region(BodyArea.CHEST, .19f, .25f, .12f, .11f)
+            region(BodyArea.CORE, .20f, .37f, .10f, .14f)
+            limb(BodyArea.SHOULDERS, .16f, .25f, .34f, .25f, .055f)
+            limb(BodyArea.BICEPS, .15f, .29f, .11f, .42f, .035f)
+            limb(BodyArea.BICEPS, .35f, .29f, .39f, .42f, .035f)
+            limb(BodyArea.QUADS, .215f, .57f, .19f, .73f, .045f)
+            limb(BodyArea.QUADS, .285f, .57f, .31f, .73f, .045f)
+            limb(BodyArea.CALVES, .19f, .76f, .18f, .90f, .035f)
+            limb(BodyArea.CALVES, .31f, .76f, .32f, .90f, .035f)
+
+            limb(BodyArea.SHOULDERS, .66f, .25f, .84f, .25f, .055f)
+            region(BodyArea.UPPER_BACK, .69f, .25f, .12f, .14f)
+            region(BodyArea.LOWER_BACK, .70f, .39f, .10f, .12f)
+            limb(BodyArea.TRICEPS, .65f, .29f, .61f, .42f, .035f)
+            limb(BodyArea.TRICEPS, .85f, .29f, .89f, .42f, .035f)
+            region(BodyArea.GLUTES, .68f, .50f, .14f, .10f)
+            limb(BodyArea.HAMSTRINGS, .715f, .61f, .69f, .75f, .045f)
+            limb(BodyArea.HAMSTRINGS, .785f, .61f, .81f, .75f, .045f)
+            limb(BodyArea.CALVES, .69f, .77f, .68f, .90f, .035f)
+            limb(BodyArea.CALVES, .81f, .77f, .82f, .90f, .035f)
+        }
+        Row(Modifier.align(Alignment.TopCenter).fillMaxWidth(), horizontalArrangement = Arrangement.SpaceAround) {
+            Text("Front", style = MaterialTheme.typography.labelMedium)
+            Text("Back", style = MaterialTheme.typography.labelMedium)
+        }
         Text(
             "Selected: ${choices.count { it.value != null }}",
             modifier = Modifier.align(Alignment.BottomCenter).background(MaterialTheme.colorScheme.surface.copy(alpha = .85f), RoundedCornerShape(8.dp)).padding(5.dp),
-            style = MaterialTheme.typography.labelSmall,
-        )
-        Text(
-            "OpenStax · CC BY 4.0 · cropped",
-            modifier = Modifier.align(Alignment.TopCenter)
-                .background(MaterialTheme.colorScheme.surface.copy(alpha = .88f), RoundedCornerShape(6.dp))
-                .clickable { uriHandler.openUri("https://commons.wikimedia.org/wiki/File:1105_Anterior_and_Posterior_Views_of_Muscles.jpg") }
-                .padding(4.dp),
             style = MaterialTheme.typography.labelSmall,
         )
     }
 }
 
 private fun areaFromBodyMap(x: Float, y: Float): BodyArea? {
-    if (y !in .16f..0.76f) return null
     val front = x < .5f
-    val localX = if (front) x / .5f else (x - .5f) / .5f
-    val center = localX in .28f..72f
+    val centerX = if (front) .25f else .75f
+    val distance = kotlin.math.abs(x - centerX)
     return if (front) when {
-        y < .36f && center -> BodyArea.CHEST
-        y < .39f -> BodyArea.SHOULDERS
-        y < .58f && center -> BodyArea.CORE
-        y < .48f -> BodyArea.BICEPS
-        else -> BodyArea.FOREARMS
+        y in 0.20f..0.29f && distance in 0.07f..0.18f -> BodyArea.SHOULDERS
+        y in 0.25f..0.37f && distance < .075f -> BodyArea.CHEST
+        y in 0.29f..0.48f && distance in 0.09f..0.20f -> BodyArea.BICEPS
+        y in 0.37f..0.53f && distance < .075f -> BodyArea.CORE
+        y in 0.54f..0.75f && distance < .10f -> BodyArea.QUADS
+        y in 0.75f..0.95f && distance < .11f -> BodyArea.CALVES
+        else -> null
     } else when {
-        y < .36f && !center -> BodyArea.SHOULDERS
-        y < .46f && center -> BodyArea.UPPER_BACK
-        y < .49f && !center -> BodyArea.TRICEPS
-        y < .62f && center -> BodyArea.LOWER_BACK
-        else -> BodyArea.FOREARMS
+        y in 0.20f..0.29f && distance in 0.07f..0.18f -> BodyArea.SHOULDERS
+        y in 0.25f..0.40f && distance < .075f -> BodyArea.UPPER_BACK
+        y in 0.29f..0.48f && distance in 0.09f..0.20f -> BodyArea.TRICEPS
+        y in 0.40f..0.52f && distance < .07f -> BodyArea.LOWER_BACK
+        y in 0.50f..0.62f && distance < .10f -> BodyArea.GLUTES
+        y in 0.62f..0.78f && distance < .10f -> BodyArea.HAMSTRINGS
+        y in 0.78f..0.95f && distance < .11f -> BodyArea.CALVES
+        else -> null
     }
 }
 

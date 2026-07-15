@@ -32,7 +32,7 @@ import androidx.compose.ui.unit.dp
 import com.gymlog.app.data.GymRepository
 import com.gymlog.app.data.MachineSummary
 
-private enum class Screen { OVERVIEW, STATS, HISTORY, REORDER, BACKUP, DETAIL }
+private enum class Screen { OVERVIEW, STATS, HISTORY, REORDER, BACKUP, PLANS, DETAIL }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -45,6 +45,9 @@ fun GymLogApp(
     var machines by remember { mutableStateOf(repository.loadMachines()) }
     var history by remember { mutableStateOf(repository.loadHistory()) }
     var areaColors by remember { mutableStateOf(repository.loadAreaColors()) }
+    var trainingPlans by remember { mutableStateOf(repository.loadTrainingPlans()) }
+    var activeTrainingPlanId by remember { mutableStateOf(repository.activeTrainingPlanId()) }
+    var progressionSettings by remember { mutableStateOf(repository.loadProgressionSettings()) }
     var screen by remember { mutableStateOf(Screen.OVERVIEW) }
     var selectedId by remember { mutableStateOf<Long?>(null) }
     var showAdd by remember { mutableStateOf(false) }
@@ -55,6 +58,9 @@ fun GymLogApp(
         machines = repository.loadMachines()
         history = repository.loadHistory()
         areaColors = repository.loadAreaColors()
+        trainingPlans = repository.loadTrainingPlans()
+        activeTrainingPlanId = repository.activeTrainingPlanId()
+        progressionSettings = repository.loadProgressionSettings()
     }
     LaunchedEffect(externalDataVersion) { refresh() }
 
@@ -77,6 +83,7 @@ fun GymLogApp(
                             Screen.HISTORY -> "History"
                             Screen.REORDER -> "Change order"
                             Screen.BACKUP -> "Data & backup"
+                            Screen.PLANS -> "Training plans"
                             Screen.DETAIL -> selected?.machine?.let { machine ->
                                 machine.name + machine.titleNote.takeIf { it.isNotBlank() }?.let { " · $it" }.orEmpty()
                             } ?: "Exercise"
@@ -103,6 +110,7 @@ fun GymLogApp(
         when (screen) {
             Screen.OVERVIEW -> OverviewScreen(
                 machines = machines,
+                activePlanName = trainingPlans.firstOrNull { it.id == activeTrainingPlanId }?.name ?: "Training plan",
                 modifier = Modifier.padding(padding),
                 onMachine = {
                     selectedId = it
@@ -113,20 +121,34 @@ fun GymLogApp(
                 onStats = { screen = Screen.STATS },
                 areaFrequency = machines.flatMap { it.areas }.groupBy { it.area }.mapValues { (_, values) -> values.sumOf { it.strength.value } },
                 onQuickSet = { machine, reps ->
-                    if (machine.machine.trackingMode == "STRENGTH") {
-                        reps.firstOrNull()?.let { repository.addLevelSet(machine.machine.id, it) }
+                    if (isDirectMetric(machine.machine.trackingMode)) {
+                        reps.firstOrNull()?.let { repository.addMetricSet(machine.machine.id, it) }
                     } else {
                         repository.addSets(machine.machine.id, reps, machine.machine.currentWeight)
                     }
                     refresh()
                 },
+                onMetricChange = { machine, value ->
+                    repository.changeWeight(machine.machine.id, value)
+                    refresh()
+                },
+                progressionSettings = progressionSettings,
+                onProgressionSettings = {
+                    repository.saveProgressionSettings(it)
+                    progressionSettings = it
+                },
             )
             Screen.HISTORY -> HistoryScreen(
                 history = history,
                 modifier = Modifier.padding(padding),
+                onUpdateSet = { id, reps, weight -> repository.updateSet(id, reps, weight); refresh() },
+                onDeleteSet = { repository.deleteSet(it); refresh() },
+                onDeleteExerciseDay = { machineId, start, end -> repository.deleteExerciseDay(machineId, start, end); refresh() },
+                onDeleteTrainingDay = { start, end -> repository.deleteTrainingDay(start, end); refresh() },
             )
             Screen.STATS -> StatsScreen(
                 history = history,
+                machines = machines,
                 modifier = Modifier.padding(padding),
             )
             Screen.REORDER -> ReorderScreen(
@@ -136,6 +158,23 @@ fun GymLogApp(
                     repository.moveMachine(id, direction)
                     refresh()
                 },
+            )
+            Screen.PLANS -> TrainingPlansScreen(
+                plans = trainingPlans,
+                activePlanId = activeTrainingPlanId,
+                modifier = Modifier.padding(padding),
+                onOpen = {
+                    repository.setActiveTrainingPlan(it)
+                    refresh()
+                    screen = Screen.OVERVIEW
+                },
+                onCreate = {
+                    repository.createTrainingPlan(it)
+                    refresh()
+                    screen = Screen.OVERVIEW
+                },
+                onRename = { id, name -> repository.renameTrainingPlan(id, name); refresh() },
+                onDelete = { repository.deleteTrainingPlan(it); refresh() },
             )
             Screen.BACKUP -> BackupScreen(
                 modifier = Modifier.padding(padding),
@@ -179,6 +218,7 @@ fun GymLogApp(
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 TextButton(onClick = { showMenu = false; screen = Screen.HISTORY }) { Text("Calendar & history") }
                 TextButton(onClick = { showMenu = false; screen = Screen.REORDER }) { Text("Change exercise order") }
+                TextButton(onClick = { showMenu = false; screen = Screen.PLANS }) { Text("Training plans") }
                 TextButton(onClick = { showMenu = false; onExport() }) { Text("Download backup / save to Drive") }
                 TextButton(onClick = { showMenu = false; confirmImport = true }) { Text("Upload backup / open from Drive") }
                 Text(
@@ -236,7 +276,7 @@ private fun BackupScreen(modifier: Modifier = Modifier, onExport: () -> Unit, on
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
         Text("Keep your progress portable", style = MaterialTheme.typography.headlineSmall)
-        Text("A backup includes every exercise, its order, notes, body areas, weight history, set history, and app settings. The file is readable JSON and stays under your control.")
+        Text("A backup includes every training plan, exercise, order, note, body area, weight history, set history, and app setting. The file is readable JSON and stays under your control.")
         Button(onClick = onExport) { Text("Download backup") }
         androidx.compose.material3.OutlinedButton(onClick = onImport) { Text("Upload and restore backup") }
         Text("Tip: save an occasional copy to cloud storage or another device. Restoring replaces the data currently on this phone.", color = MaterialTheme.colorScheme.onSurfaceVariant)
