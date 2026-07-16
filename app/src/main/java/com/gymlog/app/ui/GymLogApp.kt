@@ -23,6 +23,7 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -36,18 +37,24 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.input.KeyboardCapitalization
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.unit.dp
 import com.gymlog.app.BuildConfig
 import com.gymlog.app.data.BodyArea
 import com.gymlog.app.data.BackupSyncStatus
 import com.gymlog.app.data.GymRepository
 import com.gymlog.app.data.HistorySet
+import com.gymlog.app.data.ExerciseOrderingMode
 import com.gymlog.app.data.MachineSummary
 import com.gymlog.app.data.ProgressionSettings
 import com.gymlog.app.data.TrainingPlan
 
 private enum class Screen { OVERVIEW, BODY, STATS, HISTORY, BACKUP, PLANS, DETAIL }
+enum class ExerciseEditField { NAME, TITLE_NOTE, OVERVIEW_NOTE }
 
 private data class AppUiState(
     val machines: List<MachineSummary>,
@@ -56,6 +63,7 @@ private data class AppUiState(
     val trainingPlans: List<TrainingPlan>,
     val activeTrainingPlanId: Long,
     val progressionSettings: ProgressionSettings,
+    val exerciseOrderingMode: ExerciseOrderingMode,
     val automaticBackupEnabled: Boolean,
     val backupSyncStatus: BackupSyncStatus,
 )
@@ -67,6 +75,7 @@ private fun GymRepository.loadUiState() = AppUiState(
     trainingPlans = loadTrainingPlans(),
     activeTrainingPlanId = activeTrainingPlanId(),
     progressionSettings = loadProgressionSettings(),
+    exerciseOrderingMode = exerciseOrderingMode(),
     automaticBackupEnabled = automaticBackupEnabled(),
     backupSyncStatus = backupSyncStatus(),
 )
@@ -96,12 +105,12 @@ fun GymLogApp(
     var showMenu by remember { mutableStateOf(false) }
     var confirmImport by remember { mutableStateOf(false) }
     var showProgressionSettings by remember { mutableStateOf(false) }
+    var showExerciseOrdering by remember { mutableStateOf(false) }
     var showAccentColor by remember { mutableStateOf(false) }
     var showPlanNotes by remember { mutableStateOf(false) }
     var showHelp by remember { mutableStateOf(false) }
     var confirmDeleteCurrentTraining by remember { mutableStateOf(false) }
-    var showExerciseName by remember { mutableStateOf(false) }
-    var showExerciseTitleNote by remember { mutableStateOf(false) }
+    var editingExerciseField by remember { mutableStateOf<ExerciseEditField?>(null) }
 
     fun refresh() {
         uiStateResult = repository.loadUiStateResult()
@@ -164,12 +173,12 @@ fun GymLogApp(
                         Column {
                             Text(
                                 selected.machine.name,
-                                modifier = Modifier.clickable { showExerciseName = true },
+                                modifier = Modifier.clickable { editingExerciseField = ExerciseEditField.NAME },
                                 style = MaterialTheme.typography.titleMedium,
                             )
                             Text(
                                 selected.machine.titleNote.ifBlank { "Add a title note" },
-                                modifier = Modifier.clickable { showExerciseTitleNote = true },
+                                modifier = Modifier.clickable { editingExerciseField = ExerciseEditField.TITLE_NOTE },
                                 style = MaterialTheme.typography.labelMedium,
                                 color = MaterialTheme.colorScheme.onPrimary.copy(alpha = if (selected.machine.titleNote.isBlank()) .7f else 1f),
                             )
@@ -235,8 +244,9 @@ fun GymLogApp(
                     refresh()
                 },
                 progressionSettings = uiState.progressionSettings,
+                orderingMode = uiState.exerciseOrderingMode,
                 onReorder = { orderedIds ->
-                    repository.reorderMachines(orderedIds)
+                    repository.reorderMachines(orderedIds, uiState.exerciseOrderingMode == ExerciseOrderingMode.MIXED)
                     refresh()
                 },
                 onPinnedChange = { machine, pinned ->
@@ -308,6 +318,7 @@ fun GymLogApp(
                     repository = repository,
                     onAreaColor = { area, color -> repository.setAreaColor(area, color); refresh() },
                     onChanged = ::refresh,
+                    onEditDetails = { editingExerciseField = it },
                     onDeleted = {
                         refresh()
                         screen = Screen.OVERVIEW
@@ -353,6 +364,7 @@ fun GymLogApp(
                 }
                 TextButton(onClick = { showMenu = false; screen = Screen.PLANS }) { Text("Training Plans") }
                 TextButton(onClick = { showMenu = false; showProgressionSettings = true }) { Text("Progress Warnings") }
+                TextButton(onClick = { showMenu = false; showExerciseOrdering = true }) { Text("Exercise Ordering") }
                 TextButton(onClick = { showMenu = false; screen = Screen.BACKUP }) { Text("Data, Backup & Sync") }
                 TextButton(onClick = { showMenu = false; showAccentColor = true }) { Text("UI Color") }
                 TextButton(onClick = { showMenu = false; showHelp = true }) { Text("Help & Explanations") }
@@ -383,8 +395,8 @@ fun GymLogApp(
                 Text("Live means the timer is still counting from the first entry. It becomes completed after ten minutes without a new entry.")
                 Text("Progress Warnings", style = MaterialTheme.typography.titleSmall)
                 Text("Warnings appear when an exercise has not increased after your configured number of weeks or training sessions.")
-                Text("Pinned Exercises", style = MaterialTheme.typography.titleSmall)
-                Text("Tap ☆ to pin an exercise at the top. Pinned exercises can be manually reordered; unpinned exercises are automatically sorted by name.")
+                Text("Exercise Ordering", style = MaterialTheme.typography.titleSmall)
+                Text("Automatic prioritizes the active exercise, exercises not yet done, low-conflict areas, exercises missed last training, and least-used exercises. Mixed keeps starred exercises in your order above the automatically ranked remainder. Fixed keeps your full manual order. The active exercise stays first in every mode.")
             }
         },
         confirmButton = { TextButton(onClick = { showHelp = false; showMenu = true }) { Text("Close") } },
@@ -427,6 +439,17 @@ fun GymLogApp(
         },
     )
 
+    if (showExerciseOrdering) ExerciseOrderingDialog(
+        current = uiState.exerciseOrderingMode,
+        onDismiss = { showExerciseOrdering = false; showMenu = true },
+        onSave = {
+            repository.setExerciseOrderingMode(it)
+            refresh()
+            showExerciseOrdering = false
+            showMenu = true
+        },
+    )
+
     if (showAccentColor) AccentColorDialog(
         current = repository.accentColor(),
         onDismiss = { showAccentColor = false; showMenu = true },
@@ -437,33 +460,21 @@ fun GymLogApp(
         },
     )
 
-    if (showExerciseName) selected?.machine?.let { machine ->
-        TextEditDialog(
-            title = "Exercise Name",
-            initial = machine.name,
-            singleLine = true,
-            required = true,
-            onDismiss = { showExerciseName = false },
-            onSave = {
-                repository.renameMachine(machine.id, it)
-                refresh()
-                showExerciseName = false
-            },
-        )
-    }
-
-    if (showExerciseTitleNote) selected?.machine?.let { machine ->
-        TextEditDialog(
-            title = "Title Note",
-            initial = machine.titleNote,
-            singleLine = true,
-            onDismiss = { showExerciseTitleNote = false },
-            onSave = {
-                repository.setMachineTitleNote(machine.id, it)
-                refresh()
-                showExerciseTitleNote = false
-            },
-        )
+    editingExerciseField?.let { focus ->
+        selected?.machine?.let { machine ->
+            ExerciseDetailsDialog(
+                machineName = machine.name,
+                titleNote = machine.titleNote,
+                overviewNote = machine.notes,
+                initialFocus = focus,
+                onDismiss = { editingExerciseField = null },
+                onSave = { name, titleNote, overviewNote ->
+                    repository.updateMachine(machine.id, name, titleNote, overviewNote, machine.pauseTime)
+                    refresh()
+                    editingExerciseField = null
+                },
+            )
+        }
     }
 
     if (confirmImport) AlertDialog(
@@ -477,6 +488,114 @@ fun GymLogApp(
             }) { Text("Choose Backup") }
         },
         dismissButton = { TextButton(onClick = { confirmImport = false }) { Text("Cancel") } },
+    )
+}
+
+@Composable
+private fun ExerciseDetailsDialog(
+    machineName: String,
+    titleNote: String,
+    overviewNote: String,
+    initialFocus: ExerciseEditField,
+    onDismiss: () -> Unit,
+    onSave: (String, String, String) -> Unit,
+) {
+    var name by remember(machineName) { mutableStateOf(machineName) }
+    var title by remember(titleNote) { mutableStateOf(titleNote) }
+    var note by remember(overviewNote) { mutableStateOf(overviewNote) }
+    val nameFocus = remember { FocusRequester() }
+    val titleFocus = remember { FocusRequester() }
+    val noteFocus = remember { FocusRequester() }
+    LaunchedEffect(initialFocus) {
+        when (initialFocus) {
+            ExerciseEditField.NAME -> nameFocus
+            ExerciseEditField.TITLE_NOTE -> titleFocus
+            ExerciseEditField.OVERVIEW_NOTE -> noteFocus
+        }.requestFocus()
+    }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Edit Exercise") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                OutlinedTextField(
+                    name,
+                    { name = it },
+                    Modifier.fillMaxWidth().focusRequester(nameFocus),
+                    label = { Text("Exercise Name") },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Words),
+                )
+                OutlinedTextField(
+                    title,
+                    { title = it },
+                    Modifier.fillMaxWidth().focusRequester(titleFocus),
+                    label = { Text("Title Note") },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences),
+                )
+                OutlinedTextField(
+                    note,
+                    { note = it },
+                    Modifier.fillMaxWidth().focusRequester(noteFocus),
+                    label = { Text("Overview Note") },
+                    minLines = 3,
+                    keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences),
+                )
+            }
+        },
+        confirmButton = {
+            Button(onClick = { onSave(name.trim(), title.trim(), note.trim()) }, enabled = name.isNotBlank()) {
+                Text("Save")
+            }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
+}
+
+@Composable
+private fun ExerciseOrderingDialog(
+    current: ExerciseOrderingMode,
+    onDismiss: () -> Unit,
+    onSave: (ExerciseOrderingMode) -> Unit,
+) {
+    var selected by remember(current) { mutableStateOf(current) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Exercise Ordering") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                ExerciseOrderingMode.entries.forEach { mode ->
+                    FilterChip(
+                        selected = selected == mode,
+                        onClick = { selected = mode },
+                        label = {
+                            Text(
+                                when (mode) {
+                                    ExerciseOrderingMode.AUTOMATIC -> "Automatic"
+                                    ExerciseOrderingMode.MIXED -> "Mixed"
+                                    ExerciseOrderingMode.FIXED -> "Fixed"
+                                },
+                            )
+                        },
+                    )
+                    Text(
+                        when (mode) {
+                            ExerciseOrderingMode.AUTOMATIC ->
+                                "Smart-rank every exercise by current training, conflicts, previous training, and total use."
+                            ExerciseOrderingMode.MIXED ->
+                                "Keep starred exercises manually ordered at the top; smart-rank everything else."
+                            ExerciseOrderingMode.FIXED ->
+                                "Keep the complete list in your manual order. The current exercise still appears first."
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+        },
+        confirmButton = { Button(onClick = { onSave(selected) }) { Text("Save") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
     )
 }
 

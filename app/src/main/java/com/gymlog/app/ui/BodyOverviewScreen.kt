@@ -3,8 +3,10 @@ package com.gymlog.app.ui
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -12,6 +14,8 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
@@ -237,11 +241,18 @@ private fun BodyGraph(
     val min = rawMin - padding
     val max = rawMax + padding
     val range = max - min
-    Canvas(Modifier.fillMaxWidth().height(150.dp)) {
+    BoxWithConstraints(Modifier.fillMaxWidth()) {
+    val graphWidth = maxOf(maxWidth, (values.size * 28).dp)
+    Box(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
+    Canvas(Modifier.width(graphWidth).height(150.dp)) {
         fun y(value: Double) = size.height - ((value - min) / range).toFloat() * size.height
         repeat(3) { index ->
             val lineY = index * size.height / 2f
             drawLine(gridColor, Offset(0f, lineY), Offset(size.width, lineY), strokeWidth = 1f)
+        }
+        repeat(5) { index ->
+            val lineX = index * size.width / 4f
+            drawLine(gridColor, Offset(lineX, 0f), Offset(lineX, size.height), strokeWidth = 1f)
         }
         settings.target?.let { target ->
             settings.acceptance?.let { tolerance ->
@@ -261,6 +272,8 @@ private fun BodyGraph(
         data.zipWithNext().forEach { (a, b) -> drawLine(dataColor, a, b, strokeWidth = 5f) }
         data.forEach { drawCircle(dataColor, 5f, it) }
         points(fit).zipWithNext().forEach { (a, b) -> drawLine(fitColor, a, b, strokeWidth = 3f) }
+    }
+    }
     }
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
         val formatter = DateTimeFormatter.ofPattern("d MMM yy")

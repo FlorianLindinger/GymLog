@@ -58,6 +58,12 @@ data class ProgressionSettings(
     val staleTrainings: Int = 5,
 )
 
+enum class ExerciseOrderingMode {
+    AUTOMATIC,
+    MIXED,
+    FIXED,
+}
+
 data class BackupSyncStatus(
     val automaticBackupEnabled: Boolean,
     val lastBackupAt: Long?,

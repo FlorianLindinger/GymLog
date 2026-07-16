@@ -3,8 +3,10 @@ package com.gymlog.app.ui
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -13,6 +15,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.shape.CircleShape
@@ -272,6 +275,7 @@ private fun StatsChart(title: String, values: List<Double>, unit: String) {
             )
             val primary = MaterialTheme.colorScheme.primary
             val fitColor = MaterialTheme.colorScheme.tertiary
+            val grid = MaterialTheme.colorScheme.outlineVariant
             val (fit, fittedChange) = linearFit(values)
             Text(
                 "Linear fit: ${signedValue(fittedChange)} $unit over this interval",
@@ -282,8 +286,19 @@ private fun StatsChart(title: String, values: List<Double>, unit: String) {
             val min = combined.minOrNull()?.coerceAtMost(0.0) ?: 0.0
             val max = combined.maxOrNull()?.takeIf { it > min } ?: (min + 1.0)
             val range = max - min
-            Canvas(Modifier.fillMaxWidth().height(130.dp)) {
+            BoxWithConstraints(Modifier.fillMaxWidth()) {
+                val graphWidth = maxOf(maxWidth, (values.size * 28).dp)
+                Box(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
+                Canvas(Modifier.width(graphWidth).height(130.dp)) {
                 if (values.isEmpty()) return@Canvas
+                repeat(3) { index ->
+                    val y = index * size.height / 2f
+                    drawLine(grid, Offset(0f, y), Offset(size.width, y), strokeWidth = 1f)
+                }
+                repeat(5) { index ->
+                    val x = index * size.width / 4f
+                    drawLine(grid, Offset(x, 0f), Offset(x, size.height), strokeWidth = 1f)
+                }
                 fun points(series: List<Double>) = series.mapIndexed { index, value ->
                     Offset(
                         x = if (series.size == 1) size.width / 2f else index * size.width / (series.size - 1),
@@ -294,6 +309,8 @@ private fun StatsChart(title: String, values: List<Double>, unit: String) {
                 dataPoints.zipWithNext().forEach { (start, end) -> drawLine(primary, start, end, strokeWidth = 5f) }
                 dataPoints.forEach { drawCircle(primary, 5f, it) }
                 points(fit).zipWithNext().forEach { (start, end) -> drawLine(fitColor, start, end, strokeWidth = 3f) }
+                }
+                }
             }
         }
     }

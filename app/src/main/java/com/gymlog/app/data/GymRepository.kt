@@ -63,6 +63,14 @@ class GymRepository(context: Context) {
         staleTrainings = preferences.getInt("progress_stale_trainings", 5),
     )
 
+    fun exerciseOrderingMode(): ExerciseOrderingMode = runCatching {
+        ExerciseOrderingMode.valueOf(preferences.getString("exercise_ordering_mode", null) ?: "")
+    }.getOrDefault(ExerciseOrderingMode.MIXED)
+
+    fun setExerciseOrderingMode(mode: ExerciseOrderingMode) {
+        preferences.edit().putString("exercise_ordering_mode", mode.name).apply()
+    }
+
     fun saveProgressionSettings(settings: ProgressionSettings) {
         preferences.edit()
             .putInt("progress_stale_weeks", settings.staleWeeks.coerceAtLeast(0))
@@ -183,7 +191,7 @@ class GymRepository(context: Context) {
         val database = db.readableDatabase
         val machines = mutableListOf<Machine>()
         database.rawQuery(
-            "SELECT id,name,title_note,notes,pause_time,chart_window,trailing_average,tracking_mode,current_weight,sort_order,pinned FROM machines WHERE plan_id=? ORDER BY pinned DESC,CASE WHEN pinned=1 THEN sort_order END,CASE WHEN pinned=0 THEN LOWER(name) END,id",
+            "SELECT id,name,title_note,notes,pause_time,chart_window,trailing_average,tracking_mode,current_weight,sort_order,pinned FROM machines WHERE plan_id=? ORDER BY sort_order,id",
             arrayOf(planId.toString()),
         ).use { cursor ->
             while (cursor.moveToNext()) {
@@ -303,6 +311,11 @@ class GymRepository(context: Context) {
 
     fun changeWeight(id: Long, weight: Double) {
         val database = db.writableDatabase
+        val current = database.rawQuery(
+            "SELECT current_weight FROM machines WHERE id=?",
+            arrayOf(id.toString()),
+        ).use { cursor -> if (cursor.moveToFirst()) cursor.getDouble(0) else return }
+        if (current == weight) return
         database.transaction {
             database.update("machines", ContentValues().apply { put("current_weight", weight) }, "id=?", arrayOf(id.toString()))
             addWeightHistory(database, id, weight, System.currentTimeMillis())
@@ -313,10 +326,13 @@ class GymRepository(context: Context) {
         val database = db.writableDatabase
         val now = System.currentTimeMillis()
         database.transaction {
-            val trackingMode = database.rawQuery(
-                "SELECT tracking_mode FROM machines WHERE id=?",
+            val machine = database.rawQuery(
+                "SELECT tracking_mode,current_weight FROM machines WHERE id=?",
                 arrayOf(id.toString()),
-            ).use { cursor -> if (cursor.moveToFirst()) cursor.getString(0) else "WEIGHT" }
+            ).use { cursor -> if (cursor.moveToFirst()) cursor.getString(0) to cursor.getDouble(1) else null }
+                ?: return@transaction
+            val (trackingMode, currentValue) = machine
+            if (currentValue == value) return@transaction
             database.update("machines", ContentValues().apply { put("current_weight", value) }, "id=?", arrayOf(id.toString()))
             addWeightHistory(database, id, value, now)
             val setValues = ContentValues().apply {
@@ -471,13 +487,13 @@ class GymRepository(context: Context) {
         }
     }
 
-    fun reorderMachines(machineIds: List<Long>) {
+    fun reorderMachines(machineIds: List<Long>, pinnedOnly: Boolean) {
         val currentIds = loadMachines().map { it.machine.id }
         if (machineIds.size != currentIds.size || machineIds.toSet() != currentIds.toSet()) return
         val pinnedIds = loadMachines().filter { it.machine.pinned }.map { it.machine.id }.toSet()
         val database = db.writableDatabase
         database.transaction {
-            machineIds.filter { it in pinnedIds }.forEachIndexed { index, id ->
+            machineIds.filter { !pinnedOnly || it in pinnedIds }.forEachIndexed { index, id ->
                 database.update("machines", ContentValues().apply { put("sort_order", index) }, "id=?", arrayOf(id.toString()))
             }
         }
@@ -564,7 +580,7 @@ class GymRepository(context: Context) {
     fun importJson(json: String) {
         val root = JSONObject(json)
         val version = root.optInt("version", -1)
-        require(version in 3..5) { "Unsupported GymLog backup version" }
+        require(version == 5) { "Outdated GymLog backup format $version; this WIP build accepts format 5 only" }
         val machines = root.getJSONArray("machines")
         root.optJSONObject("settings")?.let { settings ->
             saveProgressionSettings(ProgressionSettings(
@@ -755,17 +771,20 @@ private class GymDatabase(context: Context) : SQLiteOpenHelper(context, GYMLOG_D
     }
 
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
-        if (oldVersion == 7) {
-            db.execSQL("ALTER TABLE training_plans ADD COLUMN notes TEXT NOT NULL DEFAULT ''")
-            db.execSQL("ALTER TABLE training_plans ADD COLUMN notes_pinned INTEGER NOT NULL DEFAULT 0")
-        }
-        if (oldVersion <= 8 && newVersion >= 9) {
-            db.execSQL("ALTER TABLE machines ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0")
-        }
-        if (oldVersion !in 7..9) error("This database uses GymLog schema $oldVersion, but this app requires schema $newVersion")
+        resetSchema(db)
     }
 
     override fun onDowngrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
-        error("This database uses GymLog schema $oldVersion, but this app requires schema $newVersion")
+        resetSchema(db)
+    }
+
+    private fun resetSchema(db: SQLiteDatabase) {
+        db.execSQL("DROP TABLE IF EXISTS sets")
+        db.execSQL("DROP TABLE IF EXISTS weight_history")
+        db.execSQL("DROP TABLE IF EXISTS machine_areas")
+        db.execSQL("DROP TABLE IF EXISTS machines")
+        db.execSQL("DROP TABLE IF EXISTS training_plans")
+        db.execSQL("DROP TABLE IF EXISTS area_colors")
+        onCreate(db)
     }
 }

@@ -5,8 +5,10 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -75,10 +77,10 @@ fun DetailScreen(
     repository: GymRepository,
     onAreaColor: (BodyArea, Long) -> Unit,
     onChanged: () -> Unit,
+    onEditDetails: (ExerciseEditField) -> Unit,
     onDeleted: () -> Unit,
 ) {
     var showWeight by remember { mutableStateOf(false) }
-    var showNotes by remember { mutableStateOf(false) }
     var showAreas by remember { mutableStateOf(false) }
     var confirmDelete by remember { mutableStateOf(false) }
     var editingSet by remember { mutableStateOf<SetRecord?>(null) }
@@ -92,10 +94,10 @@ fun DetailScreen(
         modifier = modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(8.dp),
         verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        Card(modifier = Modifier.fillMaxWidth().clickable { showNotes = true }) {
+        Card(modifier = Modifier.fillMaxWidth().clickable { onEditDetails(ExerciseEditField.OVERVIEW_NOTE) }) {
             Column(Modifier.padding(horizontal = 10.dp, vertical = 4.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 Text("Notes", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
-                Text(if (machine.notes.isBlank()) "Click to add note" else machine.notes, color = if (machine.notes.isBlank()) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface)
+                Text(if (machine.notes.isBlank()) "Click to add an Overview Note" else machine.notes, color = if (machine.notes.isBlank()) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface)
             }
         }
 
@@ -219,11 +221,6 @@ fun DetailScreen(
             showWeight = false
         } else null,
     )
-    if (showNotes) TextEditDialog("Notes", machine.notes, onDismiss = { showNotes = false }) {
-        repository.setMachineNotes(machine.id, it)
-        onChanged()
-        showNotes = false
-    }
     if (showAreas) AreaDialog(summary.areas, areaUsage, areaColors, onAreaColor, onDismiss = { showAreas = false }) {
         repository.saveAreas(machine.id, it)
         onChanged()
@@ -299,10 +296,17 @@ private fun SessionMetricsChart(sets: List<SetRecord>, trailingAverage: Int, dir
             style = MaterialTheme.typography.labelSmall,
         )
     }
-    Canvas(Modifier.fillMaxWidth().height(150.dp).padding(vertical = 6.dp)) {
+    BoxWithConstraints(Modifier.fillMaxWidth()) {
+    val graphWidth = maxOf(maxWidth, (sessions.size * 28).dp)
+    Box(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
+    Canvas(Modifier.width(graphWidth).height(150.dp).padding(vertical = 6.dp)) {
         repeat(3) { index ->
             val y = index * size.height / 2f
             drawLine(grid, Offset(0f, y), Offset(size.width, y), strokeWidth = 1f)
+        }
+        repeat(5) { index ->
+            val x = index * size.width / 4f
+            drawLine(grid, Offset(x, 0f), Offset(x, size.height), strokeWidth = 1f)
         }
         series.forEach { (_, values, color) ->
             val fit = fittedSeries(values).first
@@ -328,6 +332,8 @@ private fun SessionMetricsChart(sets: List<SetRecord>, trailingAverage: Int, dir
                 drawLine(color.copy(alpha = 0.55f), start, end, strokeWidth = 3f, cap = StrokeCap.Round)
             }
         }
+    }
+    }
     }
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
         Text(formatTimestamp(sessions.first().minOf { it.performedAt }), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)

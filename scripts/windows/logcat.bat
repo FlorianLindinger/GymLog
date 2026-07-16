@@ -1,8 +1,10 @@
 @echo off
 setlocal
-cd /d "%~dp0"
+set "SCRIPT_DIR=%~dp0"
+for %%I in ("%SCRIPT_DIR%..\..") do set "REPO_ROOT=%%~fI"
+cd /d "%REPO_ROOT%"
 
-call _android_env.bat
+call "%SCRIPT_DIR%_android_env.bat"
 if errorlevel 1 exit /b 1
 
 set "ADB_TARGET="

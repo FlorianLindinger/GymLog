@@ -1,8 +1,10 @@
 @echo off
 setlocal
-cd /d "%~dp0"
+set "SCRIPT_DIR=%~dp0"
+for %%I in ("%SCRIPT_DIR%..\..") do set "REPO_ROOT=%%~fI"
+cd /d "%REPO_ROOT%"
 
-call _android_env.bat
+call "%SCRIPT_DIR%_android_env.bat"
 if errorlevel 1 exit /b 1
 
 set "ADB_TARGET="
@@ -18,7 +20,7 @@ if errorlevel 1 (
 
 if not exist screenshots mkdir screenshots
 for /f "delims=" %%T in ('powershell -NoProfile -Command "Get-Date -Format yyyyMMdd-HHmmss"') do set "TIMESTAMP=%%T"
-set "OUTPUT=%~dp0screenshots\GymLog-%TIMESTAMP%.png"
+set "OUTPUT=%REPO_ROOT%\screenshots\GymLog-%TIMESTAMP%.png"
 
 "%GYMLOG_ADB%" %ADB_TARGET% exec-out screencap -p > "%OUTPUT%"
 if errorlevel 1 (

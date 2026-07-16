@@ -7,9 +7,11 @@ rem 2. Enable USB debugging in Developer options.
 rem 3. Connect and unlock the phone, then approve the USB debugging prompt.
 rem 4. Run build.bat after changing the app, then run this installer.
 
-cd /d "%~dp0"
+set "SCRIPT_DIR=%~dp0"
+for %%I in ("%SCRIPT_DIR%..\..") do set "REPO_ROOT=%%~fI"
+cd /d "%REPO_ROOT%"
 
-set "APK=%~dp0app\build\outputs\apk\debug\app-debug.apk"
+set "APK=%REPO_ROOT%\app\build\outputs\apk\debug\app-debug.apk"
 set "ADB=%LOCALAPPDATA%\Android\Sdk\platform-tools\adb.exe"
 set "ADB_TARGET="
 if not "%~1"=="" set "ADB_TARGET=-s %~1"
@@ -35,7 +37,7 @@ if not exist "%ADB%" (
 
 if not exist "%APK%" (
     echo ERROR: The GymLog APK has not been built yet.
-    echo Run build.bat first.
+    echo Run scripts\windows\build.bat first.
     pause
     exit /b 1
 )

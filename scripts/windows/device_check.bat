@@ -1,8 +1,10 @@
 @echo off
 setlocal
-cd /d "%~dp0"
+set "SCRIPT_DIR=%~dp0"
+for %%I in ("%SCRIPT_DIR%..\..") do set "REPO_ROOT=%%~fI"
+cd /d "%REPO_ROOT%"
 
-call _android_env.bat
+call "%SCRIPT_DIR%_android_env.bat"
 if errorlevel 1 exit /b 1
 
 set "ADB_TARGET="
@@ -19,7 +21,7 @@ echo.
 if errorlevel 1 (
     echo No single authorized device could be selected.
     echo Unlock the phone, approve USB debugging, or pass its serial:
-    echo     device_check.bat SERIAL
+    echo     scripts\windows\device_check.bat SERIAL
     exit /b 1
 )
 

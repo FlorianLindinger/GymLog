@@ -1,10 +1,12 @@
 @echo off
 setlocal EnableExtensions
-cd /d "%~dp0"
+set "SCRIPT_DIR=%~dp0"
+for %%I in ("%SCRIPT_DIR%..\..") do set "REPO_ROOT=%%~fI"
+cd /d "%REPO_ROOT%"
 
 if "%~1"=="" (
-    echo Usage: release.bat VERSION
-    echo Example: release.bat 1.0.0
+    echo Usage: scripts\windows\release.bat VERSION
+    echo Example: scripts\windows\release.bat 1.0.0
     exit /b 1
 )
 
@@ -41,10 +43,10 @@ if not exist "%GYMLOG_KEYSTORE_FILE%" (
     exit /b 1
 )
 
-call _android_env.bat
+call "%SCRIPT_DIR%_android_env.bat"
 if errorlevel 1 exit /b 1
 
-call verify.bat
+call "%SCRIPT_DIR%verify.bat"
 if errorlevel 1 exit /b 1
 
 echo Building signed release APK and Android App Bundle...
@@ -54,8 +56,8 @@ if errorlevel 1 (
     exit /b 1
 )
 
-set "APK=%~dp0app\build\outputs\apk\release\app-release.apk"
-set "AAB=%~dp0app\build\outputs\bundle\release\app-release.aab"
+set "APK=%REPO_ROOT%\app\build\outputs\apk\release\app-release.apk"
+set "AAB=%REPO_ROOT%\app\build\outputs\bundle\release\app-release.aab"
 if not exist "%APK%" (
     echo ERROR: Signed release APK was not produced.
     exit /b 1
@@ -87,7 +89,7 @@ echo.
 echo RELEASE BUILD SUCCESSFUL
 echo APK:      %APK%
 echo AAB:      %AAB%
-echo Checksums: %~dp0app\build\outputs\release-%VERSION%-sha256.txt
+echo Checksums: %REPO_ROOT%\app\build\outputs\release-%VERSION%-sha256.txt
 echo.
 set /p CREATE_TAG="Create local Git tag v%VERSION% now? [y/N] "
 if /i "%CREATE_TAG%"=="y" (

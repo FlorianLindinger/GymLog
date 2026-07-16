@@ -1,6 +1,6 @@
 # GymLog
 
-GymLog is a private, offline Android workout tracker built with Kotlin, Jetpack Compose, and SQLite. It supports multiple training plans, weight- and level-based exercises, detailed history management, progression warnings, and local JSON backups.
+GymLog is a privacy-first Android workout tracker built with Kotlin, Jetpack Compose, and SQLite. It supports multiple training plans, weight- and level-based exercises, body-measurement graphs, detailed history management, progression warnings, Health Connect import, and local JSON backups.
 
 ## Screenshots
 
@@ -18,7 +18,7 @@ The launcher artwork and anatomy reference were created specifically for GymLog.
 
 ## Requirements
 
-- Android Studio with Android SDK 35
+- Android Studio with Android SDK 36
 - JDK 21
 - An Android emulator or physical Android phone
 
@@ -28,7 +28,7 @@ The simplest route is Android Studio:
 
 1. Install the current stable **Android Studio** from the Android developer website.
 2. Open Android Studio and choose **Open**, then select this `GymLog` folder.
-3. Let Gradle sync. If Android Studio asks to install Android SDK 35, accept it.
+3. Let Gradle sync. If Android Studio asks to install Android SDK 36, accept it.
 4. Open **Tools > Device Manager**, create a Pixel-style device, and download a recent Android system image.
 5. Start the emulator, select it in the toolbar, and click **Run**.
 
@@ -46,21 +46,13 @@ Set a build's public version in `app/build.gradle.kts`:
 - Increase `versionCode` for every distributed build.
 - Set `versionName` to the user-facing value, such as `"1.1.0"`.
 
-GymLog shows the version name and build date/time at the bottom of Menu. For a signed release, update both values first and then run `release.bat VERSION` with the same version name.
+GymLog shows the version name and Central European build date/time at the bottom of Menu. For a signed release, update both values first and then run `scripts\windows\release.bat VERSION` with the same version name.
 
 ## Development helper scripts
 
-- `run_on_phone.bat` builds, installs, and launches GymLog on an authorized USB device.
-- `install_via_usb.bat` installs and launches the existing debug APK without rebuilding it.
-- `verify.bat` compiles the app, runs tests and Android lint, builds the debug APK, and checks Git whitespace.
-- `device_check.bat` lists connected devices and prints Android and installed-app versions.
-- `logcat.bat` restarts GymLog and follows only its current process logs.
-- `screenshot.bat` saves a timestamped device screenshot under `screenshots\`.
-- `release.bat VERSION` verifies and builds a signed APK and AAB, writes SHA-256 checksums, and can create a local version tag.
+Windows helpers now live under [`scripts/windows`](scripts/windows/README.md). For example, `scripts\windows\verify.bat` runs compilation, unit tests, Android lint, an APK build, and the Git whitespace check.
 
-Device scripts accept an optional ADB serial, for example `device_check.bat R3CT...`, when multiple phones or emulators are connected.
-
-Release signing is read only from the environment. Set `GYMLOG_KEYSTORE_FILE`, `GYMLOG_KEYSTORE_PASSWORD`, `GYMLOG_KEY_ALIAS`, and `GYMLOG_KEY_PASSWORD`; never commit a keystore or its passwords. Official verification also runs automatically on pushes and pull requests through GitHub Actions.
+Release signing is read only from the environment. Set `GYMLOG_KEYSTORE_FILE`, `GYMLOG_KEYSTORE_PASSWORD`, `GYMLOG_KEY_ALIAS`, and `GYMLOG_KEY_PASSWORD`; never commit a keystore or its passwords.
 
 ## Install it on an Android phone
 
@@ -92,7 +84,7 @@ Backups include every training plan and plan note, exercise, order, note, body-a
 
 ## Privacy
 
-GymLog stores its data locally on the device. It does not require an account, analytics service, or internet permission. Exported backup files remain under the user's control.
+GymLog stores its own data locally on the device. It does not require an account, analytics service, or internet permission. Health Connect access is optional, user-triggered, and uses Android's permission system. Exported backup files remain under the user's control.
 
 ## Features
 
@@ -100,7 +92,7 @@ GymLog stores its data locally on the device. It does not require an account, an
   - Create, open, rename, and delete plans from the overview menu
   - Add a plan note and optionally pin it below the overview training-time card
   - Separate exercises, ordering, history, statistics, timers, and progression data per plan
-- Reorderable exercise overview with a persistent long-press reorder mode and Done action
+- Automatic, mixed pinned, or fully fixed exercise ordering, with the current exercise always kept first
 - Two exercise tracking modes
   - Weight in kilograms
   - Machine or resistance level, with each training recorded in minutes
@@ -136,7 +128,7 @@ GymLog stores its data locally on the device. It does not require an account, an
   - Per-day exercise totals
   - First-entry-to-last-entry training duration
 - Training-duration tracking
-  - Today's duration displayed on the overview in `h:mm`
+  - Current duration displayed compactly, for example `1h22`
   - First and last entry times
   - Duration recorded in history and used in statistics
 - Statistics with selectable 1-week, 1-month, 3-month, 6-month, 1-year, 2-year, 3-year, and all-time windows
@@ -160,5 +152,6 @@ GymLog stores its data locally on the device. It does not require an account, an
 - JSON backup and restore through Android's file picker
   - All training plans included in one backup
   - Can be saved to local storage or a cloud provider exposed by the Android file picker
-- Fully offline operation with no account, analytics, or internet permission
+- Offline-first operation with no account, analytics, or internet permission
+- Optional body-measurement import through Android Health Connect
 - Freely selectable UI accent color
