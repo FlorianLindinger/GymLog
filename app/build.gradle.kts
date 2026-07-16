@@ -1,4 +1,4 @@
-import java.time.ZoneOffset
+import java.time.ZoneId
 import java.time.ZonedDateTime
 import java.time.format.DateTimeFormatter
 
@@ -14,8 +14,8 @@ val releaseSigningConfigured = listOf(
     "GYMLOG_KEY_ALIAS",
     "GYMLOG_KEY_PASSWORD",
 ).all { !System.getenv(it).isNullOrBlank() }
-val buildTimestamp = ZonedDateTime.now(ZoneOffset.UTC)
-    .format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm"))
+val buildTimestamp = ZonedDateTime.now(ZoneId.of("Europe/Berlin"))
+    .format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm z"))
 
 android {
     namespace = "com.gymlog.app"
@@ -82,6 +82,7 @@ dependencies {
     implementation("androidx.compose.foundation:foundation")
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.ui:ui-tooling-preview")
+    implementation("androidx.health.connect:connect-client:1.1.0-beta01")
     debugImplementation("androidx.compose.ui:ui-tooling")
 
     testImplementation("junit:junit:4.13.2")

@@ -47,7 +47,7 @@ import com.gymlog.app.data.MachineSummary
 import com.gymlog.app.data.ProgressionSettings
 import com.gymlog.app.data.TrainingPlan
 
-private enum class Screen { OVERVIEW, STATS, HISTORY, BACKUP, PLANS, DETAIL }
+private enum class Screen { OVERVIEW, BODY, STATS, HISTORY, BACKUP, PLANS, DETAIL }
 
 private data class AppUiState(
     val machines: List<MachineSummary>,
@@ -85,6 +85,9 @@ fun GymLogApp(
     onExport: () -> Unit,
     onImport: () -> Unit,
     onAccentColorChanged: (Long) -> Unit,
+    bodyData: BodyDataSnapshot,
+    healthSyncStatus: String,
+    onHealthSync: () -> Unit,
 ) {
     var uiStateResult by remember(repository) { mutableStateOf(repository.loadUiStateResult()) }
     var screen by remember { mutableStateOf(Screen.OVERVIEW) }
@@ -155,7 +158,7 @@ fun GymLogApp(
 
     Scaffold(
         topBar = {
-            if (screen != Screen.OVERVIEW) TopAppBar(
+            if (screen != Screen.OVERVIEW && screen != Screen.BODY) TopAppBar(
                 title = {
                     if (screen == Screen.DETAIL && selected != null) {
                         Column {
@@ -174,6 +177,7 @@ fun GymLogApp(
                     } else Text(
                         when (screen) {
                             Screen.OVERVIEW -> ""
+                            Screen.BODY -> ""
                             Screen.STATS -> "Stats"
                             Screen.HISTORY -> "History"
                             Screen.BACKUP -> "Data & Backup"
@@ -211,6 +215,7 @@ fun GymLogApp(
                 onAdd = { showAdd = true },
                 onMenu = { showMenu = true },
                 onStats = { screen = Screen.STATS },
+                onBody = { screen = Screen.BODY },
                 onEditPlanNotes = { showPlanNotes = true },
                 areaFrequency = areaFrequency,
                 onQuickSet = { machine, reps ->
@@ -234,6 +239,18 @@ fun GymLogApp(
                     repository.reorderMachines(orderedIds)
                     refresh()
                 },
+                onPinnedChange = { machine, pinned ->
+                    repository.setMachinePinned(machine.machine.id, pinned)
+                    refresh()
+                },
+            )
+            Screen.BODY -> BodyOverviewScreen(
+                snapshot = bodyData,
+                syncStatus = healthSyncStatus,
+                modifier = Modifier.padding(padding),
+                onSync = onHealthSync,
+                onMenu = { showMenu = true },
+                onGym = { screen = Screen.OVERVIEW },
             )
             Screen.HISTORY -> HistoryScreen(
                 history = uiState.history,
@@ -317,8 +334,24 @@ fun GymLogApp(
         title = { Text("Menu") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Card(
+                    Modifier.fillMaxWidth().clickable {
+                        showMenu = false
+                        showPlanNotes = true
+                    },
+                    colors = androidx.compose.material3.CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                    ),
+                ) {
+                    Column(Modifier.padding(10.dp)) {
+                        Text("Training Plan Note", style = MaterialTheme.typography.labelLarge)
+                        Text(
+                            activePlan?.notes?.ifBlank { "Tap to add a note." } ?: "No active training plan.",
+                            color = MaterialTheme.colorScheme.onSecondaryContainer,
+                        )
+                    }
+                }
                 TextButton(onClick = { showMenu = false; screen = Screen.PLANS }) { Text("Training Plans") }
-                TextButton(onClick = { showMenu = false; showPlanNotes = true }) { Text("Training Plan Note") }
                 TextButton(onClick = { showMenu = false; showProgressionSettings = true }) { Text("Progress Warnings") }
                 TextButton(onClick = { showMenu = false; screen = Screen.BACKUP }) { Text("Data, Backup & Sync") }
                 TextButton(onClick = { showMenu = false; showAccentColor = true }) { Text("UI Color") }
@@ -328,7 +361,7 @@ fun GymLogApp(
                 }
                 androidx.compose.material3.HorizontalDivider()
                 Text(
-                    "Version ${BuildConfig.VERSION_NAME} · Built ${BuildConfig.BUILD_TIME} UTC",
+                    "Version ${BuildConfig.VERSION_NAME} · Built ${BuildConfig.BUILD_TIME}",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -350,6 +383,8 @@ fun GymLogApp(
                 Text("Live means the timer is still counting from the first entry. It becomes completed after ten minutes without a new entry.")
                 Text("Progress Warnings", style = MaterialTheme.typography.titleSmall)
                 Text("Warnings appear when an exercise has not increased after your configured number of weeks or training sessions.")
+                Text("Pinned Exercises", style = MaterialTheme.typography.titleSmall)
+                Text("Tap ☆ to pin an exercise at the top. Pinned exercises can be manually reordered; unpinned exercises are automatically sorted by name.")
             }
         },
         confirmButton = { TextButton(onClick = { showHelp = false; showMenu = true }) { Text("Close") } },

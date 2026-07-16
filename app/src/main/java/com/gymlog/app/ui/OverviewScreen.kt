@@ -87,6 +87,7 @@ fun OverviewScreen(
     onAdd: () -> Unit,
     onMenu: () -> Unit,
     onStats: () -> Unit,
+    onBody: () -> Unit,
     onEditPlanNotes: () -> Unit,
     areaFrequency: Map<BodyArea, Double>,
     onQuickSet: (MachineSummary, List<Int>) -> Unit,
@@ -94,6 +95,7 @@ fun OverviewScreen(
     onMetricChangeForSession: (MachineSummary, Double) -> Unit,
     progressionSettings: ProgressionSettings,
     onReorder: (List<Long>) -> Unit,
+    onPinnedChange: (MachineSummary, Boolean) -> Unit,
 ) {
     val zone = ZoneId.systemDefault()
     var now by remember { mutableStateOf(System.currentTimeMillis()) }
@@ -163,12 +165,16 @@ fun OverviewScreen(
                         summary, lastExerciseInUnit, trainingUnitCutoff, areaFrequency, onMachine, onQuickSet,
                         onMetricChange, onMetricChangeForSession, progressionSettings,
                         modifier = Modifier.pointerInput(id, reorderMode, orderedMachines.map { it.machine.id }) {
+                            if (!summary.machine.pinned) return@pointerInput
                             fun moveBy(amountY: Float) {
                                     dragOffset += amountY
                                     val currentInfo = listState.layoutInfo.visibleItemsInfo.firstOrNull { it.key == id } ?: return
                                     val draggedCenter = currentInfo.offset + currentInfo.size / 2f + dragOffset
                                     val targetId = listState.layoutInfo.visibleItemsInfo
-                                        .filter { it.key is Long }
+                                        .filter { info ->
+                                            val target = info.key as? Long
+                                            target != null && orderedMachines.firstOrNull { it.machine.id == target }?.machine?.pinned == true
+                                        }
                                         .minByOrNull { abs((it.offset + it.size / 2f) - draggedCenter) }
                                         ?.key as? Long
                                     val from = orderedMachines.indexOfFirst { it.machine.id == id }
@@ -203,6 +209,7 @@ fun OverviewScreen(
                         },
                         isDragging = draggedId == id,
                         isReordering = reorderMode,
+                        onPinnedChange = onPinnedChange,
                     )
                 }
             }
@@ -214,7 +221,7 @@ fun OverviewScreen(
             exit = slideOutVertically { -it } + fadeOut(),
         ) {
             Text(
-                "Reordering Exercises",
+                "Reordering Pinned Exercises",
                 modifier = Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.primaryContainer).padding(horizontal = 16.dp, vertical = 12.dp),
                 style = MaterialTheme.typography.titleSmall,
                 color = MaterialTheme.colorScheme.onPrimaryContainer,
@@ -239,6 +246,7 @@ fun OverviewScreen(
                         modifier = Modifier.fillMaxWidth(),
                     ) { Text("Done") }
                 } else {
+                    FilledTonalButton(onClick = onBody, modifier = Modifier.weight(1f)) { Text("Body") }
                     FilledTonalButton(onClick = onMenu, modifier = Modifier.weight(1f)) { Text("Menu") }
                     FilledTonalButton(onClick = onStats, modifier = Modifier.weight(1f)) { Text("Stats") }
                     FilledTonalButton(onClick = onAdd, modifier = Modifier.weight(1f)) { Text("+ Add") }
@@ -400,6 +408,7 @@ private fun MachineCard(
     onMetricChange: (MachineSummary, Double) -> Unit,
     onMetricChangeForSession: (MachineSummary, Double) -> Unit,
     progressionSettings: ProgressionSettings,
+    onPinnedChange: (MachineSummary, Boolean) -> Unit,
     modifier: Modifier = Modifier,
     isDragging: Boolean = false,
     isReordering: Boolean = false,
@@ -447,6 +456,14 @@ private fun MachineCard(
                         Text(" · ${summary.machine.titleNote}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
+                Text(
+                    if (summary.machine.pinned) "★" else "☆",
+                    modifier = Modifier
+                        .clickable(enabled = !isReordering) { onPinnedChange(summary, !summary.machine.pinned) }
+                        .padding(horizontal = 7.dp, vertical = 3.dp),
+                    color = if (summary.machine.pinned) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = MaterialTheme.typography.titleMedium,
+                )
             }
             progressionWarning(summary, progressionSettings)?.let { warning ->
                 Text(warning, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error)

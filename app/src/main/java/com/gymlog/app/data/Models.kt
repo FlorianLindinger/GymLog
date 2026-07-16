@@ -11,6 +11,7 @@ data class Machine(
     val trackingMode: String,
     val currentWeight: Double,
     val sortOrder: Int,
+    val pinned: Boolean = false,
 )
 
 enum class BodyArea(val label: String, val color: Long) {

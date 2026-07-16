@@ -131,6 +131,7 @@ class GymRepository(context: Context) {
                     put("tracking_mode", machine.trackingMode)
                     put("current_weight", machine.currentWeight)
                     put("sort_order", machine.sortOrder)
+                    put("pinned", if (machine.pinned) 1 else 0)
                 })
                 summary.areas.forEach { assignment ->
                     database.insertOrThrow("machine_areas", null, ContentValues().apply {
@@ -182,7 +183,7 @@ class GymRepository(context: Context) {
         val database = db.readableDatabase
         val machines = mutableListOf<Machine>()
         database.rawQuery(
-            "SELECT id,name,title_note,notes,pause_time,chart_window,trailing_average,tracking_mode,current_weight,sort_order FROM machines WHERE plan_id=? ORDER BY sort_order,id",
+            "SELECT id,name,title_note,notes,pause_time,chart_window,trailing_average,tracking_mode,current_weight,sort_order,pinned FROM machines WHERE plan_id=? ORDER BY pinned DESC,CASE WHEN pinned=1 THEN sort_order END,CASE WHEN pinned=0 THEN LOWER(name) END,id",
             arrayOf(planId.toString()),
         ).use { cursor ->
             while (cursor.moveToNext()) {
@@ -197,6 +198,7 @@ class GymRepository(context: Context) {
                     trackingMode = cursor.getString(7),
                     currentWeight = cursor.getDouble(8),
                     sortOrder = cursor.getInt(9),
+                    pinned = cursor.getInt(10) != 0,
                 )
             }
         }
@@ -248,6 +250,23 @@ class GymRepository(context: Context) {
 
     fun setMachineNotes(id: Long, notes: String) {
         db.writableDatabase.update("machines", ContentValues().apply { put("notes", notes.trim()) }, "id=?", arrayOf(id.toString()))
+    }
+
+    fun setMachinePinned(id: Long, pinned: Boolean) {
+        val database = db.writableDatabase
+        val nextPinnedOrder = database.rawQuery(
+            "SELECT COALESCE(MAX(sort_order),-1)+1 FROM machines WHERE pinned=1",
+            null,
+        ).use { cursor -> cursor.moveToFirst(); cursor.getInt(0) }
+        database.update(
+            "machines",
+            ContentValues().apply {
+                put("pinned", if (pinned) 1 else 0)
+                if (pinned) put("sort_order", nextPinnedOrder)
+            },
+            "id=?",
+            arrayOf(id.toString()),
+        )
     }
 
     fun setChartWindow(id: Long, window: String) {
@@ -455,9 +474,10 @@ class GymRepository(context: Context) {
     fun reorderMachines(machineIds: List<Long>) {
         val currentIds = loadMachines().map { it.machine.id }
         if (machineIds.size != currentIds.size || machineIds.toSet() != currentIds.toSet()) return
+        val pinnedIds = loadMachines().filter { it.machine.pinned }.map { it.machine.id }.toSet()
         val database = db.writableDatabase
         database.transaction {
-            machineIds.forEachIndexed { index, id ->
+            machineIds.filter { it in pinnedIds }.forEachIndexed { index, id ->
                 database.update("machines", ContentValues().apply { put("sort_order", index) }, "id=?", arrayOf(id.toString()))
             }
         }
@@ -470,7 +490,7 @@ class GymRepository(context: Context) {
     fun exportJson(): String {
         val root = JSONObject()
         root.put("format", "GymLog backup")
-        root.put("version", 4)
+        root.put("version", 5)
         root.put("exportedAt", System.currentTimeMillis())
         root.put("settings", JSONObject().apply {
             put("weightUnit", "kg")
@@ -511,6 +531,7 @@ class GymRepository(context: Context) {
                     put("trackingMode", summary.machine.trackingMode)
                     put("currentWeight", summary.machine.currentWeight)
                     put("sortOrder", summary.machine.sortOrder)
+                    put("pinned", summary.machine.pinned)
                     put("areas", JSONArray().apply {
                         summary.areas.forEach { put(JSONObject().put("area", it.area.name).put("strength", it.strength.value)) }
                     })
@@ -543,7 +564,7 @@ class GymRepository(context: Context) {
     fun importJson(json: String) {
         val root = JSONObject(json)
         val version = root.optInt("version", -1)
-        require(version in 3..4) { "Unsupported GymLog backup version" }
+        require(version in 3..5) { "Unsupported GymLog backup version" }
         val machines = root.getJSONArray("machines")
         root.optJSONObject("settings")?.let { settings ->
             saveProgressionSettings(ProgressionSettings(
@@ -594,6 +615,7 @@ class GymRepository(context: Context) {
                     put("tracking_mode", trackingMode)
                     put("current_weight", item.getDouble("currentWeight"))
                     put("sort_order", item.optInt("sortOrder", index))
+                    put("pinned", if (item.optBoolean("pinned")) 1 else 0)
                 })
                 val areas = item.optJSONArray("areas") ?: JSONArray()
                 for (areaIndex in 0 until areas.length()) {
@@ -714,11 +736,11 @@ private const val GYMLOG_DATABASE = "gymlog.db"
 private const val DEFAULT_ACCENT_COLOR = 0xFF64B5F6
 private const val TRAINING_UNIT_MILLIS = 6L * 60L * 60L * 1000L
 
-private class GymDatabase(context: Context) : SQLiteOpenHelper(context, GYMLOG_DATABASE, null, 8) {
+private class GymDatabase(context: Context) : SQLiteOpenHelper(context, GYMLOG_DATABASE, null, 9) {
     override fun onCreate(db: SQLiteDatabase) {
         db.execSQL("CREATE TABLE training_plans(id INTEGER PRIMARY KEY AUTOINCREMENT,name TEXT NOT NULL UNIQUE,sort_order INTEGER NOT NULL,notes TEXT NOT NULL DEFAULT '',notes_pinned INTEGER NOT NULL DEFAULT 0)")
         db.execSQL("INSERT INTO training_plans(name,sort_order) VALUES('Default',0)")
-        db.execSQL("CREATE TABLE machines(id INTEGER PRIMARY KEY AUTOINCREMENT,plan_id INTEGER NOT NULL DEFAULT 1,name TEXT NOT NULL,title_note TEXT NOT NULL DEFAULT '',notes TEXT NOT NULL DEFAULT '',pause_time TEXT NOT NULL DEFAULT '',chart_window TEXT NOT NULL DEFAULT '3M',trailing_average INTEGER NOT NULL DEFAULT 0,tracking_mode TEXT NOT NULL DEFAULT 'WEIGHT',current_weight REAL NOT NULL DEFAULT 0,sort_order INTEGER NOT NULL,FOREIGN KEY(plan_id) REFERENCES training_plans(id) ON DELETE CASCADE)")
+        db.execSQL("CREATE TABLE machines(id INTEGER PRIMARY KEY AUTOINCREMENT,plan_id INTEGER NOT NULL DEFAULT 1,name TEXT NOT NULL,title_note TEXT NOT NULL DEFAULT '',notes TEXT NOT NULL DEFAULT '',pause_time TEXT NOT NULL DEFAULT '',chart_window TEXT NOT NULL DEFAULT '3M',trailing_average INTEGER NOT NULL DEFAULT 0,tracking_mode TEXT NOT NULL DEFAULT 'WEIGHT',current_weight REAL NOT NULL DEFAULT 0,sort_order INTEGER NOT NULL,pinned INTEGER NOT NULL DEFAULT 0,FOREIGN KEY(plan_id) REFERENCES training_plans(id) ON DELETE CASCADE)")
         db.execSQL("CREATE TABLE machine_areas(machine_id INTEGER NOT NULL,area TEXT NOT NULL,strength REAL NOT NULL,PRIMARY KEY(machine_id,area),FOREIGN KEY(machine_id) REFERENCES machines(id) ON DELETE CASCADE)")
         db.execSQL("CREATE TABLE sets(id INTEGER PRIMARY KEY AUTOINCREMENT,machine_id INTEGER NOT NULL,reps INTEGER NOT NULL,weight REAL NOT NULL,performed_at INTEGER NOT NULL,FOREIGN KEY(machine_id) REFERENCES machines(id) ON DELETE CASCADE)")
         db.execSQL("CREATE TABLE weight_history(id INTEGER PRIMARY KEY AUTOINCREMENT,machine_id INTEGER NOT NULL,weight REAL NOT NULL,changed_at INTEGER NOT NULL,FOREIGN KEY(machine_id) REFERENCES machines(id) ON DELETE CASCADE)")
@@ -733,12 +755,14 @@ private class GymDatabase(context: Context) : SQLiteOpenHelper(context, GYMLOG_D
     }
 
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
-        if (oldVersion == 7 && newVersion >= 8) {
+        if (oldVersion == 7) {
             db.execSQL("ALTER TABLE training_plans ADD COLUMN notes TEXT NOT NULL DEFAULT ''")
             db.execSQL("ALTER TABLE training_plans ADD COLUMN notes_pinned INTEGER NOT NULL DEFAULT 0")
-            return
         }
-        error("This database uses GymLog schema $oldVersion, but this app requires schema $newVersion")
+        if (oldVersion <= 8 && newVersion >= 9) {
+            db.execSQL("ALTER TABLE machines ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0")
+        }
+        if (oldVersion !in 7..9) error("This database uses GymLog schema $oldVersion, but this app requires schema $newVersion")
     }
 
     override fun onDowngrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
