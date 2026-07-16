@@ -4,6 +4,7 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -11,8 +12,10 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Card
 import androidx.compose.material3.MaterialTheme
@@ -26,11 +29,14 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.gymlog.app.data.HistorySet
+import com.gymlog.app.data.BodyArea
 import com.gymlog.app.data.MachineSummary
+import com.gymlog.app.data.Strength
 import com.gymlog.app.data.weightIncreases
 import java.time.Duration
 import java.time.Instant
@@ -94,6 +100,28 @@ fun StatsScreen(
     val upgradesByMonth = (plottedMonths - 1 downTo 0).map { monthsAgo ->
         (increasesByMonth[currentMonth.minusMonths(monthsAgo.toLong())] ?: 0).toDouble()
     }
+    val machinesById = machines.associateBy { it.machine.id }
+    val bodyCounts = mutableMapOf<BodyArea, Pair<Int, Int>>()
+    sessions.values.forEach { dayEntries ->
+        dayEntries.map { it.machineId }.distinct().forEach { machineId ->
+            machinesById[machineId]?.areas?.forEach { assignment ->
+                val current = bodyCounts[assignment.area] ?: (0 to 0)
+                bodyCounts[assignment.area] = if (assignment.strength == Strength.FULL) {
+                    current.copy(first = current.first + 1)
+                } else {
+                    current.copy(second = current.second + 1)
+                }
+            }
+        }
+    }
+    val bodyAreaStats = bodyCounts.map { (area, counts) ->
+        BodyAreaTrainingStat(
+            area = area,
+            full = counts.first,
+            half = counts.second,
+            color = machines.asSequence().flatMap { it.areas.asSequence() }.firstOrNull { it.area == area }?.displayColor ?: area.color,
+        )
+    }.sortedByDescending { it.weighted }
 
     LazyColumn(
         modifier = modifier.fillMaxSize(),
@@ -150,6 +178,7 @@ fun StatsScreen(
                 StatCard("Exercises progressed", increases.map { it.machineId }.distinct().size.toString(), Modifier.weight(1f))
             }
         }
+        item { BodyAreaStatsCard(bodyAreaStats) }
         item { StatsChart("Gym sessions by week", weeks.values.toList().takeLast(20), "sessions") }
         item { StatsChart("Gym duration by day", durations.values.toList().takeLast(24), "minutes") }
         item { StatsChart("Weight increases by week", increasesByWeek, "increases") }
@@ -165,6 +194,43 @@ fun StatsScreen(
         }
     }
 }
+
+private data class BodyAreaTrainingStat(
+    val area: BodyArea,
+    val full: Int,
+    val half: Int,
+    val color: Long,
+) {
+    val weighted: Double get() = full + half * 0.5
+}
+
+@Composable
+private fun BodyAreaStatsCard(stats: List<BodyAreaTrainingStat>) {
+    Card(Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(horizontal = 9.dp, vertical = 7.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+            Text("Body Area Training", fontWeight = FontWeight.SemiBold)
+            Row(Modifier.fillMaxWidth()) {
+                Text("Area", Modifier.weight(1f), style = MaterialTheme.typography.labelSmall)
+                Text("Full", Modifier.width(42.dp), style = MaterialTheme.typography.labelSmall, textAlign = TextAlign.End)
+                Text("Half", Modifier.width(42.dp), style = MaterialTheme.typography.labelSmall, textAlign = TextAlign.End)
+                Text("Total", Modifier.width(48.dp), style = MaterialTheme.typography.labelSmall, textAlign = TextAlign.End)
+            }
+            if (stats.isEmpty()) Text("No body-area training in this period.", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
+            stats.forEach { stat ->
+                Row(Modifier.fillMaxWidth(), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                    Box(Modifier.width(12.dp).height(12.dp).background(Color(stat.color), CircleShape))
+                    Text(stat.area.label, Modifier.weight(1f).padding(start = 5.dp), style = MaterialTheme.typography.bodySmall, maxLines = 1)
+                    Text(stat.full.toString(), Modifier.width(42.dp), style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.End)
+                    Text(stat.half.toString(), Modifier.width(42.dp), style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.End)
+                    Text(formatWeighted(stat.weighted), Modifier.width(48.dp), style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.End)
+                }
+            }
+        }
+    }
+}
+
+private fun formatWeighted(value: Double): String =
+    if (value % 1.0 == 0.0) value.toInt().toString() else String.format(Locale.US, "%.1f", value)
 
 @Composable
 private fun ProgressionByExerciseCard(machines: List<MachineSummary>, cutoff: Long?, periodWeeks: Double) {

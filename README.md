@@ -14,6 +14,8 @@ GymLog is a private, offline Android workout tracker built with Kotlin, Jetpack 
 
 Screenshots use sample workout data.
 
+The launcher artwork and anatomy reference were created specifically for GymLog. The anatomy PNG retains embedded C2PA provenance identifying it as generated media.
+
 ## Requirements
 
 - Android Studio with Android SDK 35
@@ -98,7 +100,7 @@ GymLog stores its data locally on the device. It does not require an account, an
   - Create, open, rename, and delete plans from the overview menu
   - Add a plan note and optionally pin it below the overview training-time card
   - Separate exercises, ordering, history, statistics, timers, and progression data per plan
-- Reorderable exercise overview (long-press and drag) with custom exercise names and optional title notes
+- Reorderable exercise overview with a persistent long-press reorder mode and Done action
 - Two exercise tracking modes
   - Weight in kilograms
   - Machine or resistance level, with each training recorded in minutes
@@ -146,6 +148,7 @@ GymLog stores its data locally on the device. It does not require an account, an
   - Average upgrades per gym day and per month
   - Weekly, per-gym-day, and monthly upgrade plots
   - Per-exercise weight-increase frequency
+  - Body-area frequency split into Full, Half, and half-weighted totals
 - Progression warnings for weight-based exercises
   - Warn after a configurable number of weeks without an increase
   - Warn after a configurable number of training days without an increase
@@ -153,7 +156,7 @@ GymLog stores its data locally on the device. It does not require an account, an
 - Simplified front/back body-area picker designed around gym machines
   - Chest, lats / upper back, lower back, traps, shoulders, biceps, triceps, forearms, core, glutes, quads, adductors, hip abductors, hamstrings, and calves
   - Half- or full-strength assignments
-  - Custom colors and most-used-area sorting
+  - High-contrast defaults, 30 custom colors, weighted usage counts, and most-used-area sorting
 - JSON backup and restore through Android's file picker
   - All training plans included in one backup
   - Can be saved to local storage or a cloud provider exposed by the Android file picker

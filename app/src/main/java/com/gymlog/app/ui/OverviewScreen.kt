@@ -2,6 +2,7 @@ package com.gymlog.app.ui
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -111,6 +112,7 @@ fun OverviewScreen(
     val orderedMachines = remember(machines) { machines.toMutableStateList() }
     var draggedId by remember { mutableStateOf<Long?>(null) }
     var dragOffset by remember { mutableStateOf(0f) }
+    var reorderMode by remember { mutableStateOf(false) }
     var footerVisible by remember { mutableStateOf(true) }
     LaunchedEffect(listState) {
         var previous = 0
@@ -136,7 +138,7 @@ fun OverviewScreen(
         } else {
             LazyColumn(
                 state = listState,
-                contentPadding = PaddingValues(start = 8.dp, end = 8.dp, top = 6.dp, bottom = 72.dp),
+                contentPadding = PaddingValues(start = 8.dp, end = 8.dp, top = if (reorderMode) 56.dp else 6.dp, bottom = 72.dp),
                 verticalArrangement = Arrangement.spacedBy(6.dp),
             ) {
                 item(key = "training-duration") { TrainingDurationCard(machines, activePlanName, now, zone) }
@@ -152,20 +154,10 @@ fun OverviewScreen(
                     MachineCard(
                         summary, lastExerciseInUnit, trainingUnitCutoff, areaFrequency, onMachine, onQuickSet,
                         onMetricChange, onMetricChangeForSession, progressionSettings,
-                        modifier = Modifier.pointerInput(id, orderedMachines.map { it.machine.id }) {
-                            detectDragGesturesAfterLongPress(
-                                onDragStart = { draggedId = id; dragOffset = 0f },
-                                onDragCancel = { draggedId = null; dragOffset = 0f },
-                                onDragEnd = {
-                                    onReorder(orderedMachines.map { it.machine.id })
-                                    draggedId = null
-                                    dragOffset = 0f
-                                },
-                                onDrag = { change, amount ->
-                                    change.consume()
-                                    dragOffset += amount.y
-                                    val currentInfo = listState.layoutInfo.visibleItemsInfo.firstOrNull { it.key == id }
-                                        ?: return@detectDragGesturesAfterLongPress
+                        modifier = Modifier.pointerInput(id, reorderMode, orderedMachines.map { it.machine.id }) {
+                            fun moveBy(amountY: Float) {
+                                    dragOffset += amountY
+                                    val currentInfo = listState.layoutInfo.visibleItemsInfo.firstOrNull { it.key == id } ?: return
                                     val draggedCenter = currentInfo.offset + currentInfo.size / 2f + dragOffset
                                     val targetId = listState.layoutInfo.visibleItemsInfo
                                         .filter { it.key is Long }
@@ -177,16 +169,51 @@ fun OverviewScreen(
                                         orderedMachines.add(to, orderedMachines.removeAt(from))
                                         dragOffset = 0f
                                     }
-                                },
-                            )
+                            }
+                            val start: (androidx.compose.ui.geometry.Offset) -> Unit = {
+                                reorderMode = true
+                                draggedId = id
+                                dragOffset = 0f
+                            }
+                            val cancel = { draggedId = null; dragOffset = 0f }
+                            val end = { draggedId = null; dragOffset = 0f }
+                            if (reorderMode) {
+                                detectDragGestures(
+                                    onDragStart = start,
+                                    onDragCancel = cancel,
+                                    onDragEnd = end,
+                                    onDrag = { change, amount -> change.consume(); moveBy(amount.y) },
+                                )
+                            } else {
+                                detectDragGesturesAfterLongPress(
+                                    onDragStart = start,
+                                    onDragCancel = cancel,
+                                    onDragEnd = end,
+                                    onDrag = { change, amount -> change.consume(); moveBy(amount.y) },
+                                )
+                            }
                         },
                         isDragging = draggedId == id,
+                        isReordering = reorderMode,
                     )
                 }
             }
         }
         AnimatedVisibility(
-            visible = footerVisible,
+            visible = reorderMode,
+            modifier = Modifier.align(Alignment.TopCenter),
+            enter = slideInVertically { -it } + fadeIn(),
+            exit = slideOutVertically { -it } + fadeOut(),
+        ) {
+            Text(
+                "Reordering Exercises",
+                modifier = Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.primaryContainer).padding(horizontal = 16.dp, vertical = 12.dp),
+                style = MaterialTheme.typography.titleSmall,
+                color = MaterialTheme.colorScheme.onPrimaryContainer,
+            )
+        }
+        AnimatedVisibility(
+            visible = reorderMode || footerVisible,
             modifier = Modifier.align(Alignment.BottomCenter),
             enter = slideInVertically { it } + fadeIn(),
             exit = slideOutVertically { it } + fadeOut(),
@@ -195,9 +222,19 @@ fun OverviewScreen(
                 modifier = Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surface).padding(8.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                FilledTonalButton(onClick = onMenu, modifier = Modifier.weight(1f)) { Text("Menu") }
-                FilledTonalButton(onClick = onStats, modifier = Modifier.weight(2f)) { Text("Stats") }
-                FilledTonalButton(onClick = onAdd, modifier = Modifier.weight(1f)) { Text("+ Add") }
+                if (reorderMode) {
+                    Button(
+                        onClick = {
+                            onReorder(orderedMachines.map { it.machine.id })
+                            reorderMode = false
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) { Text("Done") }
+                } else {
+                    FilledTonalButton(onClick = onMenu, modifier = Modifier.weight(1f)) { Text("Menu") }
+                    FilledTonalButton(onClick = onStats, modifier = Modifier.weight(2f)) { Text("Stats") }
+                    FilledTonalButton(onClick = onAdd, modifier = Modifier.weight(1f)) { Text("+ Add") }
+                }
             }
         }
     }
@@ -354,6 +391,7 @@ private fun MachineCard(
     progressionSettings: ProgressionSettings,
     modifier: Modifier = Modifier,
     isDragging: Boolean = false,
+    isReordering: Boolean = false,
 ) {
     var quickReps by remember(summary.machine.id) { mutableStateOf(false) }
     var changeMetric by remember(summary.machine.id) { mutableStateOf(false) }
@@ -371,7 +409,7 @@ private fun MachineCard(
         else -> Color(0xFF43A047)
     }
     Card(
-        modifier = modifier.fillMaxWidth().clickable { onMachine(summary.machine.id) },
+        modifier = modifier.fillMaxWidth().clickable(enabled = !isReordering) { onMachine(summary.machine.id) },
         elevation = CardDefaults.cardElevation(defaultElevation = if (isDragging) 10.dp else 1.dp),
         border = BorderStroke(if (isLastDone) 3.dp else if (trainedInUnit) 1.5.dp else 2.5.dp, outlineColor),
     ) {
@@ -409,7 +447,7 @@ private fun MachineCard(
                         isDirectMetric(summary.machine.trackingMode) -> "+ Training"
                         else -> "+ Sets"
                     },
-                    modifier = Modifier.clickable { quickReps = true }.padding(horizontal = 8.dp, vertical = 2.dp),
+                    modifier = Modifier.clickable(enabled = !isReordering) { quickReps = true }.padding(horizontal = 8.dp, vertical = 2.dp),
                     style = MaterialTheme.typography.labelLarge,
                     color = MaterialTheme.colorScheme.primary,
                 )
@@ -423,7 +461,7 @@ private fun MachineCard(
                 )
                 Text(
                     formatMetric(summary.machine.currentWeight, summary.machine.trackingMode),
-                    modifier = Modifier.clickable { changeMetric = true }.padding(horizontal = 6.dp, vertical = 4.dp),
+                    modifier = Modifier.clickable(enabled = !isReordering) { changeMetric = true }.padding(horizontal = 6.dp, vertical = 4.dp),
                     style = MaterialTheme.typography.titleSmall,
                     color = MaterialTheme.colorScheme.primary,
                 )

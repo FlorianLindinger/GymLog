@@ -3,10 +3,12 @@ package com.gymlog.app.ui
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -43,10 +45,12 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.gymlog.app.data.AreaAssignment
 import com.gymlog.app.data.BodyArea
@@ -65,7 +69,7 @@ import java.util.Locale
 @Composable
 fun DetailScreen(
     summary: MachineSummary,
-    areaUsage: Map<BodyArea, Int>,
+    areaUsage: Map<BodyArea, Double>,
     areaColors: Map<BodyArea, Long>,
     modifier: Modifier = Modifier,
     repository: GymRepository,
@@ -101,7 +105,7 @@ fun DetailScreen(
             Card(modifier = Modifier.fillMaxWidth().clickable { showAreas = true }) {
                 Column(Modifier.padding(8.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
                     Text("Training areas", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
-                    summary.areas.sortedByDescending { areaUsage[it.area] ?: 0 }.forEach { assignment ->
+                    summary.areas.sortedByDescending { areaUsage[it.area] ?: 0.0 }.forEach { assignment ->
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Box(Modifier.width(if (assignment.strength == Strength.FULL) 34.dp else 17.dp).height(8.dp).background(Color(assignment.displayColor), RoundedCornerShape(8.dp)))
                             Spacer(Modifier.width(6.dp))
@@ -382,7 +386,7 @@ fun MetricValueDialog(
 @Composable
 private fun AreaDialog(
     current: List<AreaAssignment>,
-    usage: Map<BodyArea, Int>,
+    usage: Map<BodyArea, Double>,
     colors: Map<BodyArea, Long>,
     onColorChange: (BodyArea, Long) -> Unit,
     onDismiss: () -> Unit,
@@ -395,41 +399,56 @@ private fun AreaDialog(
     }
     var colorArea by remember { mutableStateOf<BodyArea?>(null) }
     val sortedAreas = BodyArea.entries.sortedWith(
-        compareByDescending<BodyArea> { usage[it] ?: 0 }.thenBy { it.label },
+        compareByDescending<BodyArea> { usage[it] ?: 0.0 }.thenBy { it.label },
     )
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Training areas") },
         text = {
-            Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text("Selected areas are previewed on the anatomy image. Use the Half and Full controls below to make changes.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 BodyMapPicker(
                     choices = choices,
                     colors = colors,
                     modifier = Modifier.fillMaxWidth().aspectRatio(1.5f),
                 )
-                Text("Most-used areas appear first. Tap a color dot to change it.", style = MaterialTheme.typography.bodySmall)
                 sortedAreas.forEach { area ->
-                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Row(Modifier.fillMaxWidth().padding(vertical = 1.dp), verticalAlignment = Alignment.CenterVertically) {
                         Box(
-                            Modifier.width(22.dp).height(36.dp)
+                            Modifier.width(22.dp).height(22.dp)
                                 .background(Color(colors[area] ?: area.color), CircleShape)
                                 .clickable { colorArea = area },
                         )
-                        Spacer(Modifier.width(8.dp))
-                        Column(Modifier.weight(1f)) {
-                            Text(area.label)
-                            if ((usage[area] ?: 0) > 0) Text("Used ${usage[area]}×", style = MaterialTheme.typography.labelSmall)
+                        Spacer(Modifier.width(6.dp))
+                        Text(
+                            buildString {
+                                append(area.label)
+                                val count = usage[area] ?: 0.0
+                                if (count > 0) append(" · ${formatAreaUsage(count)}×")
+                            },
+                            Modifier.weight(1f),
+                            style = MaterialTheme.typography.bodySmall,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        AreaStrengthChoice("½", choices[area] == Strength.HALF) {
+                            choices[area] = if (choices[area] == Strength.HALF) null else Strength.HALF
                         }
-                        FilterChip(selected = choices[area] == Strength.HALF, onClick = { choices[area] = if (choices[area] == Strength.HALF) null else Strength.HALF }, label = { Text("½") })
-                        Spacer(Modifier.width(5.dp))
-                        FilterChip(selected = choices[area] == Strength.FULL, onClick = { choices[area] = if (choices[area] == Strength.FULL) null else Strength.FULL }, label = { Text("Full") })
+                        Spacer(Modifier.width(3.dp))
+                        AreaStrengthChoice("Full", choices[area] == Strength.FULL) {
+                            choices[area] = if (choices[area] == Strength.FULL) null else Strength.FULL
+                        }
                     }
+                }
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End, verticalAlignment = Alignment.CenterVertically) {
+                    TextButton(onClick = onDismiss, contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp)) { Text("Cancel") }
+                    Button(
+                        onClick = { onSave(choices.mapNotNull { (area, strength) -> strength?.let { AreaAssignment(area, it) } }) },
+                        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp),
+                    ) { Text("Save") }
                 }
             }
         },
-        confirmButton = { Button(onClick = { onSave(choices.mapNotNull { (area, strength) -> strength?.let { AreaAssignment(area, it) } }) }) { Text("Save") } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+        confirmButton = {},
     )
     colorArea?.let { area ->
         ColorPaletteDialog(
@@ -440,6 +459,25 @@ private fun AreaDialog(
         )
     }
 }
+
+@Composable
+private fun AreaStrengthChoice(label: String, selected: Boolean, onClick: () -> Unit) {
+    Text(
+        label,
+        modifier = Modifier
+            .background(
+                if (selected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant,
+                RoundedCornerShape(7.dp),
+            )
+            .clickable(onClick = onClick)
+            .padding(horizontal = 8.dp, vertical = 4.dp),
+        color = if (selected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
+        style = MaterialTheme.typography.labelSmall,
+    )
+}
+
+private fun formatAreaUsage(value: Double): String =
+    if (value % 1.0 == 0.0) value.toInt().toString() else String.format(Locale.US, "%.1f", value)
 
 @Composable
 private fun BodyMapPicker(
@@ -456,7 +494,7 @@ private fun BodyMapPicker(
         )
         Canvas(modifier = Modifier.fillMaxSize()) {
             fun selectedColor(area: BodyArea): Color? = choices[area]?.let { strength ->
-                Color(colors[area] ?: area.color).copy(alpha = if (strength == Strength.FULL) .58f else .30f)
+                Color(colors[area] ?: area.color).copy(alpha = if (strength == Strength.FULL) .82f else .48f)
             }
             fun oval(area: BodyArea, x: Float, y: Float, width: Float, height: Float) {
                 selectedColor(area)?.let { color ->
@@ -465,9 +503,16 @@ private fun BodyMapPicker(
             }
             fun polygon(area: BodyArea, vararg points: Pair<Float, Float>) {
                 selectedColor(area)?.let { color ->
+                    val scaled = points.map { Offset(size.width * it.first, size.height * it.second) }
+                    fun midpoint(first: Offset, second: Offset) =
+                        Offset((first.x + second.x) / 2f, (first.y + second.y) / 2f)
                     val path = Path().apply {
-                        moveTo(size.width * points.first().first, size.height * points.first().second)
-                        points.drop(1).forEach { (x, y) -> lineTo(size.width * x, size.height * y) }
+                        val start = midpoint(scaled.last(), scaled.first())
+                        moveTo(start.x, start.y)
+                        scaled.forEachIndexed { index, point ->
+                            val end = midpoint(point, scaled[(index + 1) % scaled.size])
+                            quadraticTo(point.x, point.y, end.x, end.y)
+                        }
                         close()
                     }
                     drawPath(path, color)
@@ -512,24 +557,32 @@ private fun BodyMapPicker(
 @Composable
 private fun ColorPaletteDialog(area: BodyArea, selected: Long, onDismiss: () -> Unit, onSelect: (Long) -> Unit) {
     val palette = listOf(
-        0xFFE63946, 0xFFFF7F11, 0xFFF2C14E, 0xFF70C1B3,
-        0xFF2A9D8F, 0xFF3A86FF, 0xFF4361EE, 0xFF8338EC,
-        0xFFB565D9, 0xFFFF5D8F, 0xFF8D6E63, 0xFF577590,
+        0xFFE6194B, 0xFFB00020, 0xFF800000, 0xFFF58231, 0xFFE64A19, 0xFFFF7F00,
+        0xFFFFD700, 0xFFBFEF45, 0xFF3CB44B, 0xFF008000, 0xFF008080, 0xFF00A6D6,
+        0xFF42D4F4, 0xFF0072B2, 0xFF4363D8, 0xFF000075, 0xFF3F007D, 0xFF911EB4,
+        0xFFF032E6, 0xFFE7298A, 0xFF9A6324, 0xFF6B3E26, 0xFF469990, 0xFF78909C,
+        0xFF000000, 0xFF4D4D4D, 0xFFFFFFFF, 0xFFBC80BD, 0xFF1B9E77, 0xFFD95F02,
     )
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("${area.label} color") },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                palette.chunked(4).forEach { row ->
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                palette.chunked(6).forEach { row ->
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                         row.forEach { value ->
                             Box(
-                                Modifier.width(48.dp).height(48.dp)
+                                Modifier.width(36.dp).height(36.dp)
                                     .background(Color(value), CircleShape)
+                                    .border(1.dp, MaterialTheme.colorScheme.onSurface.copy(alpha = .35f), CircleShape)
                                     .clickable { onSelect(value) },
                                 contentAlignment = Alignment.Center,
-                            ) { if (selected == value) Text("✓", color = Color.White, fontWeight = FontWeight.Bold) }
+                            ) {
+                                if (selected == value) {
+                                    val color = Color(value)
+                                    Text("✓", color = if (color.luminance() > .55f) Color.Black else Color.White, fontWeight = FontWeight.Bold)
+                                }
+                            }
                         }
                     }
                 }

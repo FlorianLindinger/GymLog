@@ -128,7 +128,8 @@ fun GymLogApp(
             .mapValues { (_, values) -> values.sumOf { it.strength.value } }
     }
     val areaUsage = remember(uiState.machines) {
-        uiState.machines.flatMap { it.areas }.groupingBy { it.area }.eachCount()
+        uiState.machines.flatMap { it.areas }.groupBy { it.area }
+            .mapValues { (_, assignments) -> assignments.sumOf { it.strength.value } }
     }
     LaunchedEffect(screen, selected) {
         if (screen == Screen.DETAIL && selected == null) screen = Screen.OVERVIEW
