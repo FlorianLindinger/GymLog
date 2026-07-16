@@ -35,4 +35,4 @@ This backlog tracks release work. Keep feature exploration in [Feature Ideas](do
 - [x] Demo training plan with historical and halfway-finished sample data
 - [x] Documented Automatic, Mixed, and Fixed exercise ordering
 - [x] Documented the current data-format policy
-- [x] Moved Windows build output outside cloud-synced repositories to prevent APK packaging locks
+- [x] Published finished builds inside the repository while keeping lock-prone Gradle intermediates outside it

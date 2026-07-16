@@ -5,10 +5,13 @@
 /.idea
 /build
 /app/build
+/artifacts/
 /captures
 /screenshots
 *.jks
 *.keystore
+*.driveupload
 .externalNativeBuild
 .cxx
 local.properties
+google_drive_synced/*.apk

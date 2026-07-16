@@ -14,7 +14,7 @@ cd /d "%REPO_ROOT%"
 call "%SCRIPT_DIR%_android_env.bat"
 if errorlevel 1 exit /b 1
 
-set "APK=%GYMLOG_BUILD_DIR%\outputs\apk\debug\app-debug.apk"
+set "APK=%REPO_ROOT%\artifacts\debug\app-debug.apk"
 set "ADB=%GYMLOG_ADB%"
 set "ADB_TARGET="
 if not "%~1"=="" set "ADB_TARGET=-s %~1"

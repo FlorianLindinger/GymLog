@@ -55,13 +55,15 @@ Open the project in Android Studio, allow Gradle to sync, and run the `app` conf
 scripts\windows\build.bat
 ```
 
-On Windows, the debug APK is written to `%LOCALAPPDATA%\GymLog\build\app\outputs\apk\debug\app-debug.apk`. This external build directory prevents cloud-sync clients from locking generated files. Run the complete local verification with:
+The finished debug APK is published inside the repository at `artifacts\debug\app-debug.apk`, where Google Drive can synchronize it. Disposable Gradle intermediates stay outside the repository to prevent cloud-sync file locks. Run the complete local verification with:
 
 ```powershell
 scripts\windows\verify.bat
 ```
 
 Windows development and release helpers are described in [scripts/windows](scripts/windows/README.md). GitHub Actions runs the same compile, lint, test, and APK checks on pushes and pull requests.
+
+The [`google_drive_synced`](google_drive_synced/README.md) folder contains portable launchers for the debug and release output folders plus signed-release instructions.
 
 ## Demo Data
 

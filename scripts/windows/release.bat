@@ -79,7 +79,15 @@ if errorlevel 1 (
     exit /b 1
 )
 
-set "CHECKSUMS=%GYMLOG_BUILD_DIR%\outputs\release-%VERSION%-sha256.txt"
+set "ARTIFACT_DIR=%REPO_ROOT%\artifacts\release\%VERSION%"
+if not exist "%ARTIFACT_DIR%" mkdir "%ARTIFACT_DIR%"
+copy /y "%APK%" "%ARTIFACT_DIR%\GymLog-%VERSION%.apk" >nul
+if errorlevel 1 goto publish_failed
+copy /y "%AAB%" "%ARTIFACT_DIR%\GymLog-%VERSION%.aab" >nul
+if errorlevel 1 goto publish_failed
+set "APK=%ARTIFACT_DIR%\GymLog-%VERSION%.apk"
+set "AAB=%ARTIFACT_DIR%\GymLog-%VERSION%.aab"
+set "CHECKSUMS=%ARTIFACT_DIR%\SHA256SUMS.txt"
 powershell -NoProfile -Command "$files = @('%APK%', '%AAB%'); $files | ForEach-Object { $h = Get-FileHash -Algorithm SHA256 -LiteralPath $_; '{0}  {1}' -f $h.Hash, (Split-Path $_ -Leaf) } | Set-Content -Encoding ASCII -LiteralPath '%CHECKSUMS%'"
 if errorlevel 1 (
     echo ERROR: Could not create SHA-256 checksums.
@@ -100,6 +108,10 @@ if /i "%CREATE_TAG%"=="y" (
     echo Push it when ready with: git push origin v%VERSION%
 )
 exit /b 0
+
+:publish_failed
+echo ERROR: Release artifacts could not be copied into the repository.
+exit /b 1
 
 :signing_missing
 echo ERROR: Release signing is not configured.
