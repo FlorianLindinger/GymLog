@@ -96,7 +96,6 @@ fun OverviewScreen(
     progressionSettings: ProgressionSettings,
     orderingMode: ExerciseOrderingMode,
     onReorder: (List<Long>) -> Unit,
-    onPinnedChange: (MachineSummary, Boolean) -> Unit,
 ) {
     val zone = ZoneId.systemDefault()
     var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
@@ -218,8 +217,6 @@ fun OverviewScreen(
                         },
                         isDragging = draggedId == id,
                         isReordering = reorderMode,
-                        onPinnedChange = onPinnedChange,
-                        showPin = orderingMode == ExerciseOrderingMode.MIXED,
                     )
                 }
             }
@@ -239,13 +236,18 @@ fun OverviewScreen(
                         modifier = Modifier.fillMaxWidth(),
                     ) { Text("Done") }
                 } else {
-                    FilledTonalButton(onClick = onBody, modifier = Modifier.weight(1f)) { Text("Body") }
-                    FilledTonalButton(onClick = onMenu, modifier = Modifier.weight(1f)) { Text("Menu") }
-                    FilledTonalButton(onClick = onStats, modifier = Modifier.weight(1f)) { Text("Stats") }
-                    FilledTonalButton(onClick = onAdd, modifier = Modifier.weight(1f)) { Text("+ Add") }
+                    FilledTonalButton(onClick = onBody, modifier = Modifier.weight(1f)) { OverviewButtonLabel("Body") }
+                    FilledTonalButton(onClick = onMenu, modifier = Modifier.weight(1f)) { OverviewButtonLabel("Menu") }
+                    FilledTonalButton(onClick = onStats, modifier = Modifier.weight(1f)) { OverviewButtonLabel("Stats") }
+                    FilledTonalButton(onClick = onAdd, modifier = Modifier.weight(1f)) { OverviewButtonLabel("+ Add") }
                 }
         }
     }
+}
+
+@Composable
+private fun OverviewButtonLabel(text: String) {
+    Text(text, maxLines = 1, softWrap = false, style = MaterialTheme.typography.labelMedium)
 }
 
 @Composable
@@ -400,8 +402,6 @@ private fun MachineCard(
     onMetricChange: (MachineSummary, Double) -> Unit,
     onMetricChangeForSession: (MachineSummary, Double) -> Unit,
     progressionSettings: ProgressionSettings,
-    onPinnedChange: (MachineSummary, Boolean) -> Unit,
-    showPin: Boolean,
     modifier: Modifier = Modifier,
     isDragging: Boolean = false,
     isReordering: Boolean = false,
@@ -428,6 +428,7 @@ private fun MachineCard(
     ) {
         Column(Modifier.padding(horizontal = 8.dp, vertical = 3.dp), verticalArrangement = Arrangement.spacedBy(0.dp)) {
             if (summary.areas.isNotEmpty()) {
+                Spacer(Modifier.height(3.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(3.dp)) {
                     summary.areas.sortedByDescending { areaFrequency[it.area] ?: 0.0 }.forEach { assignment ->
                         Box(
@@ -449,14 +450,6 @@ private fun MachineCard(
                         Text(" · ${summary.machine.titleNote}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
-                if (showPin) Text(
-                    if (summary.machine.pinned) "★" else "☆",
-                    modifier = Modifier
-                        .clickable(enabled = !isReordering) { onPinnedChange(summary, !summary.machine.pinned) }
-                        .padding(horizontal = 7.dp, vertical = 3.dp),
-                    color = if (summary.machine.pinned) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                    style = MaterialTheme.typography.titleMedium,
-                )
             }
             progressionWarning(summary, progressionSettings)?.let { warning ->
                 Text(warning, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error)

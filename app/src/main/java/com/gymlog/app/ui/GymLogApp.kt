@@ -16,6 +16,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -249,10 +251,6 @@ fun GymLogApp(
                     repository.reorderMachines(orderedIds, uiState.exerciseOrderingMode == ExerciseOrderingMode.MIXED)
                     refresh()
                 },
-                onPinnedChange = { machine, pinned ->
-                    repository.setMachinePinned(machine.machine.id, pinned)
-                    refresh()
-                },
             )
             Screen.BODY -> BodyOverviewScreen(
                 snapshot = bodyData,
@@ -297,6 +295,11 @@ fun GymLogApp(
                 onRename = { id, name -> repository.renameTrainingPlan(id, name); refresh() },
                 onDelete = { repository.deleteTrainingPlan(it); refresh() },
                 onDuplicate = { repository.duplicateTrainingPlan(it); refresh() },
+                onCreateDemo = {
+                    repository.createDemoTrainingPlan()
+                    refresh()
+                    screen = Screen.OVERVIEW
+                },
             )
             Screen.BACKUP -> BackupScreen(
                 modifier = Modifier.padding(padding),
@@ -396,7 +399,7 @@ fun GymLogApp(
                 Text("Progress Warnings", style = MaterialTheme.typography.titleSmall)
                 Text("Warnings appear when an exercise has not increased after your configured number of weeks or training sessions.")
                 Text("Exercise Ordering", style = MaterialTheme.typography.titleSmall)
-                Text("Automatic prioritizes the active exercise, exercises not yet done, low-conflict areas, exercises missed last training, and least-used exercises. Mixed keeps starred exercises in your order above the automatically ranked remainder. Fixed keeps your full manual order. The active exercise stays first in every mode.")
+                Text("Automatic prioritizes the active exercise, exercises not yet done, low-conflict areas, exercises missed last training, and least-used exercises. Mixed keeps exercises marked Keep at Top in their exercise editor above the automatically ranked remainder. Fixed keeps your full manual order. The active exercise stays first in every mode.")
             }
         },
         confirmButton = { TextButton(onClick = { showHelp = false; showMenu = true }) { Text("Close") } },
@@ -466,10 +469,12 @@ fun GymLogApp(
                 machineName = machine.name,
                 titleNote = machine.titleNote,
                 overviewNote = machine.notes,
+                pinned = machine.pinned,
                 initialFocus = focus,
                 onDismiss = { editingExerciseField = null },
-                onSave = { name, titleNote, overviewNote ->
+                onSave = { name, titleNote, overviewNote, pinned ->
                     repository.updateMachine(machine.id, name, titleNote, overviewNote, machine.pauseTime)
+                    if (pinned != machine.pinned) repository.setMachinePinned(machine.id, pinned)
                     refresh()
                     editingExerciseField = null
                 },
@@ -496,13 +501,15 @@ private fun ExerciseDetailsDialog(
     machineName: String,
     titleNote: String,
     overviewNote: String,
+    pinned: Boolean,
     initialFocus: ExerciseEditField,
     onDismiss: () -> Unit,
-    onSave: (String, String, String) -> Unit,
+    onSave: (String, String, String, Boolean) -> Unit,
 ) {
     var name by remember(machineName) { mutableStateOf(machineName) }
     var title by remember(titleNote) { mutableStateOf(titleNote) }
     var note by remember(overviewNote) { mutableStateOf(overviewNote) }
+    var keepAtTop by remember(pinned) { mutableStateOf(pinned) }
     val nameFocus = remember { FocusRequester() }
     val titleFocus = remember { FocusRequester() }
     val noteFocus = remember { FocusRequester() }
@@ -542,10 +549,17 @@ private fun ExerciseDetailsDialog(
                     minLines = 3,
                     keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences),
                 )
+                Row(Modifier.fillMaxWidth(), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Keep at Top", style = MaterialTheme.typography.titleSmall)
+                        Text("Used by Mixed exercise ordering.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    Switch(checked = keepAtTop, onCheckedChange = { keepAtTop = it })
+                }
             }
         },
         confirmButton = {
-            Button(onClick = { onSave(name.trim(), title.trim(), note.trim()) }, enabled = name.isNotBlank()) {
+            Button(onClick = { onSave(name.trim(), title.trim(), note.trim(), keepAtTop) }, enabled = name.isNotBlank()) {
                 Text("Save")
             }
         },
@@ -584,7 +598,7 @@ private fun ExerciseOrderingDialog(
                             ExerciseOrderingMode.AUTOMATIC ->
                                 "Smart-rank every exercise by current training, conflicts, previous training, and total use."
                             ExerciseOrderingMode.MIXED ->
-                                "Keep starred exercises manually ordered at the top; smart-rank everything else."
+                                "Keep exercises marked Keep at Top manually ordered first; smart-rank everything else."
                             ExerciseOrderingMode.FIXED ->
                                 "Keep the complete list in your manual order. The current exercise still appears first."
                         },
@@ -661,7 +675,7 @@ private fun BackupScreen(
     onImport: () -> Unit,
 ) {
     Column(
-        modifier = modifier.fillMaxSize().padding(20.dp),
+        modifier = modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(20.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
         Text("Backup & Sync", style = MaterialTheme.typography.headlineSmall)
@@ -706,8 +720,8 @@ private fun BackupScreen(
         )
         Text("Manual File Backup", style = MaterialTheme.typography.titleMedium)
         Text("Export creates a readable JSON copy containing every plan, exercise, note, body area, metric change, and set. Choose Google Drive in the file picker if you want to move it between phones yourself.")
-        Button(onClick = onExport) { Text("Download Backup") }
-        androidx.compose.material3.OutlinedButton(onClick = onImport) { Text("Upload and Restore Backup") }
+        Button(onClick = onExport, modifier = Modifier.fillMaxWidth()) { Text("Download Backup") }
+        androidx.compose.material3.OutlinedButton(onClick = onImport, modifier = Modifier.fillMaxWidth()) { Text("Restore from Backup") }
         Text("Restoring a manual file replaces the data currently on this phone. Automatic Android backup is unaffected by manual export and restore.", color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }

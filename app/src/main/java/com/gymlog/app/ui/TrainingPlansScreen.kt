@@ -14,6 +14,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -36,6 +37,7 @@ fun TrainingPlansScreen(
     onRename: (Long, String) -> Unit,
     onDelete: (Long) -> Unit,
     onDuplicate: (Long) -> Unit,
+    onCreateDemo: () -> Unit,
 ) {
     var creating by remember { mutableStateOf(false) }
     var renaming by remember { mutableStateOf<TrainingPlan?>(null) }
@@ -67,6 +69,7 @@ fun TrainingPlansScreen(
             }
         }
         item { Button(onClick = { creating = true }, modifier = Modifier.fillMaxWidth()) { Text("+ New Training Plan") } }
+        item { OutlinedButton(onClick = onCreateDemo, modifier = Modifier.fillMaxWidth()) { Text("Add Demo Training Plan") } }
     }
 
     if (creating) PlanNameDialog("New Training Plan", "", onDismiss = { creating = false }) {

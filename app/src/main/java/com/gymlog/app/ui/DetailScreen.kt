@@ -1,7 +1,6 @@
 package com.gymlog.app.ui
 
 import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -47,9 +46,8 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.luminance
-import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
@@ -61,7 +59,6 @@ import com.gymlog.app.data.MachineSummary
 import com.gymlog.app.data.SetRecord
 import com.gymlog.app.data.Strength
 import com.gymlog.app.data.WeightChange
-import com.gymlog.app.R
 import java.time.Duration
 import java.time.Instant
 import java.time.ZoneId
@@ -521,38 +518,56 @@ private fun BodyMapPicker(
     colors: Map<BodyArea, Long>,
     modifier: Modifier = Modifier,
 ) {
+    val neutral = MaterialTheme.colorScheme.surfaceVariant
+    val outline = MaterialTheme.colorScheme.outline
     Box(modifier, contentAlignment = Alignment.Center) {
-        Image(
-            painter = painterResource(R.drawable.body_anatomy),
-            contentDescription = "Front and back muscular anatomy reference",
-            modifier = Modifier.fillMaxSize(),
-            contentScale = ContentScale.FillBounds,
-        )
         Canvas(modifier = Modifier.fillMaxSize()) {
-            fun selectedColor(area: BodyArea): Color? = choices[area]?.let { strength ->
-                Color(colors[area] ?: area.color).copy(alpha = if (strength == Strength.FULL) .82f else .48f)
-            }
-            fun oval(area: BodyArea, x: Float, y: Float, width: Float, height: Float) {
-                selectedColor(area)?.let { color ->
-                    drawOval(color, Offset(size.width * x, size.height * y), Size(size.width * width, size.height * height))
+            val bodyStroke = size.height * .035f
+            fun point(x: Float, y: Float) = Offset(size.width * x, size.height * y)
+            fun baseFigure(centerX: Float) {
+                drawCircle(outline, size.height * .057f, point(centerX, .125f))
+                drawCircle(neutral, size.height * .052f, point(centerX, .125f))
+                val torsoTop = point(centerX, .245f)
+                val torsoBottom = point(centerX, .50f)
+                drawLine(outline, torsoTop, torsoBottom, bodyStroke * 2.55f, StrokeCap.Round)
+                drawLine(neutral, torsoTop, torsoBottom, bodyStroke * 2.25f, StrokeCap.Round)
+                listOf(
+                    point(centerX - .043f, .275f) to point(centerX - .075f, .49f),
+                    point(centerX + .043f, .275f) to point(centerX + .075f, .49f),
+                    point(centerX - .026f, .50f) to point(centerX - .035f, .875f),
+                    point(centerX + .026f, .50f) to point(centerX + .035f, .875f),
+                ).forEach { (start, end) ->
+                    drawLine(outline, start, end, bodyStroke + 5f, StrokeCap.Round)
+                    drawLine(neutral, start, end, bodyStroke, StrokeCap.Round)
                 }
+            }
+            baseFigure(.305f)
+            baseFigure(.700f)
+
+            fun areaColor(area: BodyArea): Color = choices[area]?.let { strength ->
+                Color(colors[area] ?: area.color).copy(alpha = if (strength == Strength.FULL) .90f else .58f)
+            } ?: neutral.copy(alpha = .88f)
+            fun oval(area: BodyArea, x: Float, y: Float, width: Float, height: Float) {
+                val topLeft = Offset(size.width * x, size.height * y)
+                val ovalSize = Size(size.width * width, size.height * height)
+                drawOval(areaColor(area), topLeft, ovalSize)
+                drawOval(outline.copy(alpha = .65f), topLeft, ovalSize, style = Stroke(width = 1.5f))
             }
             fun polygon(area: BodyArea, vararg points: Pair<Float, Float>) {
-                selectedColor(area)?.let { color ->
-                    val scaled = points.map { Offset(size.width * it.first, size.height * it.second) }
-                    fun midpoint(first: Offset, second: Offset) =
-                        Offset((first.x + second.x) / 2f, (first.y + second.y) / 2f)
-                    val path = Path().apply {
-                        val start = midpoint(scaled.last(), scaled.first())
-                        moveTo(start.x, start.y)
-                        scaled.forEachIndexed { index, point ->
-                            val end = midpoint(point, scaled[(index + 1) % scaled.size])
-                            quadraticTo(point.x, point.y, end.x, end.y)
-                        }
-                        close()
+                val scaled = points.map { Offset(size.width * it.first, size.height * it.second) }
+                fun midpoint(first: Offset, second: Offset) =
+                    Offset((first.x + second.x) / 2f, (first.y + second.y) / 2f)
+                val path = Path().apply {
+                    val start = midpoint(scaled.last(), scaled.first())
+                    moveTo(start.x, start.y)
+                    scaled.forEachIndexed { index, point ->
+                        val end = midpoint(point, scaled[(index + 1) % scaled.size])
+                        quadraticTo(point.x, point.y, end.x, end.y)
                     }
-                    drawPath(path, color)
+                    close()
                 }
+                drawPath(path, areaColor(area))
+                drawPath(path, outline.copy(alpha = .65f), style = Stroke(width = 1.5f))
             }
 
             oval(BodyArea.SHOULDERS, .218f, .205f, .053f, .075f)

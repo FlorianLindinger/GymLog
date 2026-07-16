@@ -18,6 +18,7 @@ class HealthConnectGateway(private val context: Context) {
             HealthPermission.getReadPermission(WeightRecord::class),
             HealthPermission.getReadPermission(BodyFatRecord::class),
             HealthPermission.getReadPermission(LeanBodyMassRecord::class),
+            "android.permission.health.READ_HEALTH_DATA_HISTORY",
         )
     }
 

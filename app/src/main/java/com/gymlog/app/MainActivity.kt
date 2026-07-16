@@ -16,6 +16,8 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.health.connect.client.HealthConnectClient
 import androidx.health.connect.client.PermissionController
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LifecycleEventEffect
 import com.gymlog.app.data.GymRepository
 import com.gymlog.app.ui.GymLogApp
 import com.gymlog.app.ui.BodyDataSnapshot
@@ -51,6 +53,13 @@ class MainActivity : ComponentActivity() {
             ) { granted ->
                 if (granted.containsAll(HealthConnectGateway.permissions)) readHealthData()
                 else healthSyncStatus = "Health Connect permission was not granted."
+            }
+            LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
+                if (healthGateway.sdkStatus() == HealthConnectClient.SDK_AVAILABLE) {
+                    scope.launch {
+                        if (healthGateway.hasPermissions()) readHealthData()
+                    }
+                }
             }
             val exportLauncher = rememberLauncherForActivityResult(
                 ActivityResultContracts.CreateDocument("application/json"),

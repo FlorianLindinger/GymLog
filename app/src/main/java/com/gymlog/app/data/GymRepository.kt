@@ -114,6 +114,87 @@ class GymRepository(context: Context) {
         return id
     }
 
+    fun createDemoTrainingPlan(): Long {
+        data class DemoExercise(
+            val name: String,
+            val title: String,
+            val weight: Double,
+            val areas: List<Pair<BodyArea, Strength>>,
+        )
+        val exercises = listOf(
+            DemoExercise("Bench Press", "Push", 72.5, listOf(BodyArea.CHEST to Strength.FULL, BodyArea.TRICEPS to Strength.HALF, BodyArea.SHOULDERS to Strength.HALF)),
+            DemoExercise("Lat Pulldown", "Pull", 67.5, listOf(BodyArea.UPPER_BACK to Strength.FULL, BodyArea.BICEPS to Strength.HALF)),
+            DemoExercise("Leg Press", "Legs", 150.0, listOf(BodyArea.QUADS to Strength.FULL, BodyArea.GLUTES to Strength.HALF)),
+            DemoExercise("Shoulder Press", "Push", 42.5, listOf(BodyArea.SHOULDERS to Strength.FULL, BodyArea.TRICEPS to Strength.HALF)),
+            DemoExercise("Leg Curl", "Legs", 52.5, listOf(BodyArea.HAMSTRINGS to Strength.FULL, BodyArea.CALVES to Strength.HALF)),
+            DemoExercise("Cable Crunch", "Core", 45.0, listOf(BodyArea.CORE to Strength.FULL)),
+        )
+        val database = db.writableDatabase
+        val now = System.currentTimeMillis()
+        val nextOrder = database.rawQuery("SELECT COALESCE(MAX(sort_order),-1)+1 FROM training_plans", null)
+            .use { it.moveToFirst(); it.getInt(0) }
+        val planId = database.transaction {
+            val newPlanId = database.insertOrThrow("training_plans", null, ContentValues().apply {
+                put("name", uniquePlanName(database, "Demo - Halfway Training"))
+                put("sort_order", nextOrder)
+                put("notes", "Demo data: three of six exercises are complete in the active training.")
+                put("notes_pinned", 1)
+            })
+            exercises.forEachIndexed { index, exercise ->
+                val machineId = database.insertOrThrow("machines", null, ContentValues().apply {
+                    put("plan_id", newPlanId)
+                    put("name", exercise.name)
+                    put("title_note", exercise.title)
+                    put("notes", "Sample exercise generated for UI and workflow testing.")
+                    put("pause_time", "90 sec")
+                    put("chart_window", "3M")
+                    put("trailing_average", 3)
+                    put("tracking_mode", "WEIGHT")
+                    put("current_weight", exercise.weight)
+                    put("sort_order", index)
+                    put("pinned", if (index == 0) 1 else 0)
+                })
+                exercise.areas.forEach { (area, strength) ->
+                    database.insertOrThrow("machine_areas", null, ContentValues().apply {
+                        put("machine_id", machineId)
+                        put("area", area.name)
+                        put("strength", strength.value)
+                    })
+                }
+                val startWeight = exercise.weight - 10.0
+                addWeightHistory(database, machineId, startWeight, now - 11L * 7L * 24L * 60L * 60L * 1000L)
+                addWeightHistory(database, machineId, exercise.weight - 5.0, now - 5L * 7L * 24L * 60L * 60L * 1000L)
+                addWeightHistory(database, machineId, exercise.weight, now - 8L * 24L * 60L * 60L * 1000L)
+                repeat(10) { sessionIndex ->
+                    val sessionTime = now - (10L - sessionIndex) * 7L * 24L * 60L * 60L * 1000L + index * 12L * 60L * 1000L
+                    val sessionWeight = startWeight + (sessionIndex / 3) * 2.5
+                    listOf(10, 10, 8).forEachIndexed { setIndex, reps ->
+                        database.insertOrThrow("sets", null, ContentValues().apply {
+                            put("machine_id", machineId)
+                            put("reps", reps + if (sessionIndex % 3 == 2 && setIndex == 0) 1 else 0)
+                            put("weight", sessionWeight)
+                            put("performed_at", sessionTime + setIndex * 25L)
+                        })
+                    }
+                }
+                if (index < exercises.size / 2) {
+                    val currentTime = now - (55L - index * 20L) * 60L * 1000L
+                    listOf(10, 10, 9).forEachIndexed { setIndex, reps ->
+                        database.insertOrThrow("sets", null, ContentValues().apply {
+                            put("machine_id", machineId)
+                            put("reps", reps)
+                            put("weight", exercise.weight)
+                            put("performed_at", currentTime + setIndex * 25L)
+                        })
+                    }
+                }
+            }
+            newPlanId
+        }
+        setActiveTrainingPlan(planId)
+        return planId
+    }
+
     fun duplicateTrainingPlan(id: Long): Long {
         val database = db.writableDatabase
         val source = loadTrainingPlans().firstOrNull { it.id == id } ?: error("Training plan does not exist")
