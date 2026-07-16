@@ -17,7 +17,7 @@ call gradlew.bat :app:compileDebugKotlin :app:testDebugUnitTest :app:lintDebug :
 if errorlevel 1 (
     echo.
     echo VERIFICATION FAILED
-    echo Lint report: app\build\reports\lint-results-debug.html
+    echo Lint report: %GYMLOG_BUILD_DIR%\reports\lint-results-debug.html
     exit /b 1
 )
 
@@ -30,6 +30,6 @@ if errorlevel 1 (
 
 echo.
 echo VERIFICATION SUCCESSFUL
-echo APK: %REPO_ROOT%\app\build\outputs\apk\debug\app-debug.apk
-echo Lint: %REPO_ROOT%\app\build\reports\lint-results-debug.html
+echo APK: %GYMLOG_BUILD_DIR%\outputs\apk\debug\app-debug.apk
+echo Lint: %GYMLOG_BUILD_DIR%\reports\lint-results-debug.html
 exit /b 0

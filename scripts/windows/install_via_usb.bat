@@ -11,8 +11,11 @@ set "SCRIPT_DIR=%~dp0"
 for %%I in ("%SCRIPT_DIR%..\..") do set "REPO_ROOT=%%~fI"
 cd /d "%REPO_ROOT%"
 
-set "APK=%REPO_ROOT%\app\build\outputs\apk\debug\app-debug.apk"
-set "ADB=%LOCALAPPDATA%\Android\Sdk\platform-tools\adb.exe"
+call "%SCRIPT_DIR%_android_env.bat"
+if errorlevel 1 exit /b 1
+
+set "APK=%GYMLOG_BUILD_DIR%\outputs\apk\debug\app-debug.apk"
+set "ADB=%GYMLOG_ADB%"
 set "ADB_TARGET="
 if not "%~1"=="" set "ADB_TARGET=-s %~1"
 

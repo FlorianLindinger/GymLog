@@ -56,8 +56,8 @@ if errorlevel 1 (
     exit /b 1
 )
 
-set "APK=%REPO_ROOT%\app\build\outputs\apk\release\app-release.apk"
-set "AAB=%REPO_ROOT%\app\build\outputs\bundle\release\app-release.aab"
+set "APK=%GYMLOG_BUILD_DIR%\outputs\apk\release\app-release.apk"
+set "AAB=%GYMLOG_BUILD_DIR%\outputs\bundle\release\app-release.aab"
 if not exist "%APK%" (
     echo ERROR: Signed release APK was not produced.
     exit /b 1
@@ -79,7 +79,8 @@ if errorlevel 1 (
     exit /b 1
 )
 
-powershell -NoProfile -Command "$files = @('%APK%', '%AAB%'); $files | ForEach-Object { $h = Get-FileHash -Algorithm SHA256 -LiteralPath $_; '{0}  {1}' -f $h.Hash, (Split-Path $_ -Leaf) } | Set-Content -Encoding ASCII -LiteralPath 'app\build\outputs\release-%VERSION%-sha256.txt'"
+set "CHECKSUMS=%GYMLOG_BUILD_DIR%\outputs\release-%VERSION%-sha256.txt"
+powershell -NoProfile -Command "$files = @('%APK%', '%AAB%'); $files | ForEach-Object { $h = Get-FileHash -Algorithm SHA256 -LiteralPath $_; '{0}  {1}' -f $h.Hash, (Split-Path $_ -Leaf) } | Set-Content -Encoding ASCII -LiteralPath '%CHECKSUMS%'"
 if errorlevel 1 (
     echo ERROR: Could not create SHA-256 checksums.
     exit /b 1
@@ -89,7 +90,7 @@ echo.
 echo RELEASE BUILD SUCCESSFUL
 echo APK:      %APK%
 echo AAB:      %AAB%
-echo Checksums: %REPO_ROOT%\app\build\outputs\release-%VERSION%-sha256.txt
+echo Checksums: %CHECKSUMS%
 echo.
 set /p CREATE_TAG="Create local Git tag v%VERSION% now? [y/N] "
 if /i "%CREATE_TAG%"=="y" (

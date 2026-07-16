@@ -12,3 +12,5 @@ Run these commands from the repository root. Every script resolves the root auto
 - `scripts\windows\release.bat VERSION` verifies and produces signed APK/AAB artifacts and checksums.
 
 `_android_env.bat` is shared implementation and is not intended to be run directly. `gradlew.bat` remains in the repository root because that is the standard Gradle wrapper layout.
+
+On Windows, generated files are written to `%LOCALAPPDATA%\GymLog\build\app` by default. Keeping build output outside the repository prevents Google Drive and similar sync clients from locking Android's APK output directory. Set `GYMLOG_BUILD_DIR` before running a helper if you need another local location.

@@ -8,7 +8,6 @@ This backlog tracks release work. Keep feature exploration in [Feature Ideas](do
 - [ ] Add instrumented tests for backup restore, history editing, demo-plan creation, and process recreation during a live training.
 - [ ] Test the release candidate on API 26, a current mid-range device, and API 36 with large text and dark mode.
 - [ ] Create fixed backup fixtures and verify that malformed or outdated backups fail with a useful, non-destructive message.
-- [ ] Resolve the intermittent Windows APK packaging/output lock or document a reproducible cleanup procedure.
 - [ ] Finalize the privacy policy, Play Data Safety answers, and Health Connect data-type declaration.
 - [ ] Configure release signing in CI without exposing credentials and test a signed internal-release artifact.
 - [ ] Add a pinned-version Gitleaks check to CI and document how confirmed false positives are reviewed and allowlisted.
@@ -36,3 +35,4 @@ This backlog tracks release work. Keep feature exploration in [Feature Ideas](do
 - [x] Demo training plan with historical and halfway-finished sample data
 - [x] Documented Automatic, Mixed, and Fixed exercise ordering
 - [x] Documented the current data-format policy
+- [x] Moved Windows build output outside cloud-synced repositories to prevent APK packaging locks

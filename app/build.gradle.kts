@@ -8,6 +8,16 @@ plugins {
     id("org.jetbrains.kotlin.plugin.compose")
 }
 
+// Google Drive and similar sync clients can lock app/build while AGP replaces APK
+// output directories on Windows. Keep generated files outside synced repositories.
+if (System.getProperty("os.name").startsWith("Windows", ignoreCase = true)) {
+    val windowsBuildDir = providers.environmentVariable("GYMLOG_BUILD_DIR").orNull
+        ?: System.getenv("LOCALAPPDATA")?.let { "$it/GymLog/build/app" }
+    if (!windowsBuildDir.isNullOrBlank()) {
+        layout.buildDirectory.set(file(windowsBuildDir))
+    }
+}
+
 val releaseSigningConfigured = listOf(
     "GYMLOG_KEYSTORE_FILE",
     "GYMLOG_KEYSTORE_PASSWORD",

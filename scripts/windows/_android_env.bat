@@ -33,4 +33,7 @@ if not exist "%GYMLOG_ADB%" (
 )
 set "PATH=%ANDROID_HOME%\platform-tools;%PATH%"
 
+rem Keep generated build output outside repositories synced by Google Drive.
+if not defined GYMLOG_BUILD_DIR set "GYMLOG_BUILD_DIR=%LOCALAPPDATA%\GymLog\build\app"
+
 exit /b 0

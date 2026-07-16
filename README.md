@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/FlorianLindinger/GymLog/actions/workflows/android.yml"><img src="https://github.com/FlorianLindinger/GymLog/actions/workflows/android.yml/badge.svg" alt="Android CI"></a>
+  <a href="https://github.com/FlorianLindinger/GymLog/actions/workflows/verify.yml"><img src="https://github.com/FlorianLindinger/GymLog/actions/workflows/verify.yml/badge.svg" alt="Android CI"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT license"></a>
   <img src="https://img.shields.io/badge/Android-8.0%2B-3DDC84" alt="Android 8.0 or newer">
 </p>
@@ -52,11 +52,10 @@ Requirements:
 Open the project in Android Studio, allow Gradle to sync, and run the `app` configuration. To build from PowerShell:
 
 ```powershell
-$env:JAVA_HOME = "C:\Program Files\Java\jdk-21.0.10"
-.\gradlew.bat :app:assembleDebug
+scripts\windows\build.bat
 ```
 
-The debug APK is written to `app\build\outputs\apk\debug\app-debug.apk`. Run the complete local verification with:
+On Windows, the debug APK is written to `%LOCALAPPDATA%\GymLog\build\app\outputs\apk\debug\app-debug.apk`. This external build directory prevents cloud-sync clients from locking generated files. Run the complete local verification with:
 
 ```powershell
 scripts\windows\verify.bat
