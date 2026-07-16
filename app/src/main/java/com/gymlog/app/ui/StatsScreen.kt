@@ -26,9 +26,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -129,7 +127,7 @@ fun StatsScreen(
         verticalArrangement = Arrangement.spacedBy(7.dp),
     ) {
         item {
-            FilledTonalButton(onClick = onHistory, modifier = Modifier.fillMaxWidth()) { Text("Calendar & history") }
+            FilledTonalButton(onClick = onHistory, modifier = Modifier.fillMaxWidth()) { Text("Calendar & History") }
         }
         item {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -140,13 +138,14 @@ fun StatsScreen(
                         modifier = Modifier
                             .weight(1f)
                             .background(
-                                if (selected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant,
+                                if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
                                 RoundedCornerShape(7.dp),
                             )
                             .clickable { window = preset }
                             .padding(vertical = 4.dp),
-                        color = if (selected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
+                        color = if (selected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
                         style = MaterialTheme.typography.labelSmall,
+                        fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
                         textAlign = TextAlign.Center,
                     )
                 }
@@ -154,36 +153,36 @@ fun StatsScreen(
         }
         item {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(5.dp)) {
-                StatCard("Gym / week", String.format(Locale.US, "%.1f", sessions.size / periodWeeks), Modifier.weight(1f))
+                StatCard("Gym / Week", String.format(Locale.US, "%.1f", sessions.size / periodWeeks), Modifier.weight(1f))
                 StatCard("Sessions", sessions.size.toString(), Modifier.weight(1f))
                 StatCard("Sets", visible.size.toString(), Modifier.weight(1f))
             }
         }
         item {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(5.dp)) {
-                StatCard("Avg upgrades / gym day", String.format(Locale.US, "%.2f", averageUpgradesPerGymDay), Modifier.weight(1f))
-                StatCard("Avg upgrades / month", String.format(Locale.US, "%.2f", averageUpgradesPerMonth), Modifier.weight(1f))
+                StatCard("Avg. Upgrades / Gym Day", String.format(Locale.US, "%.2f", averageUpgradesPerGymDay), Modifier.weight(1f))
+                StatCard("Avg. Upgrades / Month", String.format(Locale.US, "%.2f", averageUpgradesPerMonth), Modifier.weight(1f))
             }
         }
         item {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(5.dp)) {
-                StatCard("Avg duration", formatHoursMinutes(durations.values.averageOrZero().toLong()), Modifier.weight(1f))
+                StatCard("Avg. Duration", formatHoursMinutes(durations.values.averageOrZero().toLong()), Modifier.weight(1f))
                 StatCard("Longest", formatHoursMinutes((durations.values.maxOrNull() ?: 0.0).toLong()), Modifier.weight(1f))
             }
         }
         item {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(5.dp)) {
-                StatCard("Weight increases", increases.size.toString(), Modifier.weight(1f))
-                StatCard("Increases / week", String.format(Locale.US, "%.2f", increases.size / periodWeeks), Modifier.weight(1f))
-                StatCard("Exercises progressed", increases.map { it.machineId }.distinct().size.toString(), Modifier.weight(1f))
+                StatCard("Weight Increases", increases.size.toString(), Modifier.weight(1f))
+                StatCard("Increases / Week", String.format(Locale.US, "%.2f", increases.size / periodWeeks), Modifier.weight(1f))
+                StatCard("Exercises Progressed", increases.map { it.machineId }.distinct().size.toString(), Modifier.weight(1f))
             }
         }
         item { BodyAreaStatsCard(bodyAreaStats) }
-        item { StatsChart("Gym sessions by week", weeks.values.toList().takeLast(20), "sessions") }
-        item { StatsChart("Gym duration by day", durations.values.toList().takeLast(24), "minutes") }
-        item { StatsChart("Weight increases by week", increasesByWeek, "increases") }
-        item { StatsChart("Weight upgrades per gym day", upgradesPerGymDay, "upgrades") }
-        item { StatsChart("Weight upgrades by month", upgradesByMonth, "upgrades") }
+        item { StatsChart("Gym Sessions by Week", weeks.values.toList().takeLast(20), "sessions") }
+        item { StatsChart("Gym Duration by Day", durations.values.toList().takeLast(24), "minutes") }
+        item { StatsChart("Weight Increases by Week", increasesByWeek, "increases") }
+        item { StatsChart("Weight Upgrades per Gym Day", upgradesPerGymDay, "upgrades") }
+        item { StatsChart("Weight Upgrades by Month", upgradesByMonth, "upgrades") }
         item { ProgressionByExerciseCard(weightMachines, cutoff, periodWeeks) }
         item {
             Text(
@@ -236,7 +235,7 @@ private fun formatWeighted(value: Double): String =
 private fun ProgressionByExerciseCard(machines: List<MachineSummary>, cutoff: Long?, periodWeeks: Double) {
     Card(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Text("Weight increase frequency by exercise", fontWeight = FontWeight.SemiBold)
+            Text("Weight Increase Frequency by Exercise", fontWeight = FontWeight.SemiBold)
             if (machines.isEmpty()) {
                 Text("No weight-tracked exercises yet.", color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
@@ -272,19 +271,46 @@ private fun StatsChart(title: String, values: List<Double>, unit: String) {
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             val primary = MaterialTheme.colorScheme.primary
-            val max = values.maxOrNull()?.takeIf { it > 0 } ?: 1.0
+            val fitColor = MaterialTheme.colorScheme.tertiary
+            val (fit, fittedChange) = linearFit(values)
+            Text(
+                "Linear fit: ${signedValue(fittedChange)} $unit over this interval",
+                color = fitColor,
+                style = MaterialTheme.typography.bodySmall,
+            )
+            val combined = values + fit
+            val min = combined.minOrNull()?.coerceAtMost(0.0) ?: 0.0
+            val max = combined.maxOrNull()?.takeIf { it > min } ?: (min + 1.0)
+            val range = max - min
             Canvas(Modifier.fillMaxWidth().height(130.dp)) {
                 if (values.isEmpty()) return@Canvas
-                val gap = 5f
-                val width = (size.width - gap * (values.size - 1)) / values.size
-                values.forEachIndexed { index, value ->
-                    val h = (value / max).toFloat() * size.height
-                    drawRoundRect(primary, Offset(index * (width + gap), size.height - h), Size(width, h), CornerRadius(6f, 6f))
+                fun points(series: List<Double>) = series.mapIndexed { index, value ->
+                    Offset(
+                        x = if (series.size == 1) size.width / 2f else index * size.width / (series.size - 1),
+                        y = size.height - ((value - min) / range).toFloat() * size.height,
+                    )
                 }
+                val dataPoints = points(values)
+                dataPoints.zipWithNext().forEach { (start, end) -> drawLine(primary, start, end, strokeWidth = 5f) }
+                dataPoints.forEach { drawCircle(primary, 5f, it) }
+                points(fit).zipWithNext().forEach { (start, end) -> drawLine(fitColor, start, end, strokeWidth = 3f) }
             }
         }
     }
 }
+
+private fun linearFit(values: List<Double>): Pair<List<Double>, Double> {
+    if (values.size < 2) return values to 0.0
+    val meanX = (values.size - 1) / 2.0
+    val meanY = values.average()
+    val denominator = values.indices.sumOf { index -> (index - meanX) * (index - meanX) }
+    val slope = values.indices.sumOf { index -> (index - meanX) * (values[index] - meanY) } / denominator
+    val intercept = meanY - slope * meanX
+    val fit = values.indices.map { index -> intercept + slope * index }
+    return fit to (fit.last() - fit.first())
+}
+
+private fun signedValue(value: Double): String = String.format(Locale.US, "%+.1f", value)
 
 private fun statsCutoff(window: String): Long? {
     val days = when (window) {

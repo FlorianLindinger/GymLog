@@ -1,3 +1,4 @@
+import java.time.ZoneOffset
 import java.time.ZonedDateTime
 import java.time.format.DateTimeFormatter
 
@@ -13,8 +14,8 @@ val releaseSigningConfigured = listOf(
     "GYMLOG_KEY_ALIAS",
     "GYMLOG_KEY_PASSWORD",
 ).all { !System.getenv(it).isNullOrBlank() }
-val buildTimestamp = ZonedDateTime.now()
-    .format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm XXX"))
+val buildTimestamp = ZonedDateTime.now(ZoneOffset.UTC)
+    .format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm"))
 
 android {
     namespace = "com.gymlog.app"

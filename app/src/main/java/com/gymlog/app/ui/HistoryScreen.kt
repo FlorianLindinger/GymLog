@@ -52,6 +52,7 @@ fun HistoryScreen(
     history: List<HistorySet>,
     modifier: Modifier = Modifier,
     onUpdateSet: (Long, Int, Double) -> Unit,
+    onAddSet: (Long, Int, Double, Long) -> Unit,
     onDeleteSet: (Long) -> Unit,
     onDeleteExerciseDay: (Long, Long, Long) -> Unit,
     onDeleteTrainingDay: (Long, Long) -> Unit,
@@ -63,6 +64,7 @@ fun HistoryScreen(
     var month by remember { mutableStateOf(YearMonth.now()) }
     var selectedDate by remember { mutableStateOf<LocalDate?>(null) }
     var editing by remember { mutableStateOf<HistorySet?>(null) }
+    var addingFor by remember { mutableStateOf<HistorySet?>(null) }
     var deletingEntry by remember { mutableStateOf<HistorySet?>(null) }
     var deletingExerciseDay by remember { mutableStateOf<ExerciseDayDeletion?>(null) }
     var deletingTrainingDay by remember { mutableStateOf<LocalDate?>(null) }
@@ -74,7 +76,7 @@ fun HistoryScreen(
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
         item {
-            Text("Training history", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+            Text("Training History", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
             Text("Daily activity across weight and level exercises", color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         item { WeeklyVolumeCard(history) }
@@ -97,7 +99,7 @@ fun HistoryScreen(
                     style = MaterialTheme.typography.titleLarge,
                     fontWeight = FontWeight.SemiBold,
                 )
-                TextButton(onClick = { deletingTrainingDay = selectedDate }) { Text("Delete day") }
+                TextButton(onClick = { deletingTrainingDay = selectedDate }) { Text("Delete Day") }
                 }
             }
             if (selectedSets.isEmpty()) item { Text("No sets recorded on this day.", color = MaterialTheme.colorScheme.onSurfaceVariant) }
@@ -105,13 +107,14 @@ fun HistoryScreen(
                 item(key = "exercise-$machineId") {
                     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                         Text(exerciseSets.first().machineName, Modifier.weight(1f), fontWeight = FontWeight.SemiBold)
-                        TextButton(onClick = { deletingExerciseDay = ExerciseDayDeletion(machineId, exerciseSets.first().machineName, selectedDate!!) }) { Text("Delete exercise day") }
+                        TextButton(onClick = { addingFor = exerciseSets.maxBy { it.performedAt } }) { Text("+ Add Set") }
+                        TextButton(onClick = { deletingExerciseDay = ExerciseDayDeletion(machineId, exerciseSets.first().machineName, selectedDate!!) }) { Text("Delete Exercise Day") }
                     }
                 }
                 items(exerciseSets, key = { it.id }) { set -> HistorySetRow(set, { editing = set }, { deletingEntry = set }, showName = false) }
             }
         } else {
-            item { Text("Recent sessions", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold) }
+            item { Text("Recent Sessions", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold) }
             if (byDate.isEmpty()) item { Text("Your completed sets will appear here.", color = MaterialTheme.colorScheme.onSurfaceVariant) }
             byDate.entries.sortedByDescending { it.key }.take(12).forEach { (date, sets) ->
                 item(key = date.toEpochDay()) {
@@ -125,6 +128,18 @@ fun HistoryScreen(
         EditSetDialog(set.trackingMode, set.reps, set.weight, onDismiss = { editing = null }) { reps, weight ->
             onUpdateSet(set.id, reps, weight)
             editing = null
+        }
+    }
+    addingFor?.let { set ->
+        EditSetDialog(
+            trackingMode = set.trackingMode,
+            initialReps = set.reps,
+            initialWeight = set.weight,
+            title = "Add Set",
+            onDismiss = { addingFor = null },
+        ) { reps, weight ->
+            onAddSet(set.machineId, reps, weight, set.performedAt + 1)
+            addingFor = null
         }
     }
     deletingEntry?.let { set ->
@@ -163,23 +178,31 @@ private fun WeeklyVolumeCard(history: List<HistorySet>) {
     }
     val max = volumes.maxOrNull()?.takeIf { it > 0 } ?: 1.0
     val primary = MaterialTheme.colorScheme.primary
+    val fitColor = MaterialTheme.colorScheme.tertiary
     val grid = MaterialTheme.colorScheme.outlineVariant
     Card(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text("8-week activity trend", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+            Text("8-Week Activity Trend", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
             Text("This week: ${volumes.last().toInt()} logged sets", color = MaterialTheme.colorScheme.primary)
+            val fit = historyLinearFit(volumes)
+            Text(
+                "Linear fit: ${String.format(Locale.US, "%+.1f", fit.second)} sets over eight weeks",
+                color = MaterialTheme.colorScheme.tertiary,
+                style = MaterialTheme.typography.bodySmall,
+            )
             Canvas(Modifier.fillMaxWidth().height(150.dp)) {
                 drawLine(grid, Offset(0f, size.height), Offset(size.width, size.height), strokeWidth = 2f)
-                val gap = 8f
-                val barWidth = (size.width - gap * (volumes.size - 1)) / volumes.size
-                volumes.forEachIndexed { index, volume ->
-                    val height = (volume / max).toFloat() * (size.height - 8f)
-                    drawRoundRect(
-                        color = primary,
-                        topLeft = Offset(index * (barWidth + gap), size.height - height),
-                        size = androidx.compose.ui.geometry.Size(barWidth, height),
-                        cornerRadius = androidx.compose.ui.geometry.CornerRadius(8f, 8f),
+                fun points(values: List<Double>) = values.mapIndexed { index, value ->
+                    Offset(
+                        x = index * size.width / (values.size - 1),
+                        y = size.height - (value / max).toFloat() * (size.height - 8f),
                     )
+                }
+                val values = points(volumes)
+                values.zipWithNext().forEach { (start, end) -> drawLine(primary, start, end, strokeWidth = 5f) }
+                values.forEach { drawCircle(primary, 5f, it) }
+                points(fit.first).zipWithNext().forEach { (start, end) ->
+                    drawLine(fitColor, start, end, strokeWidth = 3f)
                 }
             }
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
@@ -188,6 +211,17 @@ private fun WeeklyVolumeCard(history: List<HistorySet>) {
             }
         }
     }
+}
+
+private fun historyLinearFit(values: List<Double>): Pair<List<Double>, Double> {
+    if (values.size < 2) return values to 0.0
+    val meanX = (values.size - 1) / 2.0
+    val meanY = values.average()
+    val denominator = values.indices.sumOf { index -> (index - meanX) * (index - meanX) }
+    val slope = values.indices.sumOf { index -> (index - meanX) * (values[index] - meanY) } / denominator
+    val intercept = meanY - slope * meanX
+    val fit = values.indices.map { index -> intercept + slope * index }
+    return fit to (fit.last() - fit.first())
 }
 
 @Composable
@@ -267,7 +301,7 @@ private fun SessionCard(
             Text("${sets.size} sets · ${sets.map { it.machineId }.distinct().size} exercises · ${formatHoursMinutes(durationMinutes)}", color = MaterialTheme.colorScheme.onSurfaceVariant)
             sets.take(4).forEach { HistorySetRow(it, onEdit, onDelete) }
             if (sets.size > 4) Text("+ ${sets.size - 4} more sets", style = MaterialTheme.typography.bodySmall)
-            TextButton(onClick = onManage) { Text("Manage entries") }
+            TextButton(onClick = onManage) { Text("Manage Entries") }
         }
     }
 }
@@ -307,6 +341,7 @@ fun EditSetDialog(
     trackingMode: String,
     initialReps: Int,
     initialWeight: Double,
+    title: String = "Edit Entry",
     onDismiss: () -> Unit,
     onSave: (Int, Double) -> Unit,
 ) {
@@ -316,13 +351,13 @@ fun EditSetDialog(
     val parsedWeight = weight.replace(',', '.').toDoubleOrNull()
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Edit entry") },
+        title = { Text(title) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                if (!isDirectMetric(trackingMode)) OutlinedTextField(
+                if (trackingMode != "DURATION") OutlinedTextField(
                     value = reps,
                     onValueChange = { reps = it.filter(Char::isDigit) },
-                    label = { Text("Reps") },
+                    label = { Text(if (trackingMode == "STRENGTH") "Level" else "Reps") },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                     singleLine = true,
                 )
@@ -337,8 +372,8 @@ fun EditSetDialog(
         },
         confirmButton = {
             Button(
-                onClick = { onSave(if (isDirectMetric(trackingMode)) initialReps else parsedReps ?: 1, parsedWeight ?: 0.0) },
-                enabled = parsedWeight != null && parsedWeight >= 0 && (isDirectMetric(trackingMode) || parsedReps != null && parsedReps > 0),
+                onClick = { onSave(if (trackingMode == "DURATION") initialReps else parsedReps ?: 1, parsedWeight ?: 0.0) },
+                enabled = parsedWeight != null && parsedWeight >= 0 && (trackingMode == "DURATION" || parsedReps != null && parsedReps > 0),
             ) { Text("Save") }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },

@@ -87,6 +87,7 @@ fun OverviewScreen(
     onAdd: () -> Unit,
     onMenu: () -> Unit,
     onStats: () -> Unit,
+    onEditPlanNotes: () -> Unit,
     areaFrequency: Map<BodyArea, Double>,
     onQuickSet: (MachineSummary, List<Int>) -> Unit,
     onMetricChange: (MachineSummary, Double) -> Unit,
@@ -131,9 +132,9 @@ fun OverviewScreen(
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 Text(activePlanName, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
-                Text("Build your routine", style = MaterialTheme.typography.headlineSmall)
+                Text("Build Your Routine", style = MaterialTheme.typography.headlineSmall)
                 Text("Add your first exercise, choose its training areas, then log each set in a couple of taps.", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Button(onClick = onAdd) { Text("Add first exercise") }
+                Button(onClick = onAdd) { Text("Add First Exercise") }
             }
         } else {
             LazyColumn(
@@ -144,8 +145,15 @@ fun OverviewScreen(
                 item(key = "training-duration") { TrainingDurationCard(machines, activePlanName, now, zone) }
                 if (activePlanNotesPinned && activePlanNotes.isNotBlank()) {
                     item(key = "pinned-plan-notes") {
-                        Card(Modifier.fillMaxWidth()) {
-                            Text(activePlanNotes, Modifier.padding(horizontal = 12.dp, vertical = 8.dp))
+                        Card(
+                            Modifier.fillMaxWidth().clickable(onClick = onEditPlanNotes),
+                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer),
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.secondary),
+                        ) {
+                            Column(Modifier.padding(horizontal = 12.dp, vertical = 9.dp)) {
+                                Text("Training Plan Note", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSecondaryContainer)
+                                Text(activePlanNotes, color = MaterialTheme.colorScheme.onSecondaryContainer)
+                            }
                         }
                     }
                 }
@@ -232,7 +240,7 @@ fun OverviewScreen(
                     ) { Text("Done") }
                 } else {
                     FilledTonalButton(onClick = onMenu, modifier = Modifier.weight(1f)) { Text("Menu") }
-                    FilledTonalButton(onClick = onStats, modifier = Modifier.weight(2f)) { Text("Stats") }
+                    FilledTonalButton(onClick = onStats, modifier = Modifier.weight(1f)) { Text("Stats") }
                     FilledTonalButton(onClick = onAdd, modifier = Modifier.weight(1f)) { Text("+ Add") }
                 }
             }
@@ -249,7 +257,6 @@ private fun TrainingDurationCard(machines: List<MachineSummary>, activePlanName:
     val isActive = last != null && now - last < 10L * 60L * 1000L
     val durationMillis = if (first == null || last == null) 0L else ((if (isActive) now else last) - first).coerceAtLeast(0L)
     val clock = DateTimeFormatter.ofPattern("HH:mm")
-    val dateClock = DateTimeFormatter.ofPattern("dd.MM HH:mm")
     val completedExercises = machines.count { summary -> summary.recentSets.any { first != null && it.performedAt >= first } }
 
     Card(
@@ -260,7 +267,7 @@ private fun TrainingDurationCard(machines: List<MachineSummary>, activePlanName:
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.65f)),
     ) {
         Row(
-            Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp),
+            Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Column(Modifier.weight(1f)) {
@@ -270,8 +277,7 @@ private fun TrainingDurationCard(machines: List<MachineSummary>, activePlanName:
                     else {
                         val startTime = Instant.ofEpochMilli(first).atZone(zone)
                         val endTime = Instant.ofEpochMilli(if (isActive) now else last!!).atZone(zone)
-                        val formatter = if (startTime.toLocalDate() == endTime.toLocalDate()) clock else dateClock
-                        "${startTime.format(formatter)} - ${if (isActive) "Now" else endTime.format(formatter)}"
+                        "${startTime.format(clock)} – ${if (isActive) "Now" else endTime.format(clock)}"
                     },
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -289,6 +295,11 @@ private fun TrainingDurationCard(machines: List<MachineSummary>, activePlanName:
                     fontWeight = FontWeight.Bold,
                     color = MaterialTheme.colorScheme.onPrimaryContainer,
                 )
+                Text(
+                    if (isActive) "● Live" else "✓ Completed",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = if (isActive) MaterialTheme.colorScheme.primary else Color(0xFF2E7D32),
+                )
             }
         }
     }
@@ -302,7 +313,7 @@ private fun ProgressionSettingsCard(settings: ProgressionSettings, onEdit: () ->
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Column(Modifier.weight(1f)) {
-                Text("Progress warnings", style = MaterialTheme.typography.labelLarge)
+                Text("Progress Warnings", style = MaterialTheme.typography.labelLarge)
                 Text(
                     "${settingSummary(settings.staleWeeks, "weeks")} · ${settingSummary(settings.staleTrainings, "trainings")}",
                     style = MaterialTheme.typography.bodySmall,
@@ -328,21 +339,21 @@ fun ProgressionSettingsDialog(
     val parsedTrainings = trainings.toIntOrNull()
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Progress warnings") },
+        title = { Text("Progress Warnings") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text("Warn on weight exercises when either limit is reached without an increase. Set a limit to 0 to disable it.")
                 OutlinedTextField(
                     value = weeks,
                     onValueChange = { weeks = it.filter(Char::isDigit) },
-                    label = { Text("Weeks without increase") },
+                    label = { Text("Weeks Without Increase") },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                     singleLine = true,
                 )
                 OutlinedTextField(
                     value = trainings,
                     onValueChange = { trainings = it.filter(Char::isDigit) },
-                    label = { Text("Trainings without increase") },
+                    label = { Text("Trainings Without Increase") },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                     singleLine = true,
                 )
@@ -692,13 +703,13 @@ fun AddMachineDialog(onDismiss: () -> Unit, onAdd: (String, Double, String) -> U
     val parsedWeight = weight.replace(',', '.').toDoubleOrNull()
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Add exercise") },
+        title = { Text("Add Exercise") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 OutlinedTextField(
                     value = name,
                     onValueChange = { value -> name = value.replaceFirstChar { if (it.isLowerCase()) it.titlecase() else it.toString() } },
-                    label = { Text("Exercise name") },
+                    label = { Text("Exercise Name") },
                     keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences),
                     singleLine = true,
                 )
@@ -734,13 +745,17 @@ fun AddMachineDialog(onDismiss: () -> Unit, onAdd: (String, Double, String) -> U
 
 fun formatWeight(weight: Double): String = if (weight % 1.0 == 0.0) "${weight.toInt()} kg" else String.format(Locale.US, "%.1f kg", weight)
 
-fun formatHoursMinutes(totalMinutes: Long): String = "${totalMinutes / 60}:${(totalMinutes % 60).toString().padStart(2, '0')}"
+fun formatHoursMinutes(totalMinutes: Long): String {
+    val hours = totalMinutes / 60
+    val minutes = totalMinutes % 60
+    return if (hours > 0) "${hours}h${minutes.toString().padStart(2, '0')}" else "${minutes}m"
+}
 
 private fun formatElapsed(totalMillis: Long): String {
     val totalSeconds = totalMillis / 1_000L
     val hours = totalSeconds / 3_600L
     val minutes = (totalSeconds % 3_600L) / 60L
-    return "$hours:${minutes.toString().padStart(2, '0')}"
+    return if (hours > 0) "${hours}h${minutes.toString().padStart(2, '0')}" else "${minutes}m"
 }
 
 fun isDirectMetric(trackingMode: String): Boolean = trackingMode == "STRENGTH" || trackingMode == "DURATION"
@@ -754,9 +769,9 @@ fun metricName(trackingMode: String): String = when (trackingMode) {
 fun metricTitle(trackingMode: String): String = metricName(trackingMode).replaceFirstChar { it.uppercase() }
 
 fun currentMetricLabel(trackingMode: String): String = when (trackingMode) {
-    "WEIGHT" -> "Current weight (kg)"
-    "DURATION" -> "Current duration (min)"
-    else -> "Current level"
+    "WEIGHT" -> "Current Weight (kg)"
+    "DURATION" -> "Current Duration (min)"
+    else -> "Current Level"
 }
 
 private fun formatNumber(value: Double): String = if (value % 1.0 == 0.0) value.toInt().toString() else String.format(Locale.US, "%.1f", value)

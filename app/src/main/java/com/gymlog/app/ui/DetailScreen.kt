@@ -100,11 +100,11 @@ fun DetailScreen(
         }
 
         if (summary.areas.isEmpty()) {
-            OutlinedButton(onClick = { showAreas = true }, modifier = Modifier.fillMaxWidth()) { Text("+ Choose training areas") }
+            OutlinedButton(onClick = { showAreas = true }, modifier = Modifier.fillMaxWidth()) { Text("+ Choose Training Areas") }
         } else {
             Card(modifier = Modifier.fillMaxWidth().clickable { showAreas = true }) {
                 Column(Modifier.padding(8.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                    Text("Training areas", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+                    Text("Training Areas", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
                     summary.areas.sortedByDescending { areaUsage[it.area] ?: 0.0 }.forEach { assignment ->
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Box(Modifier.width(if (assignment.strength == Strength.FULL) 34.dp else 17.dp).height(8.dp).background(Color(assignment.displayColor), RoundedCornerShape(8.dp)))
@@ -129,13 +129,13 @@ fun DetailScreen(
 
         Card(modifier = Modifier.fillMaxWidth()) {
             Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text("${metricTitle(machine.trackingMode)} statistics", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+                Text("${metricTitle(machine.trackingMode)} Statistics", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                     Stat("Started", formatMetric(first, machine.trackingMode))
                     Stat("Current", formatMetric(machine.currentWeight, machine.trackingMode))
                     Stat("Highest", formatMetric(highest, machine.trackingMode))
                 }
-                Text("Chart window", style = MaterialTheme.typography.labelMedium)
+                Text("Chart Window", style = MaterialTheme.typography.labelMedium)
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                     listOf("1M", "3M", "6M", "1Y", "ALL").forEach { window ->
                         CompactChoice(
@@ -145,7 +145,7 @@ fun DetailScreen(
                         )
                     }
                 }
-                Text("Trailing average", style = MaterialTheme.typography.labelMedium)
+                Text("Trailing Average", style = MaterialTheme.typography.labelMedium)
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     listOf(0 to "Off", 3 to "3", 5 to "5", 10 to "10").forEach { (amount, label) ->
                         CompactChoice(
@@ -164,7 +164,7 @@ fun DetailScreen(
 
         Card(modifier = Modifier.fillMaxWidth()) {
             Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                Text("Recent entries", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+                Text("Recent Entries", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
                 if (summary.recentSets.isEmpty()) Text("No entries recorded yet.", color = MaterialTheme.colorScheme.onSurfaceVariant)
                 groupSetBatches(summary.recentSets).take(12).forEachIndexed { index, batch ->
                     val ordered = batch.sortedBy { it.performedAt }
@@ -200,7 +200,7 @@ fun DetailScreen(
             }
         }
 
-        TextButton(onClick = { confirmDelete = true }, modifier = Modifier.fillMaxWidth()) { Text("Delete exercise", color = MaterialTheme.colorScheme.error) }
+        TextButton(onClick = { confirmDelete = true }, modifier = Modifier.fillMaxWidth()) { Text("Delete Exercise", color = MaterialTheme.colorScheme.error) }
         Spacer(Modifier.height(8.dp))
     }
 
@@ -258,10 +258,11 @@ private fun CompactChoice(selected: Boolean, onClick: () -> Unit, label: String)
     Text(
         label,
         modifier = Modifier
-            .background(if (selected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(8.dp))
+            .background(if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(8.dp))
             .clickable(onClick = onClick)
             .padding(horizontal = 9.dp, vertical = 5.dp),
-        color = if (selected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
+        color = if (selected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
+        fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
         style = MaterialTheme.typography.labelMedium,
     )
 }
@@ -287,11 +288,16 @@ private fun SessionMetricsChart(sets: List<SetRecord>, trailingAverage: Int, dir
         Triple("Volume (kg × reps)", volume, volumeColor),
         Triple("Reps", reps, repsColor),
     )
-    Text("Training session chart", style = MaterialTheme.typography.labelLarge)
+    Text("Training Session Graph", style = MaterialTheme.typography.labelLarge)
     series.forEach { (label, values, color) ->
         val min = values.minOrNull() ?: 0.0
         val max = values.maxOrNull() ?: 0.0
-        Text("$label axis: ${formatAxisValue(min)}–${formatAxisValue(max)}", color = color, style = MaterialTheme.typography.labelSmall)
+        val change = fittedSeries(values).second
+        Text(
+            "$label: ${formatAxisValue(min)}–${formatAxisValue(max)} · fit ${formatSignedAxisValue(change)} / selected interval",
+            color = color,
+            style = MaterialTheme.typography.labelSmall,
+        )
     }
     Canvas(Modifier.fillMaxWidth().height(150.dp).padding(vertical = 6.dp)) {
         repeat(3) { index ->
@@ -299,8 +305,10 @@ private fun SessionMetricsChart(sets: List<SetRecord>, trailingAverage: Int, dir
             drawLine(grid, Offset(0f, y), Offset(size.width, y), strokeWidth = 1f)
         }
         series.forEach { (_, values, color) ->
-            val min = values.minOrNull() ?: 0.0
-            val max = values.maxOrNull() ?: 0.0
+            val fit = fittedSeries(values).first
+            val combined = values + fit
+            val min = combined.minOrNull() ?: 0.0
+            val max = combined.maxOrNull() ?: 0.0
             val range = (max - min).takeIf { it > 0 } ?: 1.0
             val points = values.mapIndexed { index, value ->
                 Offset(
@@ -310,6 +318,15 @@ private fun SessionMetricsChart(sets: List<SetRecord>, trailingAverage: Int, dir
             }
             points.zipWithNext().forEach { (start, end) -> drawLine(color, start, end, strokeWidth = 5f, cap = StrokeCap.Round) }
             points.forEach { drawCircle(color, radius = 5f, center = it) }
+            val fitPoints = fit.mapIndexed { index, value ->
+                Offset(
+                    x = if (fit.size == 1) size.width / 2f else index * size.width / (fit.size - 1),
+                    y = size.height - 5f - ((value - min) / range).toFloat() * (size.height - 10f),
+                )
+            }
+            fitPoints.zipWithNext().forEach { (start, end) ->
+                drawLine(color.copy(alpha = 0.55f), start, end, strokeWidth = 3f, cap = StrokeCap.Round)
+            }
         }
     }
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
@@ -321,6 +338,19 @@ private fun SessionMetricsChart(sets: List<SetRecord>, trailingAverage: Int, dir
 
 private fun formatAxisValue(value: Double): String = if (value % 1.0 == 0.0) value.toInt().toString()
 else String.format(Locale.US, "%.1f", value)
+
+private fun formatSignedAxisValue(value: Double): String = String.format(Locale.US, "%+.1f", value)
+
+private fun fittedSeries(values: List<Double>): Pair<List<Double>, Double> {
+    if (values.size < 2) return values to 0.0
+    val meanX = (values.size - 1) / 2.0
+    val meanY = values.average()
+    val denominator = values.indices.sumOf { index -> (index - meanX) * (index - meanX) }
+    val slope = values.indices.sumOf { index -> (index - meanX) * (values[index] - meanY) } / denominator
+    val intercept = meanY - slope * meanX
+    val fit = values.indices.map { index -> intercept + slope * index }
+    return fit to (fit.last() - fit.first())
+}
 
 private fun movingAverage(values: List<Double>, amount: Int): List<Double> {
     if (amount <= 1) return values
@@ -403,7 +433,7 @@ private fun AreaDialog(
     )
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Training areas") },
+        title = { Text("Training Areas") },
         text = {
             Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 BodyMapPicker(
@@ -565,7 +595,7 @@ private fun ColorPaletteDialog(area: BodyArea, selected: Long, onDismiss: () -> 
     )
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("${area.label} color") },
+        title = { Text("${area.label} Color") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 palette.chunked(6).forEach { row ->

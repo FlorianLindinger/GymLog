@@ -321,6 +321,15 @@ class GymRepository(context: Context) {
         })
     }
 
+    fun addHistoricalSet(machineId: Long, reps: Int, weight: Double, performedAt: Long) {
+        db.writableDatabase.insertOrThrow("sets", null, ContentValues().apply {
+            put("machine_id", machineId)
+            put("reps", reps.coerceAtLeast(1))
+            put("weight", weight.coerceAtLeast(0.0))
+            put("performed_at", performedAt)
+        })
+    }
+
     fun addTrainingMinutes(machineId: Long, minutes: Int) {
         require(minutes > 0) { "Training duration must be greater than zero" }
         val database = db.writableDatabase
@@ -401,6 +410,16 @@ class GymRepository(context: Context) {
             "sets",
             "performed_at>=? AND performed_at<? AND machine_id IN (SELECT id FROM machines WHERE plan_id=?)",
             arrayOf(startInclusive.toString(), endExclusive.toString(), planId.toString()),
+        )
+    }
+
+    fun deleteCurrentTraining() {
+        val planId = activeTrainingPlanId()
+        val cutoff = System.currentTimeMillis() - TRAINING_UNIT_MILLIS
+        db.writableDatabase.delete(
+            "sets",
+            "performed_at>=? AND machine_id IN (SELECT id FROM machines WHERE plan_id=?)",
+            arrayOf(cutoff.toString(), planId.toString()),
         )
     }
 

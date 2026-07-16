@@ -54,7 +54,7 @@ fun TrainingPlansScreen(
                     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                         Column(Modifier.weight(1f)) {
                             Text(plan.name, style = MaterialTheme.typography.titleMedium)
-                            if (plan.id == activePlanId) Text("Active plan", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelMedium)
+                            if (plan.id == activePlanId) Text("Active Plan", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelMedium)
                         }
                         TextButton(onClick = { onOpen(plan.id) }, enabled = plan.id != activePlanId) { Text("Open") }
                     }
@@ -66,15 +66,15 @@ fun TrainingPlansScreen(
                 }
             }
         }
-        item { Button(onClick = { creating = true }, modifier = Modifier.fillMaxWidth()) { Text("+ New training plan") } }
+        item { Button(onClick = { creating = true }, modifier = Modifier.fillMaxWidth()) { Text("+ New Training Plan") } }
     }
 
-    if (creating) PlanNameDialog("New training plan", "", onDismiss = { creating = false }) {
+    if (creating) PlanNameDialog("New Training Plan", "", onDismiss = { creating = false }) {
         onCreate(it)
         creating = false
     }
     renaming?.let { plan ->
-        PlanNameDialog("Rename training plan", plan.name, onDismiss = { renaming = null }) {
+        PlanNameDialog("Rename Training Plan", plan.name, onDismiss = { renaming = null }) {
             onRename(plan.id, it)
             renaming = null
         }
@@ -96,7 +96,7 @@ private fun PlanNameDialog(title: String, initial: String, onDismiss: () -> Unit
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(title) },
-        text = { OutlinedTextField(name, { name = it }, label = { Text("Plan name") }, singleLine = true) },
+        text = { OutlinedTextField(name, { name = it }, label = { Text("Plan Name") }, singleLine = true) },
         confirmButton = { Button(onClick = { onSave(name.trim()) }, enabled = name.isNotBlank()) { Text("Save") } },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
     )

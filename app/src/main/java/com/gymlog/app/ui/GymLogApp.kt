@@ -95,6 +95,8 @@ fun GymLogApp(
     var showProgressionSettings by remember { mutableStateOf(false) }
     var showAccentColor by remember { mutableStateOf(false) }
     var showPlanNotes by remember { mutableStateOf(false) }
+    var showHelp by remember { mutableStateOf(false) }
+    var confirmDeleteCurrentTraining by remember { mutableStateOf(false) }
     var showExerciseName by remember { mutableStateOf(false) }
     var showExerciseTitleNote by remember { mutableStateOf(false) }
 
@@ -174,8 +176,8 @@ fun GymLogApp(
                             Screen.OVERVIEW -> ""
                             Screen.STATS -> "Stats"
                             Screen.HISTORY -> "History"
-                            Screen.BACKUP -> "Data & backup"
-                            Screen.PLANS -> "Training plans"
+                            Screen.BACKUP -> "Data & Backup"
+                            Screen.PLANS -> "Training Plans"
                             Screen.DETAIL -> "Exercise"
                         },
                     )
@@ -209,6 +211,7 @@ fun GymLogApp(
                 onAdd = { showAdd = true },
                 onMenu = { showMenu = true },
                 onStats = { screen = Screen.STATS },
+                onEditPlanNotes = { showPlanNotes = true },
                 areaFrequency = areaFrequency,
                 onQuickSet = { machine, reps ->
                     if (isDirectMetric(machine.machine.trackingMode)) {
@@ -236,6 +239,10 @@ fun GymLogApp(
                 history = uiState.history,
                 modifier = Modifier.padding(padding),
                 onUpdateSet = { id, reps, weight -> repository.updateSet(id, reps, weight); refresh() },
+                onAddSet = { machineId, reps, weight, performedAt ->
+                    repository.addHistoricalSet(machineId, reps, weight, performedAt)
+                    refresh()
+                },
                 onDeleteSet = { repository.deleteSet(it); refresh() },
                 onDeleteExerciseDay = { machineId, start, end -> repository.deleteExerciseDay(machineId, start, end); refresh() },
                 onDeleteTrainingDay = { start, end -> repository.deleteTrainingDay(start, end); refresh() },
@@ -310,20 +317,56 @@ fun GymLogApp(
         title = { Text("Menu") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                TextButton(onClick = { showMenu = false; screen = Screen.PLANS }) { Text("Training plans") }
-                TextButton(onClick = { showMenu = false; showPlanNotes = true }) { Text("Training plan note") }
-                TextButton(onClick = { showMenu = false; showProgressionSettings = true }) { Text("Progress warnings") }
-                TextButton(onClick = { showMenu = false; screen = Screen.BACKUP }) { Text("Data, backup & sync") }
-                TextButton(onClick = { showMenu = false; showAccentColor = true }) { Text("UI color") }
+                TextButton(onClick = { showMenu = false; screen = Screen.PLANS }) { Text("Training Plans") }
+                TextButton(onClick = { showMenu = false; showPlanNotes = true }) { Text("Training Plan Note") }
+                TextButton(onClick = { showMenu = false; showProgressionSettings = true }) { Text("Progress Warnings") }
+                TextButton(onClick = { showMenu = false; screen = Screen.BACKUP }) { Text("Data, Backup & Sync") }
+                TextButton(onClick = { showMenu = false; showAccentColor = true }) { Text("UI Color") }
+                TextButton(onClick = { showMenu = false; showHelp = true }) { Text("Help & Explanations") }
+                TextButton(onClick = { showMenu = false; confirmDeleteCurrentTraining = true }) {
+                    Text("Delete Current Training", color = MaterialTheme.colorScheme.error)
+                }
                 androidx.compose.material3.HorizontalDivider()
                 Text(
-                    "Version ${BuildConfig.VERSION_NAME} · Built ${BuildConfig.BUILD_TIME}",
+                    "Version ${BuildConfig.VERSION_NAME} · Built ${BuildConfig.BUILD_TIME} UTC",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
         },
         confirmButton = { TextButton(onClick = { showMenu = false }) { Text("Close") } },
+    )
+
+    if (showHelp) AlertDialog(
+        onDismissRequest = { showHelp = false; showMenu = true },
+        title = { Text("Help & Explanations") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text("Outlines", style = MaterialTheme.typography.titleSmall)
+                Text("A colored outline marks interactive or emphasized cards. Tap cards with notes, metrics, or training areas to edit them.")
+                Text("Body-Area Colors", style = MaterialTheme.typography.titleSmall)
+                Text("Each color identifies a body area throughout the overview, exercise details, and statistics. A full-width marker means primary involvement; a half-width marker means secondary involvement.")
+                Text("Training Time", style = MaterialTheme.typography.titleSmall)
+                Text("Live means the timer is still counting from the first entry. It becomes completed after ten minutes without a new entry.")
+                Text("Progress Warnings", style = MaterialTheme.typography.titleSmall)
+                Text("Warnings appear when an exercise has not increased after your configured number of weeks or training sessions.")
+            }
+        },
+        confirmButton = { TextButton(onClick = { showHelp = false; showMenu = true }) { Text("Close") } },
+    )
+
+    if (confirmDeleteCurrentTraining) AlertDialog(
+        onDismissRequest = { confirmDeleteCurrentTraining = false; showMenu = true },
+        title = { Text("Delete Current Training?") },
+        text = { Text("This removes all entries in the current six-hour training unit from the active plan.") },
+        confirmButton = {
+            Button(onClick = {
+                repository.deleteCurrentTraining()
+                refresh()
+                confirmDeleteCurrentTraining = false
+            }) { Text("Delete Training") }
+        },
+        dismissButton = { TextButton(onClick = { confirmDeleteCurrentTraining = false; showMenu = true }) { Text("Cancel") } },
     )
 
     if (showPlanNotes && activePlan != null) TrainingPlanNotesDialog(
@@ -361,7 +404,7 @@ fun GymLogApp(
 
     if (showExerciseName) selected?.machine?.let { machine ->
         TextEditDialog(
-            title = "Exercise name",
+            title = "Exercise Name",
             initial = machine.name,
             singleLine = true,
             required = true,
@@ -376,7 +419,7 @@ fun GymLogApp(
 
     if (showExerciseTitleNote) selected?.machine?.let { machine ->
         TextEditDialog(
-            title = "Title note",
+            title = "Title Note",
             initial = machine.titleNote,
             singleLine = true,
             onDismiss = { showExerciseTitleNote = false },
@@ -390,13 +433,13 @@ fun GymLogApp(
 
     if (confirmImport) AlertDialog(
         onDismissRequest = { confirmImport = false },
-        title = { Text("Restore backup?") },
+        title = { Text("Restore Backup?") },
         text = { Text("Restoring replaces all current GymLog data. Export a backup first if you want to keep it.") },
         confirmButton = {
             Button(onClick = {
                 confirmImport = false
                 onImport()
-            }) { Text("Choose backup") }
+            }) { Text("Choose Backup") }
         },
         dismissButton = { TextButton(onClick = { confirmImport = false }) { Text("Cancel") } },
     )
@@ -424,8 +467,8 @@ private fun DataRecoveryDialog(
                 }
             }
         },
-        confirmButton = { Button(onClick = onCreateFresh) { Text("Create new database") } },
-        dismissButton = { TextButton(onClick = onRetry) { Text("Try again") } },
+        confirmButton = { Button(onClick = onCreateFresh) { Text("Create New Database") } },
+        dismissButton = { TextButton(onClick = onRetry) { Text("Try Again") } },
     )
 }
 
@@ -467,7 +510,7 @@ private fun BackupScreen(
         modifier = modifier.fillMaxSize().padding(20.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
-        Text("Backup & sync", style = MaterialTheme.typography.headlineSmall)
+        Text("Backup & Sync", style = MaterialTheme.typography.headlineSmall)
         Card(Modifier.fillMaxWidth()) {
             Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
                 Text(
@@ -494,7 +537,7 @@ private fun BackupScreen(
         }
         Row(Modifier.fillMaxWidth(), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
-                Text("Android automatic backup", style = MaterialTheme.typography.titleMedium)
+                Text("Android Automatic Backup", style = MaterialTheme.typography.titleMedium)
                 Text(
                     if (automaticBackupEnabled) "On · included in future Android backups" else "Off · future Android backups skip GymLog data",
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -507,10 +550,10 @@ private fun BackupScreen(
             "This is not live sync. Android decides when an automatic backup runs and may restore it after reinstalling the app or while setting up another phone. Changes do not immediately appear on a second phone.",
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
-        Text("Manual file backup", style = MaterialTheme.typography.titleMedium)
+        Text("Manual File Backup", style = MaterialTheme.typography.titleMedium)
         Text("Export creates a readable JSON copy containing every plan, exercise, note, body area, metric change, and set. Choose Google Drive in the file picker if you want to move it between phones yourself.")
-        Button(onClick = onExport) { Text("Download backup") }
-        androidx.compose.material3.OutlinedButton(onClick = onImport) { Text("Upload and restore backup") }
+        Button(onClick = onExport) { Text("Download Backup") }
+        androidx.compose.material3.OutlinedButton(onClick = onImport) { Text("Upload and Restore Backup") }
         Text("Restoring a manual file replaces the data currently on this phone. Automatic Android backup is unaffected by manual export and restore.", color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
@@ -527,7 +570,7 @@ private fun AccentColorDialog(
     val selected = 0xFF000000L or (red.toLong() shl 16) or (green.toLong() shl 8) or blue.toLong()
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("UI color") },
+        title = { Text("UI Color") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Box(Modifier.fillMaxWidth().height(56.dp).background(Color(selected), androidx.compose.foundation.shape.RoundedCornerShape(12.dp)))
@@ -571,19 +614,19 @@ private fun TrainingPlanNotesDialog(
     var isPinned by remember(pinned) { mutableStateOf(pinned) }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Training plan note") },
+        title = { Text("Training Plan Note") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 androidx.compose.material3.OutlinedTextField(
                     value = value,
                     onValueChange = { value = it },
                     modifier = Modifier.fillMaxWidth(),
-                    minLines = 4,
-                    label = { Text("Note") },
+                    minLines = 5,
+                    label = { Text("Training Plan Note") },
                 )
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                     Column(Modifier.weight(1f)) {
-                        Text("Pin below training time")
+                        Text("Pin Below Training Time")
                         Text("Show this note on the overview.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                     Switch(checked = isPinned, onCheckedChange = { isPinned = it })
