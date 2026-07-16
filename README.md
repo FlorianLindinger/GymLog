@@ -1,21 +1,37 @@
 # GymLog
 
-GymLog is a privacy-first Android workout tracker for fast set logging, exercise progression, training history, and body-measurement trends. It is built with Kotlin, Jetpack Compose, SQLite, and Health Connect.
+<p align="center">
+  <img src="app/src/main/res/drawable-nodpi/ic_launcher_foreground.png" alt="GymLog app icon" width="180">
+</p>
 
-## Highlights
+<p align="center">
+  A privacy-first Android workout tracker for fast logging, useful progression insights, and body-measurement trends.
+</p>
+
+<p align="center">
+  <a href="https://github.com/FlorianLindinger/GymLog/actions/workflows/android.yml"><img src="https://github.com/FlorianLindinger/GymLog/actions/workflows/android.yml/badge.svg" alt="Android CI"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT license"></a>
+  <img src="https://img.shields.io/badge/Android-8.0%2B-3DDC84" alt="Android 8.0 or newer">
+</p>
+
+GymLog is built with Kotlin, Jetpack Compose, SQLite, and Health Connect. Workout data remains local by default; the app has no account system, analytics SDK, or internet permission.
+
+## Features
 
 - Fast weight-, level-, and duration-based workout logging
 - Multiple independent training plans
-- Automatic, mixed pinned, or fixed exercise ordering
-- Editable training history and progression warnings
-- Interval charts with rolling averages, linear fits, and target ranges
-- Optional Health Connect import for weight, body fat, and lean body mass
+- Automatic, mixed pinned, and fully fixed exercise ordering
+- Editable history, progression warnings, and live-training status
+- Interval charts with gridlines, rolling averages, linear fits, and targets
+- Body trends for weight, body fat, and lean body mass
+- Optional, permission-controlled Health Connect import
 - Local JSON export and restore
-- No account, analytics SDK, or internet permission
+
+The ordering modes and their exact priority rules are documented in [Exercise Ordering](docs/exercise-ordering.md).
 
 ## Screenshots
 
-| Overview | Exercise details |
+| Overview | Exercise Details |
 | --- | --- |
 | <img src="docs/screenshots/overview.png" alt="Exercise overview" width="320"> | <img src="docs/screenshots/exercise-detail.png" alt="Exercise details" width="320"> |
 
@@ -23,55 +39,58 @@ GymLog is a privacy-first Android workout tracker for fast set logging, exercise
 | --- | --- |
 | <img src="docs/screenshots/history.png" alt="Training history" width="320"> | <img src="docs/screenshots/statistics.png" alt="Training statistics" width="320"> |
 
-Screenshots contain sample data.
+Screenshots use sample data.
 
-## Requirements
+## Getting Started
 
-- Android Studio with Android SDK 36
+Requirements:
+
+- Android Studio and Android SDK 36
 - JDK 17 or newer
-- Android 8.0 (API 26) or newer device/emulator
+- Android 8.0 (API 26) or newer device or emulator
 
-## Build
-
-Open the repository in Android Studio, allow Gradle to sync, and run the `app` configuration. From PowerShell:
+Open the project in Android Studio, allow Gradle to sync, and run the `app` configuration. To build from PowerShell:
 
 ```powershell
 $env:JAVA_HOME = "C:\Program Files\Java\jdk-21.0.10"
 .\gradlew.bat :app:assembleDebug
 ```
 
-The APK is written to `app\build\outputs\apk\debug\app-debug.apk`.
-
-Windows development and release helpers are documented in [`scripts/windows`](scripts/windows/README.md). Run the complete local verification with:
+The debug APK is written to `app\build\outputs\apk\debug\app-debug.apk`. Run the complete local verification with:
 
 ```powershell
 scripts\windows\verify.bat
 ```
 
-The same compile, lint, test, and APK checks run on pushes and pull requests through GitHub Actions.
+Windows development and release helpers are described in [scripts/windows](scripts/windows/README.md). GitHub Actions runs the same compile, lint, test, and APK checks on pushes and pull requests.
 
 ## Demo Data
 
-Open **Menu → Training Plans → Add Demo Training Plan** to create an isolated sample plan with ten weeks of history and a halfway-completed live workout. Repeating the action creates another uniquely named demo plan.
+Open **Menu → Training Plans → Add Demo Training Plan** to create an isolated sample plan with ten weeks of history and a halfway-completed live workout. Repeating the action creates another uniquely named plan.
 
 ## Data and Privacy
 
-Workout data stays in the app's local SQLite database. Health Connect access is optional and permission-controlled. Manual JSON backups can be stored locally or in a document provider such as Google Drive.
+Workout data is stored in the app's local SQLite database. Health Connect access is optional and controlled by Android permissions. JSON backups can be saved locally or through a document provider such as Google Drive.
 
-This WIP build resets incompatible local database schemas and accepts only its current backup format. The policy required before stable releases is documented in [`docs/data-format.md`](docs/data-format.md).
+This work-in-progress build resets incompatible local database schemas and accepts only its current backup format. The intended stable-release migration policy is documented in [Data Format Policy](docs/data-format.md).
 
 Release signing is read only from `GYMLOG_KEYSTORE_FILE`, `GYMLOG_KEYSTORE_PASSWORD`, `GYMLOG_KEY_ALIAS`, and `GYMLOG_KEY_PASSWORD`. Never commit signing files or credentials.
 
-## Project Structure
+## Project
 
 ```text
 app/src/main/java/com/gymlog/app/
 ├── data/        SQLite repository and models
 ├── ui/          Compose screens and Health Connect integration
 └── MainActivity.kt
-docs/            Screenshots and data-format policy
+docs/            Product documentation and screenshots
 scripts/windows/ Development, device, and release helpers
 ```
+
+- [Professional TODO](TODO.md)
+- [Feature Ideas](docs/feature-ideas.md)
+- [Exercise Ordering](docs/exercise-ordering.md)
+- [Data Format Policy](docs/data-format.md)
 
 ## License
 
