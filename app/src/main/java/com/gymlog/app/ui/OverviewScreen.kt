@@ -140,7 +140,6 @@ fun OverviewScreen(
                     border = BorderStroke(1.dp, MaterialTheme.colorScheme.secondary),
                 ) {
                     Column(Modifier.padding(horizontal = 12.dp, vertical = 7.dp)) {
-                        Text("Training Plan Note", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSecondaryContainer)
                         Text(activePlanNotes, color = MaterialTheme.colorScheme.onSecondaryContainer)
                     }
                 }
@@ -415,16 +414,15 @@ private fun MachineCard(
     val clash = if (!trainedInUnit && lastExerciseInUnit != null) strongestClash(summary, lastExerciseInUnit) else null
     val clashAreas = if (!trainedInUnit && lastExerciseInUnit != null) clashingAreas(summary, lastExerciseInUnit) else emptySet()
     val outlineColor = when {
-        isLastDone -> Color(0xFF1976D2)
-        trainedInUnit -> sessionTrendColor(summary)
         clash != null && clash >= 1.0 -> Color(0xFFE53935)
+        clash != null && clash >= .5 -> Color(0xFFFB8C00)
         clash != null -> Color(0xFFFBC02D)
         else -> Color(0xFF43A047)
     }
     Card(
         modifier = modifier.fillMaxWidth().clickable(enabled = !isReordering) { onMachine(summary.machine.id) },
         elevation = CardDefaults.cardElevation(defaultElevation = if (isDragging) 10.dp else 1.dp),
-        border = BorderStroke(if (isLastDone) 3.dp else if (trainedInUnit) 1.5.dp else 2.5.dp, outlineColor),
+        border = if (trainedInUnit) null else BorderStroke(2.5.dp, outlineColor),
     ) {
         Column(Modifier.padding(horizontal = 8.dp, vertical = 3.dp), verticalArrangement = Arrangement.spacedBy(0.dp)) {
             if (summary.areas.isNotEmpty()) {
@@ -453,6 +451,17 @@ private fun MachineCard(
             }
             progressionWarning(summary, progressionSettings)?.let { warning ->
                 Text(warning, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error)
+            }
+            if (!trainedInUnit && clash != null) {
+                Text(
+                    when {
+                        clash >= 1.0 -> "Conflict: full / full"
+                        clash >= .5 -> "Conflict: full / half"
+                        else -> "Conflict: half / half"
+                    },
+                    style = MaterialTheme.typography.labelSmall,
+                    color = outlineColor,
+                )
             }
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
@@ -485,7 +494,7 @@ private fun MachineCard(
     if (quickReps) {
         if (isDirectMetric(summary.machine.trackingMode)) {
             QuickTrainingDialog(
-                initialMinutes = (currentUnitSets.firstOrNull() ?: summary.recentSets.firstOrNull())?.weight?.toInt() ?: 0,
+                initialMinutes = (currentUnitSets.firstOrNull() ?: summary.recentSets.firstOrNull())?.weight?.toInt() ?: 10,
                 isChange = isChangingTrainingUnit,
                 onDismiss = { quickReps = false },
                 onAdd = { onQuickSet(summary, listOf(it)); quickReps = false },
@@ -557,9 +566,7 @@ private fun rankOverviewMachines(
     val currentFirst = listOfNotNull(current)
     return when (mode) {
         ExerciseOrderingMode.AUTOMATIC -> automatic
-        ExerciseOrderingMode.FIXED -> currentFirst + machines
-            .filter { it.machine.id != currentId }
-            .sortedBy { it.machine.sortOrder }
+        ExerciseOrderingMode.FIXED -> machines.sortedBy { it.machine.sortOrder }
         ExerciseOrderingMode.MIXED -> currentFirst +
             machines.filter { it.machine.pinned && it.machine.id != currentId }.sortedBy { it.machine.sortOrder } +
             automatic.filter { !it.machine.pinned && it.machine.id != currentId }

@@ -61,6 +61,14 @@ fun StatsScreen(
     val durations = sessions.mapValues { (_, sets) ->
         if (sets.size < 2) 0.0 else Duration.ofMillis(sets.maxOf { it.performedAt } - sets.minOf { it.performedAt }).toMinutes().toDouble()
     }
+    val last30Cutoff = Instant.now().minus(Duration.ofDays(30)).toEpochMilli()
+    val allSessions = history.groupBy { Instant.ofEpochMilli(it.performedAt).atZone(zone).toLocalDate() }
+    val last30Durations = (29 downTo 0).map { daysAgo ->
+        val day = LocalDate.now().minusDays(daysAgo.toLong())
+        val entries = allSessions[day].orEmpty()
+        if (entries.size < 2) 0.0 else Duration.ofMillis(entries.maxOf { it.performedAt } - entries.minOf { it.performedAt }).toMinutes().toDouble()
+    }
+    val hoursLast30Days = last30Durations.sum() / 60.0
     val weeks = sessions.entries.groupBy { (date, _) -> date.minusDays((date.dayOfWeek.value - 1).toLong()) }
         .toSortedMap().mapValues { it.value.size.toDouble() }
     val periodWeeks = when {
@@ -169,6 +177,7 @@ fun StatsScreen(
         }
         item {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                StatCard("Hours, last 30 days", String.format(Locale.US, "%.1f h", hoursLast30Days), Modifier.weight(1f))
                 StatCard("Avg. Duration", formatHoursMinutes(durations.values.averageOrZero().toLong()), Modifier.weight(1f))
                 StatCard("Longest", formatHoursMinutes((durations.values.maxOrNull() ?: 0.0).toLong()), Modifier.weight(1f))
             }
@@ -182,6 +191,7 @@ fun StatsScreen(
         }
         item { BodyAreaStatsCard(bodyAreaStats) }
         item { StatsChart("Gym Sessions by Week", weeks.values.toList().takeLast(20), "sessions") }
+        item { StatsChart("Training Hours by Day (last 30 days)", last30Durations.map { it / 60.0 }, "hours") }
         item { StatsChart("Gym Duration by Day", durations.values.toList().takeLast(24), "minutes") }
         item { StatsChart("Weight Increases by Week", increasesByWeek, "increases") }
         item { StatsChart("Weight Upgrades per Gym Day", upgradesPerGymDay, "upgrades") }

@@ -257,7 +257,6 @@ fun GymLogApp(
                 syncStatus = healthSyncStatus,
                 modifier = Modifier.padding(padding),
                 onSync = onHealthSync,
-                onMenu = { showMenu = true },
                 onGym = { screen = Screen.OVERVIEW },
             )
             Screen.HISTORY -> HistoryScreen(
@@ -358,7 +357,7 @@ fun GymLogApp(
                     ),
                 ) {
                     Column(Modifier.padding(10.dp)) {
-                        Text("Training Plan Note", style = MaterialTheme.typography.labelLarge)
+                        Text("Plan notes", style = MaterialTheme.typography.labelLarge)
                         Text(
                             activePlan?.notes?.ifBlank { "Tap to add a note." } ?: "No active training plan.",
                             color = MaterialTheme.colorScheme.onSecondaryContainer,

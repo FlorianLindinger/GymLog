@@ -49,6 +49,7 @@ import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Locale
+import kotlin.math.pow
 
 private data class BodyChartSettings(
     val showFit: Boolean = true,
@@ -69,12 +70,12 @@ fun BodyOverviewScreen(
     syncStatus: String,
     modifier: Modifier = Modifier,
     onSync: () -> Unit,
-    onMenu: () -> Unit,
     onGym: () -> Unit,
 ) {
     val context = LocalContext.current
     val preferences = remember { context.getSharedPreferences("body_graph_settings", 0) }
     var window by remember { mutableStateOf(preferences.getString("window", "6M") ?: "6M") }
+    var showBodyMenu by remember { mutableStateOf(false) }
     val settings = remember {
         mutableStateMapOf<BodyMetric, BodyChartSettings>().apply {
             BodyMetric.entries.forEach { metric ->
@@ -105,7 +106,7 @@ fun BodyOverviewScreen(
                 Card(Modifier.fillMaxWidth()) {
                     Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         Text("Body Measurements", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
-                        Text("Work in progress · On-device Health Connect import", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text("On-device Health Connect import", color = MaterialTheme.colorScheme.onSurfaceVariant)
                         Text(syncStatus, style = MaterialTheme.typography.bodySmall)
                         Button(onClick = onSync, modifier = Modifier.fillMaxWidth()) { Text("Sync Health Connect") }
                         Text(
@@ -163,8 +164,8 @@ fun BodyOverviewScreen(
             }
             item {
                 Text(
-                    "Suggested next steps: rolling averages, source filtering, measurement annotations, goal dates, forecasts, and reminders for consistent measurement times.",
-                    style = MaterialTheme.typography.bodySmall,
+                    "Muscle reference: OpenStax, redrawn by Tomáš Kebert / umimeto.org · CC BY-SA 4.0.",
+                    style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
@@ -173,10 +174,22 @@ fun BodyOverviewScreen(
             Modifier.align(Alignment.BottomCenter).fillMaxWidth().background(MaterialTheme.colorScheme.surface).padding(8.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            FilledTonalButton(onClick = onMenu, modifier = Modifier.weight(1f)) { Text("Menu") }
+            FilledTonalButton(onClick = { showBodyMenu = true }, modifier = Modifier.weight(1f)) { Text("Menu") }
             FilledTonalButton(onClick = onGym, modifier = Modifier.weight(1f)) { Text("Gym") }
         }
     }
+    if (showBodyMenu) AlertDialog(
+        onDismissRequest = { showBodyMenu = false },
+        title = { Text("Body") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(syncStatus, style = MaterialTheme.typography.bodySmall)
+                Button(onClick = { onSync(); showBodyMenu = false }, modifier = Modifier.fillMaxWidth()) { Text("Sync Health Connect") }
+                Text("Body data and graph settings are independent of training plans.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        },
+        confirmButton = { TextButton(onClick = { showBodyMenu = false }) { Text("Close") } },
+    )
 }
 
 @Composable
@@ -271,9 +284,9 @@ private fun BodyGraph(
     val all = rawValues.map { it.value } + fit + acceptanceValues
     val rawMin = all.minOrNull() ?: 0.0
     val rawMax = all.maxOrNull() ?: 1.0
-    val padding = ((rawMax - rawMin) * .12).takeIf { it > 0 } ?: 1.0
-    val min = rawMin - padding
-    val max = rawMax + padding
+    val ticks = bodyNiceTicks(rawMin, rawMax)
+    val min = ticks.first()
+    val max = ticks.last()
     val range = max - min
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
     Column(
@@ -281,9 +294,7 @@ private fun BodyGraph(
         verticalArrangement = Arrangement.SpaceBetween,
         horizontalAlignment = Alignment.End,
     ) {
-        Text(formatBodyValue(max), style = MaterialTheme.typography.labelSmall)
-        Text(formatBodyValue((min + max) / 2.0), style = MaterialTheme.typography.labelSmall)
-        Text(formatBodyValue(min), style = MaterialTheme.typography.labelSmall)
+        ticks.asReversed().forEach { tick -> Text(formatBodyValue(tick), style = MaterialTheme.typography.labelSmall) }
     }
     BoxWithConstraints(Modifier.weight(1f)) {
     val graphWidth = maxOf(maxWidth, (rawValues.size * 28).dp)
@@ -292,13 +303,13 @@ private fun BodyGraph(
         fun y(value: Double) = size.height - ((value - min) / range).toFloat() * size.height
         fun x(timestamp: Long) = ((timestamp - xStart).toDouble() / (xEnd - xStart).coerceAtLeast(1L))
             .coerceIn(0.0, 1.0).toFloat() * size.width
-        repeat(3) { index ->
-            val lineY = index * size.height / 2f
-            drawLine(gridColor, Offset(0f, lineY), Offset(size.width, lineY), strokeWidth = 1f)
+        ticks.forEach { tick ->
+            val lineY = y(tick)
+            drawLine(gridColor.copy(alpha = .78f), Offset(0f, lineY), Offset(size.width, lineY), strokeWidth = 1.5f)
         }
         repeat(5) { index ->
             val lineX = index * size.width / 4f
-            drawLine(gridColor, Offset(lineX, 0f), Offset(lineX, size.height), strokeWidth = 1f)
+            drawLine(gridColor.copy(alpha = .78f), Offset(lineX, 0f), Offset(lineX, size.height), strokeWidth = 1.5f)
         }
         settings.target?.let { target ->
             settings.acceptance?.let { tolerance ->
@@ -324,9 +335,28 @@ private fun BodyGraph(
     }
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
         val formatter = DateTimeFormatter.ofPattern("d MMM yy")
-        Text(Instant.ofEpochMilli(xStart).atZone(ZoneId.systemDefault()).format(formatter), style = MaterialTheme.typography.labelSmall)
-        Text(Instant.ofEpochMilli(xEnd).atZone(ZoneId.systemDefault()).format(formatter), style = MaterialTheme.typography.labelSmall)
+        repeat(5) { index ->
+            val timestamp = xStart + ((xEnd - xStart) * index / 4)
+            Text(Instant.ofEpochMilli(timestamp).atZone(ZoneId.systemDefault()).format(formatter), style = MaterialTheme.typography.labelSmall)
+        }
     }
+}
+
+private fun bodyNiceTicks(rawMin: Double, rawMax: Double): List<Double> {
+    val span = (rawMax - rawMin).takeIf { it > 0.0 } ?: kotlin.math.abs(rawMax).coerceAtLeast(1.0)
+    val roughStep = span / 4.0
+    val magnitude = 10.0.pow(kotlin.math.floor(kotlin.math.log10(roughStep)))
+    val normalized = roughStep / magnitude
+    val step = when {
+        normalized <= 1.0 -> 1.0
+        normalized <= 2.0 -> 2.0
+        normalized <= 5.0 -> 5.0
+        else -> 10.0
+    } * magnitude
+    val low = kotlin.math.floor((rawMin - step * .08) / step) * step
+    val high = kotlin.math.ceil((rawMax + step * .08) / step) * step
+    val count = ((high - low) / step).toInt().coerceAtLeast(1)
+    return (0..count).map { low + it * step }
 }
 
 @Composable

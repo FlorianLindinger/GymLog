@@ -343,9 +343,10 @@ class GymRepository(context: Context) {
 
     fun setMachinePinned(id: Long, pinned: Boolean) {
         val database = db.writableDatabase
+        val planId = activeTrainingPlanId()
         val nextPinnedOrder = database.rawQuery(
-            "SELECT COALESCE(MAX(sort_order),-1)+1 FROM machines WHERE pinned=1",
-            null,
+            "SELECT COALESCE(MAX(sort_order),-1)+1 FROM machines WHERE pinned=1 AND plan_id=?",
+            arrayOf(planId.toString()),
         ).use { cursor -> cursor.moveToFirst(); cursor.getInt(0) }
         database.update(
             "machines",
@@ -574,7 +575,7 @@ class GymRepository(context: Context) {
         val pinnedIds = loadMachines().filter { it.machine.pinned }.map { it.machine.id }.toSet()
         val database = db.writableDatabase
         database.transaction {
-            machineIds.filter { !pinnedOnly || it in pinnedIds }.forEachIndexed { index, id ->
+            machineIds.forEachIndexed { index, id ->
                 database.update("machines", ContentValues().apply { put("sort_order", index) }, "id=?", arrayOf(id.toString()))
             }
         }

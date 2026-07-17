@@ -1,6 +1,7 @@
 package com.gymlog.app.ui
 
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -44,6 +45,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -52,6 +55,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.gymlog.app.R
 import com.gymlog.app.data.AreaAssignment
 import com.gymlog.app.data.BodyArea
 import com.gymlog.app.data.GymRepository
@@ -402,6 +406,12 @@ fun MetricValueDialog(
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedTextField(value, { value = it.filter { char -> char.isDigit() || char == '.' || char == ',' } }, label = { Text(when (trackingMode) { "WEIGHT" -> "New Weight (kg)"; "DURATION" -> "New Duration (min)"; else -> "New Level" }) }, singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = if (trackingMode == "WEIGHT") KeyboardType.Decimal else KeyboardType.Number))
+                if (trackingMode == "WEIGHT") {
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        androidx.compose.material3.FilledTonalButton(onClick = { value = formatMetricDialogValue((parsed ?: current) + 3.0) }) { Text("+3 kg") }
+                        androidx.compose.material3.FilledTonalButton(onClick = { value = formatMetricDialogValue((parsed ?: current) + 5.0) }) { Text("+5 kg") }
+                    }
+                }
                 if (onSaveCurrentAndNext != null) {
                     Text("This exercise already has entries in the current training session.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     Button(onClick = { parsed?.let(onSave) }, enabled = parsed != null && parsed >= 0, modifier = Modifier.fillMaxWidth()) { Text("Change for Next Session") }
@@ -415,6 +425,8 @@ fun MetricValueDialog(
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
     )
 }
+
+private fun formatMetricDialogValue(value: Double): String = if (value % 1.0 == 0.0) value.toInt().toString() else String.format(Locale.US, "%.1f", value)
 
 @Composable
 private fun AreaDialog(
@@ -442,7 +454,7 @@ private fun AreaDialog(
                 BodyMapPicker(
                     choices = choices,
                     colors = colors,
-                    modifier = Modifier.fillMaxWidth().aspectRatio(1.5f),
+                    modifier = Modifier.fillMaxWidth().aspectRatio(960f / 836f),
                 )
                 sortedAreas.forEach { area ->
                     Row(Modifier.fillMaxWidth().padding(vertical = 1.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -521,6 +533,13 @@ private fun BodyMapPicker(
     val neutral = MaterialTheme.colorScheme.surfaceVariant
     val outline = MaterialTheme.colorScheme.outline
     Box(modifier, contentAlignment = Alignment.Center) {
+        Image(
+            painter = painterResource(R.drawable.muscles_front_back),
+            contentDescription = "Front and back muscle reference",
+            modifier = Modifier.fillMaxSize(),
+            contentScale = ContentScale.FillBounds,
+            alpha = .34f,
+        )
         Canvas(modifier = Modifier.fillMaxSize()) {
             val bodyStroke = size.height * .035f
             fun point(x: Float, y: Float) = Offset(size.width * x, size.height * y)
