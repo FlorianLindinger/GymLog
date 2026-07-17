@@ -214,7 +214,7 @@ fun GymLogApp(
     ) { padding ->
         when (screen) {
             Screen.OVERVIEW -> OverviewScreen(
-                machines = uiState.machines,
+                machines = uiState.machines.filterNot { repository.isMachineHidden(it.machine.id) },
                 activePlanName = activePlan?.name ?: "Training plan",
                 activePlanNotes = activePlan?.notes.orEmpty(),
                 activePlanNotesPinned = activePlan?.notesPinned == true,
@@ -237,6 +237,7 @@ fun GymLogApp(
                     }
                     refresh()
                 },
+                onDeleteCurrentExerciseSets = { machine -> repository.deleteCurrentExerciseSets(machine.machine.id); refresh() },
                 onMetricChange = { machine, value ->
                     repository.changeWeight(machine.machine.id, value)
                     refresh()
@@ -253,6 +254,7 @@ fun GymLogApp(
                 },
                 onSetPinned = { machine, pinned -> repository.setMachinePinned(machine.machine.id, pinned); refresh() },
                 onMovePinned = { machine, direction -> repository.movePinnedMachine(machine.machine.id, direction); refresh() },
+                onHide = { machine -> repository.setMachineHidden(machine.machine.id, true); refresh() },
             )
             Screen.BODY -> BodyOverviewScreen(
                 snapshot = bodyData,

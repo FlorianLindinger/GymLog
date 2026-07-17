@@ -344,6 +344,10 @@ class GymRepository(context: Context) {
         db.writableDatabase.update("machines", ContentValues().apply { put("notes", notes.trim()) }, "id=?", arrayOf(id.toString()))
     }
 
+    fun isMachineHidden(id: Long): Boolean = preferences.getBoolean("hidden_machine_$id", false)
+
+    fun setMachineHidden(id: Long, hidden: Boolean) { preferences.edit().putBoolean("hidden_machine_$id", hidden).apply() }
+
     fun setMachinePinned(id: Long, pinned: Boolean) {
         val database = db.writableDatabase
         val planId = activeTrainingPlanId()
@@ -531,6 +535,10 @@ class GymRepository(context: Context) {
             "performed_at>=? AND performed_at<? AND machine_id IN (SELECT id FROM machines WHERE plan_id=?)",
             arrayOf(startInclusive.toString(), endExclusive.toString(), planId.toString()),
         )
+    }
+
+    fun deleteCurrentExerciseSets(machineId: Long) {
+        db.writableDatabase.delete("sets", "machine_id=? AND performed_at>=?", arrayOf(machineId.toString(), (System.currentTimeMillis() - TRAINING_UNIT_MILLIS).toString()))
     }
 
     fun deleteCurrentTraining() {

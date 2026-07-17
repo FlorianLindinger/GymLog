@@ -311,11 +311,11 @@ private fun DualAxisSessionPlot(reps: List<Double>, weight: List<Double>, volume
                         val lineY = index * size.height / 2f
                         drawLine(grid, Offset(0f, lineY), Offset(size.width, lineY), strokeWidth = 1.2f)
                     }
-                    val barWidth = (size.width / volume.size.coerceAtLeast(1) * .55f).coerceAtMost(22f)
-                    volume.forEachIndexed { index, value ->
-                        val height = (value / volumeMax).toFloat() * (size.height - 10f)
-                        drawRoundRect(volumeColor.copy(alpha = .42f), Offset(x(index, volume.size) - barWidth / 2f, size.height - 5f - height), Size(barWidth, height.coerceAtLeast(2f)), androidx.compose.ui.geometry.CornerRadius(barWidth / 2f, barWidth / 2f))
+                    val volumePoints = volume.mapIndexed { index, value ->
+                        Offset(x(index, volume.size), size.height - 5f - (value / volumeMax).toFloat() * (size.height - 10f))
                     }
+                    volumePoints.zipWithNext().forEach { (a, b) -> drawLine(volumeColor, a, b, strokeWidth = 3.5f, cap = StrokeCap.Round) }
+                    volumePoints.forEach { drawCircle(volumeColor, 3.8f, it) }
                     fun drawMetric(values: List<Double>, fit: List<Double>, min: Double, max: Double, color: Color) {
                         val points = values.mapIndexed { index, value -> Offset(x(index, values.size), y(value, min, max)) }
                         points.zipWithNext().forEach { (a, b) -> drawLine(color, a, b, strokeWidth = 4f, cap = StrokeCap.Round) }
@@ -523,17 +523,11 @@ private fun AreaDialog(
                 )
                 sortedAreas.forEach { area ->
                     Row(Modifier.fillMaxWidth().padding(vertical = 1.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Box(
-                            Modifier.width(22.dp).height(22.dp)
-                                .background(Color(colors[area] ?: area.color), CircleShape)
-                                .clickable { colorArea = area },
-                        )
-                        Spacer(Modifier.width(6.dp))
                         Text(
                             buildString {
                                 append(area.label)
                                 val count = usage[area] ?: 0.0
-                                if (count > 0) append(" · ${formatAreaUsage(count)}×")
+                                if (count > 0) append(" · exists ${formatAreaUsage(count)}×")
                             },
                             Modifier.weight(1f),
                             style = MaterialTheme.typography.bodySmall,
@@ -590,105 +584,12 @@ private fun formatAreaUsage(value: Double): String =
     if (value % 1.0 == 0.0) value.toInt().toString() else String.format(Locale.US, "%.1f", value)
 
 @Composable
-private fun BodyMapPicker(
-    choices: Map<BodyArea, Strength?>,
-    colors: Map<BodyArea, Long>,
-    modifier: Modifier = Modifier,
-) {
-    val neutral = MaterialTheme.colorScheme.surfaceVariant
-    val outline = MaterialTheme.colorScheme.outline
-    Box(modifier, contentAlignment = Alignment.Center) {
-        Image(
-            painter = painterResource(R.drawable.muscles_front_back),
-            contentDescription = "Front and back muscle reference",
-            modifier = Modifier.fillMaxSize(),
-            contentScale = ContentScale.FillBounds,
-            alpha = .34f,
-        )
-        Canvas(modifier = Modifier.fillMaxSize()) {
-            val bodyStroke = size.height * .035f
-            fun point(x: Float, y: Float) = Offset(size.width * x, size.height * y)
-            fun baseFigure(centerX: Float) {
-                drawCircle(outline, size.height * .057f, point(centerX, .125f))
-                drawCircle(neutral, size.height * .052f, point(centerX, .125f))
-                val torsoTop = point(centerX, .245f)
-                val torsoBottom = point(centerX, .50f)
-                drawLine(outline, torsoTop, torsoBottom, bodyStroke * 2.55f, StrokeCap.Round)
-                drawLine(neutral, torsoTop, torsoBottom, bodyStroke * 2.25f, StrokeCap.Round)
-                listOf(
-                    point(centerX - .043f, .275f) to point(centerX - .075f, .49f),
-                    point(centerX + .043f, .275f) to point(centerX + .075f, .49f),
-                    point(centerX - .026f, .50f) to point(centerX - .035f, .875f),
-                    point(centerX + .026f, .50f) to point(centerX + .035f, .875f),
-                ).forEach { (start, end) ->
-                    drawLine(outline, start, end, bodyStroke + 5f, StrokeCap.Round)
-                    drawLine(neutral, start, end, bodyStroke, StrokeCap.Round)
-                }
-            }
-            baseFigure(.305f)
-            baseFigure(.700f)
-
-            fun areaColor(area: BodyArea): Color = choices[area]?.let { strength ->
-                Color(colors[area] ?: area.color).copy(alpha = if (strength == Strength.FULL) .90f else .58f)
-            } ?: neutral.copy(alpha = .88f)
-            fun oval(area: BodyArea, x: Float, y: Float, width: Float, height: Float) {
-                val topLeft = Offset(size.width * x, size.height * y)
-                val ovalSize = Size(size.width * width, size.height * height)
-                drawOval(areaColor(area), topLeft, ovalSize)
-                drawOval(outline.copy(alpha = .65f), topLeft, ovalSize, style = Stroke(width = 1.5f))
-            }
-            fun polygon(area: BodyArea, vararg points: Pair<Float, Float>) {
-                val scaled = points.map { Offset(size.width * it.first, size.height * it.second) }
-                fun midpoint(first: Offset, second: Offset) =
-                    Offset((first.x + second.x) / 2f, (first.y + second.y) / 2f)
-                val path = Path().apply {
-                    val start = midpoint(scaled.last(), scaled.first())
-                    moveTo(start.x, start.y)
-                    scaled.forEachIndexed { index, point ->
-                        val end = midpoint(point, scaled[(index + 1) % scaled.size])
-                        quadraticTo(point.x, point.y, end.x, end.y)
-                    }
-                    close()
-                }
-                drawPath(path, areaColor(area))
-                drawPath(path, outline.copy(alpha = .65f), style = Stroke(width = 1.5f))
-            }
-
-            oval(BodyArea.SHOULDERS, .218f, .205f, .053f, .075f)
-            oval(BodyArea.SHOULDERS, .339f, .205f, .053f, .075f)
-            polygon(BodyArea.CHEST, .263f to .238f, .305f to .220f, .347f to .238f, .343f to .315f, .305f to .333f, .267f to .315f)
-            polygon(BodyArea.CORE, .277f to .322f, .333f to .322f, .329f to .493f, .281f to .493f)
-            oval(BodyArea.BICEPS, .202f, .285f, .033f, .115f)
-            oval(BodyArea.BICEPS, .375f, .285f, .033f, .115f)
-            polygon(BodyArea.FOREARMS, .201f to .390f, .226f to .397f, .203f to .510f, .181f to .516f)
-            polygon(BodyArea.FOREARMS, .384f to .397f, .409f to .390f, .429f to .516f, .407f to .510f)
-            polygon(BodyArea.QUADS, .270f to .515f, .303f to .525f, .298f to .705f, .267f to .705f)
-            polygon(BodyArea.QUADS, .307f to .525f, .340f to .515f, .343f to .705f, .312f to .705f)
-            polygon(BodyArea.ADDUCTORS, .298f to .520f, .307f to .535f, .305f to .675f, .292f to .610f)
-            polygon(BodyArea.ADDUCTORS, .303f to .535f, .312f to .520f, .318f to .610f, .305f to .675f)
-            polygon(BodyArea.ABDUCTORS, .256f to .490f, .278f to .505f, .273f to .620f, .252f to .585f)
-            polygon(BodyArea.ABDUCTORS, .332f to .505f, .354f to .490f, .358f to .585f, .337f to .620f)
-            polygon(BodyArea.CALVES, .264f to .715f, .296f to .715f, .282f to .875f, .258f to .875f)
-            polygon(BodyArea.CALVES, .314f to .715f, .346f to .715f, .352f to .875f, .328f to .875f)
-
-            oval(BodyArea.SHOULDERS, .608f, .205f, .053f, .075f)
-            oval(BodyArea.SHOULDERS, .739f, .205f, .053f, .075f)
-            polygon(BodyArea.TRAPS, .685f to .180f, .715f to .180f, .742f to .270f, .700f to .315f, .658f to .270f)
-            polygon(BodyArea.UPPER_BACK, .654f to .270f, .700f to .305f, .746f to .270f, .739f to .405f, .700f to .440f, .661f to .405f)
-            polygon(BodyArea.LOWER_BACK, .674f to .400f, .726f to .400f, .728f to .490f, .672f to .490f)
-            oval(BodyArea.TRICEPS, .592f, .285f, .033f, .115f)
-            oval(BodyArea.TRICEPS, .775f, .285f, .033f, .115f)
-            polygon(BodyArea.FOREARMS, .591f to .390f, .616f to .397f, .597f to .510f, .575f to .516f)
-            polygon(BodyArea.FOREARMS, .784f to .397f, .809f to .390f, .825f to .516f, .803f to .510f)
-            oval(BodyArea.GLUTES, .650f, .475f, .100f, .105f)
-            polygon(BodyArea.HAMSTRINGS, .650f to .565f, .696f to .575f, .686f to .720f, .650f to .720f)
-            polygon(BodyArea.HAMSTRINGS, .704f to .575f, .750f to .565f, .750f to .720f, .714f to .720f)
-            polygon(BodyArea.CALVES, .650f to .720f, .686f to .720f, .673f to .875f, .647f to .875f)
-            polygon(BodyArea.CALVES, .714f to .720f, .750f to .720f, .753f to .875f, .727f to .875f)
-        }
+private fun BodyMapPicker(choices: Map<BodyArea, Strength?>, colors: Map<BodyArea, Long>, modifier: Modifier = Modifier) {
+    Column(modifier, horizontalAlignment = Alignment.CenterHorizontally) {
+        Image(painter = painterResource(R.drawable.muscles_front_back), contentDescription = "Front and back muscle reference", modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Fit)
+        Text("Front (left) · Back (right)", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
-
 @Composable
 private fun ColorPaletteDialog(area: BodyArea, selected: Long, onDismiss: () -> Unit, onSelect: (Long) -> Unit) {
     val palette = listOf(

@@ -92,6 +92,7 @@ fun OverviewScreen(
     onEditPlanNotes: () -> Unit,
     areaFrequency: Map<BodyArea, Double>,
     onQuickSet: (MachineSummary, List<Int>) -> Unit,
+    onDeleteCurrentExerciseSets: (MachineSummary) -> Unit,
     onMetricChange: (MachineSummary, Double) -> Unit,
     onMetricChangeForSession: (MachineSummary, Double) -> Unit,
     progressionSettings: ProgressionSettings,
@@ -99,6 +100,7 @@ fun OverviewScreen(
     onReorder: (List<Long>) -> Unit,
     onSetPinned: (MachineSummary, Boolean) -> Unit,
     onMovePinned: (MachineSummary, Int) -> Unit,
+    onHide: (MachineSummary) -> Unit,
 ) {
     val zone = ZoneId.systemDefault()
     var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
@@ -170,7 +172,7 @@ fun OverviewScreen(
                     val reorderable = orderingMode == ExerciseOrderingMode.FIXED ||
                         orderingMode == ExerciseOrderingMode.MIXED && summary.machine.pinned
                     MachineCard(
-                        summary, lastExerciseInUnit, trainingUnitCutoff, areaFrequency, onMachine, onQuickSet,
+                        summary, lastExerciseInUnit, trainingUnitCutoff, areaFrequency, onMachine, onQuickSet, onDeleteCurrentExerciseSets,
                         onMetricChange, onMetricChangeForSession, progressionSettings,
                         modifier = Modifier.pointerInput(id) { detectTapGestures(onLongPress = { longPressed = summary }) },
                         isDragging = false,
@@ -215,7 +217,7 @@ fun OverviewScreen(
                     FilledTonalButton(onClick = { onMovePinned(summary, 1); longPressed = null }) { Text("Move down") }
                 }
             } },
-            confirmButton = { Button(onClick = { onSetPinned(summary, !pinned); longPressed = null }) { Text(if (pinned) "Unfix exercise" else "Fix exercise") } },
+            confirmButton = { Row { TextButton(onClick = { onHide(summary); longPressed = null }) { Text("Hide exercise", color = MaterialTheme.colorScheme.error) }; Button(onClick = { onSetPinned(summary, !pinned); longPressed = null }) { Text(if (pinned) "Unfix exercise" else "Fix exercise") } } },
             dismissButton = { TextButton(onClick = { longPressed = null }) { Text("Cancel") } },
         )
     }
@@ -350,6 +352,7 @@ private fun MachineCard(
     areaFrequency: Map<BodyArea, Double>,
     onMachine: (Long) -> Unit,
     onQuickSet: (MachineSummary, List<Int>) -> Unit,
+    onDeleteCurrentExerciseSets: (MachineSummary) -> Unit,
     onMetricChange: (MachineSummary, Double) -> Unit,
     onMetricChangeForSession: (MachineSummary, Double) -> Unit,
     progressionSettings: ProgressionSettings,
@@ -455,6 +458,7 @@ private fun MachineCard(
                 isChange = isChangingTrainingUnit,
                 onDismiss = { quickReps = false },
                 onAdd = { onQuickSet(summary, listOf(it)); quickReps = false },
+                onDelete = if (isChangingTrainingUnit) { { onDeleteCurrentExerciseSets(summary); quickReps = false } } else null,
             )
         } else {
             QuickRepDialog(
@@ -463,6 +467,7 @@ private fun MachineCard(
                 isChange = isChangingTrainingUnit,
                 onDismiss = { quickReps = false },
                 onAdd = { onQuickSet(summary, it); quickReps = false },
+                onDelete = if (isChangingTrainingUnit) { { onDeleteCurrentExerciseSets(summary); quickReps = false } } else null,
             )
         }
     }
@@ -597,7 +602,7 @@ fun groupSetBatches(sets: List<SetRecord>): List<List<SetRecord>> {
 }
 
 @Composable
-fun QuickTrainingDialog(initialMinutes: Int, isChange: Boolean = false, onDismiss: () -> Unit, onAdd: (Int) -> Unit) {
+fun QuickTrainingDialog(initialMinutes: Int, isChange: Boolean = false, onDismiss: () -> Unit, onAdd: (Int) -> Unit, onDelete: (() -> Unit)? = null) {
     var value by remember(initialMinutes) { mutableStateOf(initialMinutes.coerceAtLeast(0).toString()) }
     val level = value.toIntOrNull()
     AlertDialog(
@@ -618,7 +623,7 @@ fun QuickTrainingDialog(initialMinutes: Int, isChange: Boolean = false, onDismis
             }
         },
         confirmButton = { Button(onClick = { level?.let(onAdd) }, enabled = level != null && level > 0) { Text(if (isChange) "Change Training" else "Save Training") } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+        dismissButton = { Row { if (onDelete != null) TextButton(onClick = onDelete) { Text("Delete sets", color = MaterialTheme.colorScheme.error) }; TextButton(onClick = onDismiss) { Text("Cancel") } } },
     )
 }
 
@@ -667,6 +672,7 @@ fun QuickRepDialog(
     isChange: Boolean = false,
     onDismiss: () -> Unit,
     onAdd: (List<Int>) -> Unit,
+    onDelete: (() -> Unit)? = null,
 ) {
     val reps = remember(initialReps) { mutableStateListOf<Int>().apply { addAll((initialReps + List(5) { 0 }).take(5)) } }
     AlertDialog(
@@ -698,7 +704,7 @@ fun QuickRepDialog(
             }
         },
         confirmButton = { Button(onClick = { onAdd(reps.toList()) }, enabled = isChange || reps.any { it > 0 }) { Text(if (isChange) "Change Sets" else "Save Sets") } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+        dismissButton = { Row { if (onDelete != null) TextButton(onClick = onDelete) { Text("Delete sets", color = MaterialTheme.colorScheme.error) }; TextButton(onClick = onDismiss) { Text("Cancel") } } },
     )
 }
 
