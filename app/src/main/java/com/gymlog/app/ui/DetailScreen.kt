@@ -269,80 +269,74 @@ private fun CompactChoice(selected: Boolean, onClick: () -> Unit, label: String)
 private fun SessionMetricsChart(sets: List<SetRecord>, trailingAverage: Int, directMetric: Boolean) {
     val allSessions = groupSetBatches(sets).asReversed()
     val sessions = allSessions.takeLast(24)
-    if (sessions.isEmpty()) {
-        Text("No training data in this window.", color = MaterialTheme.colorScheme.onSurfaceVariant)
-        return
-    }
+    if (sessions.isEmpty()) { Text("No training data in this window.", color = MaterialTheme.colorScheme.onSurfaceVariant); return }
     val weight = movingAverage(sessions.map { it.first().weight }, trailingAverage)
     val volume = movingAverage(sessions.map { session -> session.sumOf { it.weight * it.reps } }, trailingAverage)
-    val reps = movingAverage(sessions.map { session -> session.sumOf { it.reps }.toDouble() }, trailingAverage)
+    val repsPerSet = movingAverage(sessions.map { session -> session.map { it.reps }.average() }, trailingAverage)
     val minutes = movingAverage(sessions.map { session -> session.sumOf { it.weight } }, trailingAverage)
-    val weightColor = MaterialTheme.colorScheme.primary
-    val volumeColor = Color(0xFF00BCD4)
-    val repsColor = Color(0xFFFFA726)
-    val grid = MaterialTheme.colorScheme.outlineVariant
-    val series = if (directMetric) listOf(Triple("Minutes", minutes, weightColor)) else listOf(
-        Triple("Weight (kg)", weight, weightColor),
-        Triple("Volume (kg × reps)", volume, volumeColor),
-        Triple("Reps", reps, repsColor),
-    )
     Text("Training Session Graph", style = MaterialTheme.typography.labelLarge)
-    series.forEach { (label, values, color) ->
-        val min = values.minOrNull() ?: 0.0
-        val max = values.maxOrNull() ?: 0.0
-        val change = fittedSeries(values).second
-        Text(
-            "$label: ${formatAxisValue(min)}–${formatAxisValue(max)} · fit ${formatSignedAxisValue(change)} / selected interval",
-            color = color,
-            style = MaterialTheme.typography.labelSmall,
-        )
+    if (directMetric) AxisMetricPlot("Minutes", minutes, MaterialTheme.colorScheme.primary)
+    else {
+        AxisMetricPlot("Weight (kg)", weight, MaterialTheme.colorScheme.primary)
+        AxisMetricPlot("Reps / set", repsPerSet, Color(0xFFFFA726))
+        VolumePerTrainingDayPlot(volume, sessions)
     }
+    if (allSessions.size > 24) Text("Showing the 24 most recent training sessions", style = MaterialTheme.typography.bodySmall)
+}
+
+@Composable
+private fun AxisMetricPlot(label: String, values: List<Double>, color: Color) {
+    val min = values.minOrNull() ?: 0.0
+    val max = values.maxOrNull() ?: 0.0
+    val grid = MaterialTheme.colorScheme.outlineVariant.copy(alpha = .72f)
+    Text("$label: ${formatAxisValue(min)}–${formatAxisValue(max)}", color = color, style = MaterialTheme.typography.labelSmall)
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
+        Column(Modifier.width(50.dp).height(112.dp), verticalArrangement = Arrangement.SpaceBetween, horizontalAlignment = Alignment.End) {
+            Text(formatAxisValue(max), style = MaterialTheme.typography.labelSmall)
+            Text(formatAxisValue((min + max) / 2), style = MaterialTheme.typography.labelSmall)
+            Text(formatAxisValue(min), style = MaterialTheme.typography.labelSmall)
+        }
+        BoxWithConstraints(Modifier.weight(1f)) {
+            val graphWidth = maxOf(maxWidth, (values.size * 28).dp)
+            Box(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
+                Canvas(Modifier.width(graphWidth).height(112.dp).padding(vertical = 5.dp)) {
+                    val range = (max - min).takeIf { it > 0 } ?: 1.0
+                    fun y(value: Double) = size.height - 4f - ((value - min) / range).toFloat() * (size.height - 8f)
+                    repeat(3) { index ->
+                        val lineY = index * size.height / 2f
+                        drawLine(grid, Offset(0f, lineY), Offset(size.width, lineY), strokeWidth = 1.2f)
+                    }
+                    val points = values.mapIndexed { index, value -> Offset(if (values.size == 1) size.width / 2f else index * size.width / (values.size - 1), y(value)) }
+                    points.zipWithNext().forEach { (a, b) -> drawLine(color, a, b, strokeWidth = 4f, cap = StrokeCap.Round) }
+                    points.forEach { drawCircle(color, 4.5f, it) }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun VolumePerTrainingDayPlot(values: List<Double>, sessions: List<List<SetRecord>>) {
+    val max = values.maxOrNull()?.takeIf { it > 0.0 } ?: 1.0
+    Text("Volume / training day", color = Color(0xFF00BCD4), style = MaterialTheme.typography.labelSmall)
     BoxWithConstraints(Modifier.fillMaxWidth()) {
-    val graphWidth = maxOf(maxWidth, (sessions.size * 28).dp)
-    Box(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
-    Canvas(Modifier.width(graphWidth).height(150.dp).padding(vertical = 6.dp)) {
-        repeat(3) { index ->
-            val y = index * size.height / 2f
-            drawLine(grid, Offset(0f, y), Offset(size.width, y), strokeWidth = 1f)
-        }
-        repeat(5) { index ->
-            val x = index * size.width / 4f
-            drawLine(grid, Offset(x, 0f), Offset(x, size.height), strokeWidth = 1f)
-        }
-        series.forEach { (_, values, color) ->
-            val fit = fittedSeries(values).first
-            val combined = values + fit
-            val min = combined.minOrNull() ?: 0.0
-            val max = combined.maxOrNull() ?: 0.0
-            val range = (max - min).takeIf { it > 0 } ?: 1.0
-            val points = values.mapIndexed { index, value ->
-                Offset(
-                    x = if (values.size == 1) size.width / 2f else index * size.width / (values.size - 1),
-                    y = size.height - 5f - ((value - min) / range).toFloat() * (size.height - 10f),
-                )
-            }
-            points.zipWithNext().forEach { (start, end) -> drawLine(color, start, end, strokeWidth = 5f, cap = StrokeCap.Round) }
-            points.forEach { drawCircle(color, radius = 5f, center = it) }
-            val fitPoints = fit.mapIndexed { index, value ->
-                Offset(
-                    x = if (fit.size == 1) size.width / 2f else index * size.width / (fit.size - 1),
-                    y = size.height - 5f - ((value - min) / range).toFloat() * (size.height - 10f),
-                )
-            }
-            fitPoints.zipWithNext().forEach { (start, end) ->
-                drawLine(color.copy(alpha = 0.55f), start, end, strokeWidth = 3f, cap = StrokeCap.Round)
+        val graphWidth = maxOf(maxWidth, (values.size * 28).dp)
+        Box(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
+            Canvas(Modifier.width(graphWidth).height(132.dp).padding(vertical = 5.dp)) {
+                val barWidth = (size.width / values.size.coerceAtLeast(1) * .55f).coerceAtMost(22f)
+                values.forEachIndexed { index, value ->
+                    val x = if (values.size == 1) size.width / 2f else index * size.width / (values.size - 1)
+                    val height = (value / max).toFloat() * (size.height - 8f)
+                    drawRoundRect(Color(0xFF00BCD4), Offset(x - barWidth / 2f, size.height - 4f - height), Size(barWidth, height.coerceAtLeast(2f)), androidx.compose.ui.geometry.CornerRadius(barWidth / 2f, barWidth / 2f))
+                }
             }
         }
-    }
-    }
     }
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
         Text(formatTimestamp(sessions.first().minOf { it.performedAt }), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         Text(formatTimestamp(sessions.last().maxOf { it.performedAt }), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
-    if (allSessions.size > 24) Text("Showing the 24 most recent training sessions", style = MaterialTheme.typography.bodySmall)
 }
-
 private fun formatAxisValue(value: Double): String = if (value % 1.0 == 0.0) value.toInt().toString()
 else String.format(Locale.US, "%.1f", value)
 
