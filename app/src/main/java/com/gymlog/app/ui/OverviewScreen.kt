@@ -4,6 +4,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -96,6 +97,8 @@ fun OverviewScreen(
     progressionSettings: ProgressionSettings,
     orderingMode: ExerciseOrderingMode,
     onReorder: (List<Long>) -> Unit,
+    onSetPinned: (MachineSummary, Boolean) -> Unit,
+    onMovePinned: (MachineSummary, Int) -> Unit,
 ) {
     val zone = ZoneId.systemDefault()
     var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
@@ -122,6 +125,7 @@ fun OverviewScreen(
     var draggedId by remember { mutableStateOf<Long?>(null) }
     var dragOffset by remember { mutableFloatStateOf(0f) }
     var reorderMode by remember { mutableStateOf(false) }
+    var longPressed by remember { mutableStateOf<MachineSummary?>(null) }
     Box(modifier.fillMaxSize()) {
         Column(Modifier.fillMaxSize().padding(bottom = 64.dp)) {
             if (reorderMode) {
@@ -168,54 +172,9 @@ fun OverviewScreen(
                     MachineCard(
                         summary, lastExerciseInUnit, trainingUnitCutoff, areaFrequency, onMachine, onQuickSet,
                         onMetricChange, onMetricChangeForSession, progressionSettings,
-                        modifier = Modifier.pointerInput(id, reorderMode, orderedMachines.map { it.machine.id }) {
-                            if (!reorderable) return@pointerInput
-                            fun moveBy(amountY: Float) {
-                                    dragOffset += amountY
-                                    val currentInfo = listState.layoutInfo.visibleItemsInfo.firstOrNull { it.key == id } ?: return
-                                    val draggedCenter = currentInfo.offset + currentInfo.size / 2f + dragOffset
-                                    val targetId = listState.layoutInfo.visibleItemsInfo
-                                        .filter { info ->
-                                            val target = info.key as? Long
-                                            target != null && (
-                                                orderingMode == ExerciseOrderingMode.FIXED ||
-                                                    orderedMachines.firstOrNull { it.machine.id == target }?.machine?.pinned == true
-                                                )
-                                        }
-                                        .minByOrNull { abs((it.offset + it.size / 2f) - draggedCenter) }
-                                        ?.key as? Long
-                                    val from = orderedMachines.indexOfFirst { it.machine.id == id }
-                                    val to = orderedMachines.indexOfFirst { it.machine.id == targetId }
-                                    if (from >= 0 && to >= 0 && from != to) {
-                                        orderedMachines.add(to, orderedMachines.removeAt(from))
-                                        dragOffset = 0f
-                                    }
-                            }
-                            val start: (androidx.compose.ui.geometry.Offset) -> Unit = {
-                                reorderMode = true
-                                draggedId = id
-                                dragOffset = 0f
-                            }
-                            val cancel = { draggedId = null; dragOffset = 0f }
-                            val end = { draggedId = null; dragOffset = 0f }
-                            if (reorderMode) {
-                                detectDragGestures(
-                                    onDragStart = start,
-                                    onDragCancel = cancel,
-                                    onDragEnd = end,
-                                    onDrag = { change, amount -> change.consume(); moveBy(amount.y) },
-                                )
-                            } else {
-                                detectDragGesturesAfterLongPress(
-                                    onDragStart = start,
-                                    onDragCancel = cancel,
-                                    onDragEnd = end,
-                                    onDrag = { change, amount -> change.consume(); moveBy(amount.y) },
-                                )
-                            }
-                        },
-                        isDragging = draggedId == id,
-                        isReordering = reorderMode,
+                        modifier = Modifier.pointerInput(id) { detectTapGestures(onLongPress = { longPressed = summary }) },
+                        isDragging = false,
+                        isReordering = false,
                     )
                 }
             }
@@ -242,8 +201,25 @@ fun OverviewScreen(
                 }
         }
     }
-}
 
+
+    longPressed?.let { summary ->
+        val pinned = summary.machine.pinned
+        AlertDialog(
+            onDismissRequest = { longPressed = null },
+            title = { Text(summary.machine.name) },
+            text = { Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(if (pinned) "This exercise is fixed in the manual order." else "Fix this exercise to include it in the manual fixed order.")
+                if (pinned) Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    FilledTonalButton(onClick = { onMovePinned(summary, -1); longPressed = null }) { Text("Move up") }
+                    FilledTonalButton(onClick = { onMovePinned(summary, 1); longPressed = null }) { Text("Move down") }
+                }
+            } },
+            confirmButton = { Button(onClick = { onSetPinned(summary, !pinned); longPressed = null }) { Text(if (pinned) "Unfix exercise" else "Fix exercise") } },
+            dismissButton = { TextButton(onClick = { longPressed = null }) { Text("Cancel") } },
+        )
+    }
+}
 @Composable
 private fun OverviewButtonLabel(text: String) {
     Text(text, maxLines = 1, softWrap = false, style = MaterialTheme.typography.labelMedium)

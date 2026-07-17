@@ -174,8 +174,8 @@ fun BodyOverviewScreen(
             Modifier.align(Alignment.BottomCenter).fillMaxWidth().background(MaterialTheme.colorScheme.surface).padding(8.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            FilledTonalButton(onClick = { showBodyMenu = true }, modifier = Modifier.weight(1f)) { Text("Menu") }
             FilledTonalButton(onClick = onGym, modifier = Modifier.weight(1f)) { Text("Gym") }
+            FilledTonalButton(onClick = { showBodyMenu = true }, modifier = Modifier.weight(1f)) { Text("Menu") }
         }
     }
     if (showBodyMenu) AlertDialog(

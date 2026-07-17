@@ -251,6 +251,8 @@ fun GymLogApp(
                     repository.reorderMachines(orderedIds, uiState.exerciseOrderingMode == ExerciseOrderingMode.MIXED)
                     refresh()
                 },
+                onSetPinned = { machine, pinned -> repository.setMachinePinned(machine.machine.id, pinned); refresh() },
+                onMovePinned = { machine, direction -> repository.movePinnedMachine(machine.machine.id, direction); refresh() },
             )
             Screen.BODY -> BodyOverviewScreen(
                 snapshot = bodyData,

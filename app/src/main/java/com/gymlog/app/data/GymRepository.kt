@@ -569,6 +569,21 @@ class GymRepository(context: Context) {
         }
     }
 
+    fun movePinnedMachine(machineId: Long, direction: Int) {
+        val planId = activeTrainingPlanId()
+        val database = db.writableDatabase
+        val ordered = loadMachinesForPlan(planId).filter { it.machine.pinned }.map { it.machine.id }.toMutableList()
+        val from = ordered.indexOf(machineId)
+        val to = from + direction
+        if (from < 0 || to !in ordered.indices) return
+        val moved = ordered.removeAt(from)
+        ordered.add(to, moved)
+        database.transaction {
+            ordered.forEachIndexed { index, id ->
+                database.update("machines", ContentValues().apply { put("sort_order", index) }, "id=?", arrayOf(id.toString()))
+            }
+        }
+    }
     fun reorderMachines(machineIds: List<Long>, pinnedOnly: Boolean) {
         val currentIds = loadMachines().map { it.machine.id }
         if (machineIds.size != currentIds.size || machineIds.toSet() != currentIds.toSet()) return
