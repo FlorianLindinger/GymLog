@@ -24,6 +24,7 @@ class GymRepository(context: Context) {
                 .remove("active_training_plan")
                 .remove("progress_stale_weeks")
                 .remove("progress_stale_trainings")
+                .remove("progress_volume_minimum_percent")
                 .commit(),
         ) { "GymLog settings could not be reset" }
         db = GymDatabase(appContext)
@@ -61,6 +62,7 @@ class GymRepository(context: Context) {
     fun loadProgressionSettings(): ProgressionSettings = ProgressionSettings(
         staleWeeks = preferences.getInt("progress_stale_weeks", 4),
         staleTrainings = preferences.getInt("progress_stale_trainings", 5),
+        volumeMinimumIncreasePercent = preferences.getInt("progress_volume_minimum_percent", 5),
     )
 
     fun exerciseOrderingMode(): ExerciseOrderingMode = runCatching {
@@ -75,6 +77,7 @@ class GymRepository(context: Context) {
         preferences.edit()
             .putInt("progress_stale_weeks", settings.staleWeeks.coerceAtLeast(0))
             .putInt("progress_stale_trainings", settings.staleTrainings.coerceAtLeast(0))
+            .putInt("progress_volume_minimum_percent", settings.volumeMinimumIncreasePercent.coerceAtLeast(0))
             .apply()
     }
 
@@ -610,6 +613,7 @@ class GymRepository(context: Context) {
             loadProgressionSettings().let {
                 put("progressStaleWeeks", it.staleWeeks)
                 put("progressStaleTrainings", it.staleTrainings)
+                put("progressVolumeMinimumPercent", it.volumeMinimumIncreasePercent)
             }
             put("areaColors", JSONObject().apply {
                 BodyArea.entries.forEach { area -> put(area.name, areaColor(db.readableDatabase, area)) }
@@ -683,6 +687,7 @@ class GymRepository(context: Context) {
             saveProgressionSettings(ProgressionSettings(
                 staleWeeks = settings.optInt("progressStaleWeeks", 4),
                 staleTrainings = settings.optInt("progressStaleTrainings", 5),
+                volumeMinimumIncreasePercent = settings.optInt("progressVolumeMinimumPercent", 5),
             ))
         }
         val database = db.writableDatabase

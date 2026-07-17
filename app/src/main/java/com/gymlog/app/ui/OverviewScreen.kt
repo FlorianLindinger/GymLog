@@ -305,67 +305,43 @@ private fun ProgressionSettingsCard(settings: ProgressionSettings, onEdit: () ->
 private fun settingSummary(value: Int, unit: String): String = if (value <= 0) "$unit off" else "$value $unit"
 
 @Composable
-fun ProgressionSettingsDialog(
-    current: ProgressionSettings,
-    onDismiss: () -> Unit,
-    onSave: (ProgressionSettings) -> Unit,
-) {
+fun ProgressionSettingsDialog(current: ProgressionSettings, onDismiss: () -> Unit, onSave: (ProgressionSettings) -> Unit) {
     var weeks by remember(current) { mutableStateOf(current.staleWeeks.toString()) }
     var trainings by remember(current) { mutableStateOf(current.staleTrainings.toString()) }
+    var volumePercent by remember(current) { mutableStateOf(current.volumeMinimumIncreasePercent.toString()) }
     val parsedWeeks = weeks.toIntOrNull()
     val parsedTrainings = trainings.toIntOrNull()
+    val parsedVolumePercent = volumePercent.toIntOrNull()
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Progress Warnings") },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text("Warn on weight exercises when either limit is reached without an increase. Set a limit to 0 to disable it.")
-                OutlinedTextField(
-                    value = weeks,
-                    onValueChange = { weeks = it.filter(Char::isDigit) },
-                    label = { Text("Weeks Without Increase") },
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                    singleLine = true,
-                )
-                OutlinedTextField(
-                    value = trainings,
-                    onValueChange = { trainings = it.filter(Char::isDigit) },
-                    label = { Text("Trainings Without Increase") },
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                    singleLine = true,
-                )
-            }
-        },
-        confirmButton = {
-            Button(
-                onClick = { onSave(ProgressionSettings(parsedWeeks ?: 0, parsedTrainings ?: 0)) },
-                enabled = parsedWeeks != null && parsedTrainings != null,
-            ) { Text("Save") }
-        },
+        text = { Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Text("Volume checks the latest five training sessions. Set any limit to 0 to disable it.")
+            OutlinedTextField(weeks, { weeks = it.filter(Char::isDigit) }, label = { Text("Weeks Without Weight Increase") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), singleLine = true)
+            OutlinedTextField(trainings, { trainings = it.filter(Char::isDigit) }, label = { Text("Trainings Without Weight Increase") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), singleLine = true)
+            OutlinedTextField(volumePercent, { volumePercent = it.filter(Char::isDigit) }, label = { Text("Minimum Volume Trend Increase (%)") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), singleLine = true)
+        } },
+        confirmButton = { Button(onClick = { onSave(ProgressionSettings(parsedWeeks ?: 0, parsedTrainings ?: 0, parsedVolumePercent ?: 0)) }, enabled = parsedWeeks != null && parsedTrainings != null && parsedVolumePercent != null) { Text("Save") } },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
     )
 }
-
 private fun progressionWarning(summary: MachineSummary, settings: ProgressionSettings): String? {
     if (summary.machine.trackingMode != "WEIGHT" || summary.recentSets.isEmpty()) return null
-    val reference = summary.weightIncreases().maxOfOrNull { it.changedAt }
-        ?: summary.weightChanges.minOfOrNull { it.changedAt }
-        ?: return null
-    val weeksWithoutIncrease = ((System.currentTimeMillis() - reference).coerceAtLeast(0L) / 604_800_000L).toInt()
+    val reference = summary.weightIncreases().maxOfOrNull { it.changedAt } ?: summary.weightChanges.minOfOrNull { it.changedAt }
+    val weeksWithoutIncrease = reference?.let { ((System.currentTimeMillis() - it).coerceAtLeast(0L) / 604_800_000L).toInt() } ?: 0
     val zone = ZoneId.systemDefault()
-    val trainingsWithoutIncrease = summary.recentSets
-        .asSequence()
-        .filter { it.performedAt > reference }
-        .map { Instant.ofEpochMilli(it.performedAt).atZone(zone).toLocalDate() }
-        .distinct()
-        .count()
+    val trainingsWithoutIncrease = reference?.let { threshold -> summary.recentSets.filter { it.performedAt > threshold }.map { Instant.ofEpochMilli(it.performedAt).atZone(zone).toLocalDate() }.distinct().count() } ?: 0
     val reasons = buildList {
-        if (settings.staleWeeks > 0 && weeksWithoutIncrease >= settings.staleWeeks) add("$weeksWithoutIncrease weeks")
-        if (settings.staleTrainings > 0 && trainingsWithoutIncrease >= settings.staleTrainings) add("$trainingsWithoutIncrease trainings")
+        if (reference != null && settings.staleWeeks > 0 && weeksWithoutIncrease >= settings.staleWeeks) add("$weeksWithoutIncrease weeks without weight increase")
+        if (reference != null && settings.staleTrainings > 0 && trainingsWithoutIncrease >= settings.staleTrainings) add("$trainingsWithoutIncrease trainings without weight increase")
+        val volumes = groupSetBatches(summary.recentSets).asReversed().takeLast(5).map { batch -> batch.sumOf { it.weight * it.reps } }
+        if (settings.volumeMinimumIncreasePercent > 0 && volumes.size >= 3 && volumes.first() > 0.0) {
+            val growth = (volumes.last() - volumes.first()) / volumes.first() * 100.0
+            if (growth < settings.volumeMinimumIncreasePercent) add("volume trend ${formatNumber(growth)}% (needs +${settings.volumeMinimumIncreasePercent}%)")
+        }
     }
-    return reasons.takeIf { it.isNotEmpty() }?.joinToString(" · ", prefix = "No weight increase for ")
+    return reasons.takeIf { it.isNotEmpty() }?.joinToString(" · ", prefix = "Progress warning: ")
 }
-
 @Composable
 private fun MachineCard(
     summary: MachineSummary,

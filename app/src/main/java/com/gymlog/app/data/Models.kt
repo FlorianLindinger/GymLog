@@ -56,6 +56,7 @@ data class WeightChange(val weight: Double, val changedAt: Long)
 data class ProgressionSettings(
     val staleWeeks: Int = 4,
     val staleTrainings: Int = 5,
+    val volumeMinimumIncreasePercent: Int = 5,
 )
 
 enum class ExerciseOrderingMode {
