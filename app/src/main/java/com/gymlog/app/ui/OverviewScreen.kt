@@ -414,6 +414,7 @@ private fun MachineCard(
     val clash = if (!trainedInUnit && lastExerciseInUnit != null) strongestClash(summary, lastExerciseInUnit) else null
     val clashAreas = if (!trainedInUnit && lastExerciseInUnit != null) clashingAreas(summary, lastExerciseInUnit) else emptySet()
     val outlineColor = when {
+        isLastDone -> Color(0xFF1976D2)
         clash != null && clash >= 1.0 -> Color(0xFFE53935)
         clash != null && clash >= .5 -> Color(0xFFFB8C00)
         clash != null -> Color(0xFFFBC02D)
@@ -422,7 +423,11 @@ private fun MachineCard(
     Card(
         modifier = modifier.fillMaxWidth().clickable(enabled = !isReordering) { onMachine(summary.machine.id) },
         elevation = CardDefaults.cardElevation(defaultElevation = if (isDragging) 10.dp else 1.dp),
-        border = if (trainedInUnit) null else BorderStroke(2.5.dp, outlineColor),
+        border = when {
+            isLastDone -> BorderStroke(3.dp, outlineColor)
+            trainedInUnit -> null
+            else -> BorderStroke(2.5.dp, outlineColor)
+        },
     ) {
         Column(Modifier.padding(horizontal = 8.dp, vertical = 3.dp), verticalArrangement = Arrangement.spacedBy(0.dp)) {
             if (summary.areas.isNotEmpty()) {
@@ -566,7 +571,9 @@ private fun rankOverviewMachines(
     val currentFirst = listOfNotNull(current)
     return when (mode) {
         ExerciseOrderingMode.AUTOMATIC -> automatic
-        ExerciseOrderingMode.FIXED -> machines.sortedBy { it.machine.sortOrder }
+        ExerciseOrderingMode.FIXED -> currentFirst + machines
+            .filter { it.machine.id != currentId }
+            .sortedBy { it.machine.sortOrder }
         ExerciseOrderingMode.MIXED -> currentFirst +
             machines.filter { it.machine.pinned && it.machine.id != currentId }.sortedBy { it.machine.sortOrder } +
             automatic.filter { !it.machine.pinned && it.machine.id != currentId }

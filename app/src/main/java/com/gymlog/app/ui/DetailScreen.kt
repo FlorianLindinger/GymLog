@@ -286,6 +286,7 @@ private fun SessionMetricsChart(sets: List<SetRecord>, trailingAverage: Int, dir
 
 @Composable
 private fun AxisMetricPlot(label: String, values: List<Double>, color: Color) {
+    val fit = fittedSeries(values).first
     val min = values.minOrNull() ?: 0.0
     val max = values.maxOrNull() ?: 0.0
     val grid = MaterialTheme.colorScheme.outlineVariant.copy(alpha = .72f)
@@ -309,6 +310,8 @@ private fun AxisMetricPlot(label: String, values: List<Double>, color: Color) {
                     val points = values.mapIndexed { index, value -> Offset(if (values.size == 1) size.width / 2f else index * size.width / (values.size - 1), y(value)) }
                     points.zipWithNext().forEach { (a, b) -> drawLine(color, a, b, strokeWidth = 4f, cap = StrokeCap.Round) }
                     points.forEach { drawCircle(color, 4.5f, it) }
+                    val trendPoints = fit.mapIndexed { index, value -> Offset(if (fit.size == 1) size.width / 2f else index * size.width / (fit.size - 1), y(value)) }
+                    trendPoints.zipWithNext().forEach { (a, b) -> drawLine(color.copy(alpha = .58f), a, b, strokeWidth = 2.5f, cap = StrokeCap.Round) }
                 }
             }
         }
@@ -317,7 +320,8 @@ private fun AxisMetricPlot(label: String, values: List<Double>, color: Color) {
 
 @Composable
 private fun VolumePerTrainingDayPlot(values: List<Double>, sessions: List<List<SetRecord>>) {
-    val max = values.maxOrNull()?.takeIf { it > 0.0 } ?: 1.0
+    val fit = fittedSeries(values).first
+    val max = (values + fit).maxOrNull()?.takeIf { it > 0.0 } ?: 1.0
     Text("Volume / training day", color = Color(0xFF00BCD4), style = MaterialTheme.typography.labelSmall)
     BoxWithConstraints(Modifier.fillMaxWidth()) {
         val graphWidth = maxOf(maxWidth, (values.size * 28).dp)
@@ -329,6 +333,10 @@ private fun VolumePerTrainingDayPlot(values: List<Double>, sessions: List<List<S
                     val height = (value / max).toFloat() * (size.height - 8f)
                     drawRoundRect(Color(0xFF00BCD4), Offset(x - barWidth / 2f, size.height - 4f - height), Size(barWidth, height.coerceAtLeast(2f)), androidx.compose.ui.geometry.CornerRadius(barWidth / 2f, barWidth / 2f))
                 }
+                val trendPoints = fit.mapIndexed { index, value ->
+                    Offset(if (fit.size == 1) size.width / 2f else index * size.width / (fit.size - 1), size.height - 4f - (value / max).toFloat() * (size.height - 8f))
+                }
+                trendPoints.zipWithNext().forEach { (a, b) -> drawLine(Color(0xFF007C91), a, b, strokeWidth = 3f, cap = StrokeCap.Round) }
             }
         }
     }
