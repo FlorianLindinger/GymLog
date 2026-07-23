@@ -453,6 +453,9 @@ private fun formatBodyEta(days: Double): String = when {
 
 private fun bodyCutoff(window: String): Long? {
     val days = when (window) {
+        "1W" -> 7L
+        "2W" -> 14L
+        "3W" -> 21L
         "1M" -> 30L
         "3M" -> 90L
         "6M" -> 182L

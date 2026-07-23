@@ -92,7 +92,6 @@ fun DetailScreen(
     var expandedBatch by remember { mutableStateOf<Long?>(null) }
     val machine = summary.machine
     val currentUnitSets = currentTrainingUnitSets(summary)
-    val highest = summary.weightChanges.maxOfOrNull { it.weight } ?: machine.currentWeight
     val first = summary.weightChanges.lastOrNull()?.weight ?: machine.currentWeight
 
     Column(
@@ -140,7 +139,6 @@ fun DetailScreen(
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                     Stat("Started", formatMetric(first, machine.trackingMode))
                     Stat("Current", formatMetric(machine.currentWeight, machine.trackingMode))
-                    Stat("Highest", formatMetric(highest, machine.trackingMode))
                 }
                 Text("Chart Window", style = MaterialTheme.typography.labelMedium)
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -149,16 +147,6 @@ fun DetailScreen(
                             selected = machine.chartWindow == window,
                             onClick = { repository.setChartWindow(machine.id, window); onChanged() },
                             label = if (window == "ALL") "All" else window,
-                        )
-                    }
-                }
-                Text("Trailing Average", style = MaterialTheme.typography.labelMedium)
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    listOf(0 to "Off", 3 to "3", 5 to "5", 10 to "10").forEach { (amount, label) ->
-                        CompactChoice(
-                            selected = machine.trailingAverage == amount,
-                            onClick = { repository.setTrailingAverage(machine.id, amount); onChanged() },
-                            label = label,
                         )
                     }
                 }
