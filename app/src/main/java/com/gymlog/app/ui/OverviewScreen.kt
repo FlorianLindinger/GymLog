@@ -233,8 +233,16 @@ private fun TrainingDurationCard(machines: List<MachineSummary>, activePlanName:
     val last = allSets.maxOfOrNull { it.performedAt }
     val sessionSets = last?.let { latest -> allSets.filter { it.performedAt >= latest - TRAINING_UNIT_MILLIS } }.orEmpty()
     val first = sessionSets.minOfOrNull { it.performedAt }
+    val firstSet = sessionSets.minByOrNull { it.performedAt }
+    val firstMode = firstSet?.let { set -> machines.firstOrNull { it.machine.id == set.machineId }?.machine?.trackingMode }
+    val estimatedLeadMillis = when {
+        firstSet == null -> 0L
+        isDirectMetric(firstMode ?: "") -> (firstSet.weight * 60_000L).toLong()
+        else -> sessionSets.size * 3L * 60_000L
+    }
+    val estimatedStart = first?.minus(estimatedLeadMillis)
     val isActive = last != null && now - last < 10L * 60L * 1000L
-    val durationMillis = if (first == null || last == null) 0L else ((if (isActive) now else last) - first).coerceAtLeast(0L)
+    val durationMillis = if (estimatedStart == null || last == null) 0L else ((if (isActive) now else last) - estimatedStart).coerceAtLeast(0L)
     val clock = DateTimeFormatter.ofPattern("HH:mm")
     val completedExercises = machines.count { summary -> summary.recentSets.any { first != null && it.performedAt >= first } }
 
@@ -254,7 +262,7 @@ private fun TrainingDurationCard(machines: List<MachineSummary>, activePlanName:
                 Text(
                     if (first == null) "Starts with your first entry"
                     else {
-                        val startTime = Instant.ofEpochMilli(first).atZone(zone)
+                        val startTime = Instant.ofEpochMilli(estimatedStart!!).atZone(zone)
                         val endTime = Instant.ofEpochMilli(if (isActive) now else last!!).atZone(zone)
                         "${startTime.format(clock)} – ${if (isActive) "Now" else endTime.format(clock)}"
                     },
