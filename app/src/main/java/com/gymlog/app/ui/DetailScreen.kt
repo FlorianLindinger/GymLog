@@ -51,7 +51,9 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
@@ -85,6 +87,7 @@ fun DetailScreen(
     var showWeight by remember { mutableStateOf(false) }
     var showAreas by remember { mutableStateOf(false) }
     var confirmDelete by remember { mutableStateOf(false) }
+    var deletingSets by remember { mutableStateOf<List<SetRecord>?>(null) }
     var editingSet by remember { mutableStateOf<SetRecord?>(null) }
     var expandedBatch by remember { mutableStateOf<Long?>(null) }
     val machine = summary.machine
@@ -161,7 +164,7 @@ fun DetailScreen(
                 }
                 val cutoff = chartCutoff(machine.chartWindow)
                 val visibleSets = summary.recentSets.filter { cutoff == null || it.performedAt >= cutoff }
-                SessionMetricsChart(visibleSets, machine.trailingAverage, isDirectMetric(machine.trackingMode))
+                SessionMetricsChart(visibleSets, 0, machine.trackingMode)
                 Text("${summary.weightChanges.size} ${metricName(machine.trackingMode)} changes · ${summary.recentSets.size} recorded sets", color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
@@ -197,7 +200,7 @@ fun DetailScreen(
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                             Text("Edit", Modifier.clickable { editingSet = set }.padding(horizontal = 6.dp, vertical = 2.dp), color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelSmall)
-                            Text("Delete", Modifier.clickable { repository.deleteSet(set.id); onChanged() }.padding(horizontal = 6.dp, vertical = 2.dp), color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.labelSmall)
+                            Text("Delete", Modifier.clickable { deletingSets = listOf(set) }.padding(horizontal = 6.dp, vertical = 2.dp), color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.labelSmall)
                         }
                     }
                 }
@@ -227,6 +230,9 @@ fun DetailScreen(
         repository.saveAreas(machine.id, it)
         onChanged()
         showAreas = false
+    }
+    deletingSets?.let { sets ->
+        AlertDialog(onDismissRequest = { deletingSets = null }, title = { Text("Delete ${sets.size} set${if (sets.size == 1) "" else "s"}?") }, text = { Text("This cannot be undone.") }, confirmButton = { Button(onClick = { sets.forEach { repository.deleteSet(it.id) }; deletingSets = null; onChanged() }) { Text("Delete") } }, dismissButton = { TextButton(onClick = { deletingSets = null }) { Text("Cancel") } })
     }
     if (confirmDelete) AlertDialog(
         onDismissRequest = { confirmDelete = false },
@@ -267,7 +273,7 @@ private fun CompactChoice(selected: Boolean, onClick: () -> Unit, label: String)
 }
 
 @Composable
-private fun SessionMetricsChart(sets: List<SetRecord>, trailingAverage: Int, directMetric: Boolean) {
+private fun SessionMetricsChart(sets: List<SetRecord>, trailingAverage: Int, trackingMode: String) {
     val allSessions = groupSetBatches(sets).asReversed()
     val sessions = allSessions.takeLast(24)
     if (sessions.isEmpty()) { Text("No training data in this window.", color = MaterialTheme.colorScheme.onSurfaceVariant); return }
@@ -276,13 +282,13 @@ private fun SessionMetricsChart(sets: List<SetRecord>, trailingAverage: Int, dir
     val repsPerSet = movingAverage(sessions.map { session -> session.map { it.reps }.average() }, trailingAverage)
     val minutes = movingAverage(sessions.map { session -> session.sumOf { it.weight } }, trailingAverage)
     Text("Training Session Graph", style = MaterialTheme.typography.labelLarge)
-    if (directMetric) AxisMetricPlot("Minutes", minutes, MaterialTheme.colorScheme.primary)
-    else DualAxisSessionPlot(repsPerSet, weight, volume, sessions)
+    if (trackingMode == "DURATION") AxisMetricPlot("Minutes", minutes, MaterialTheme.colorScheme.primary)
+    else DualAxisSessionPlot(repsPerSet, weight, volume, sessions, strength = trackingMode == "STRENGTH")
     if (allSessions.size > 24) Text("Showing the 24 most recent training sessions", style = MaterialTheme.typography.bodySmall)
 }
 
 @Composable
-private fun DualAxisSessionPlot(reps: List<Double>, weight: List<Double>, volume: List<Double>, sessions: List<List<SetRecord>>) {
+private fun DualAxisSessionPlot(reps: List<Double>, weight: List<Double>, volume: List<Double>, sessions: List<List<SetRecord>>, strength: Boolean) {
     val repsFit = fittedSeries(reps).first
     val weightFit = fittedSeries(weight).first
     val volumeFit = fittedSeries(volume).first
@@ -290,14 +296,15 @@ private fun DualAxisSessionPlot(reps: List<Double>, weight: List<Double>, volume
     val repsMax = (reps + repsFit).maxOrNull() ?: 1.0
     val weightMin = (weight + weightFit).minOrNull() ?: 0.0
     val weightMax = (weight + weightFit).maxOrNull() ?: 1.0
-    val volumeMax = (volume + volumeFit).maxOrNull()?.takeIf { it > 0.0 } ?: 1.0
+    val volumeMin = (volume + volumeFit).minOrNull() ?: 0.0
+    val volumeMax = (volume + volumeFit).maxOrNull()?.takeIf { it > volumeMin } ?: volumeMin + 1.0
     val repsColor = Color(0xFFFFA726)
     val weightColor = MaterialTheme.colorScheme.primary
     val volumeColor = Color(0xFF00BCD4)
     val grid = MaterialTheme.colorScheme.outlineVariant.copy(alpha = .72f)
-    Text("Volume / training day", color = volumeColor, style = MaterialTheme.typography.labelSmall)
+    Text(if (strength) "Level volume / training day" else "Volume / training day", color = volumeColor, style = MaterialTheme.typography.labelSmall)
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
-        AxisLabels("Reps / set", repsMax, repsMin, repsColor, Modifier.width(52.dp))
+        AxisLabels(if (strength) "Level" else "Reps / set", repsMax, repsMin, repsColor, Modifier.width(52.dp))
         BoxWithConstraints(Modifier.weight(1f)) {
             val graphWidth = maxOf(maxWidth, (reps.size * 28).dp)
             Box(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
@@ -312,7 +319,7 @@ private fun DualAxisSessionPlot(reps: List<Double>, weight: List<Double>, volume
                         drawLine(grid, Offset(0f, lineY), Offset(size.width, lineY), strokeWidth = 1.2f)
                     }
                     val volumePoints = volume.mapIndexed { index, value ->
-                        Offset(x(index, volume.size), size.height - 5f - (value / volumeMax).toFloat() * (size.height - 10f))
+                        Offset(x(index, volume.size), y(value, volumeMin, volumeMax))
                     }
                     volumePoints.zipWithNext().forEach { (a, b) -> drawLine(volumeColor, a, b, strokeWidth = 3.5f, cap = StrokeCap.Round) }
                     volumePoints.forEach { drawCircle(volumeColor, 3.8f, it) }
@@ -325,12 +332,12 @@ private fun DualAxisSessionPlot(reps: List<Double>, weight: List<Double>, volume
                     }
                     drawMetric(reps, repsFit, repsMin, repsMax, repsColor)
                     drawMetric(weight, weightFit, weightMin, weightMax, weightColor)
-                    val volumeTrend = volumeFit.mapIndexed { index, value -> Offset(x(index, volumeFit.size), size.height - 5f - (value / volumeMax).toFloat() * (size.height - 10f)) }
+                    val volumeTrend = volumeFit.mapIndexed { index, value -> Offset(x(index, volumeFit.size), y(value, volumeMin, volumeMax)) }
                     volumeTrend.zipWithNext().forEach { (a, b) -> drawLine(Color(0xFF007C91), a, b, strokeWidth = 2.5f, cap = StrokeCap.Round, pathEffect = PathEffect.dashPathEffect(floatArrayOf(9f, 7f))) }
                 }
             }
         }
-        AxisLabels("Weight", weightMax, weightMin, weightColor, Modifier.width(52.dp))
+        AxisLabels(if (strength) "Minutes" else "Weight", weightMax, weightMin, weightColor, Modifier.width(52.dp))
     }
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
         Text(formatTimestamp(sessions.first().minOf { it.performedAt }), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -341,7 +348,7 @@ private fun DualAxisSessionPlot(reps: List<Double>, weight: List<Double>, volume
 @Composable
 private fun AxisLabels(label: String, max: Double, min: Double, color: Color, modifier: Modifier) {
     Column(modifier.height(164.dp), verticalArrangement = Arrangement.SpaceBetween, horizontalAlignment = Alignment.End) {
-        Text(label, style = MaterialTheme.typography.labelSmall, color = color)
+        Text(label, modifier = Modifier.graphicsLayer { rotationZ = -90f }, style = MaterialTheme.typography.labelSmall, color = color)
         Text(formatAxisValue(max), style = MaterialTheme.typography.labelSmall)
         Text(formatAxisValue((max + min) / 2.0), style = MaterialTheme.typography.labelSmall)
         Text(formatAxisValue(min), style = MaterialTheme.typography.labelSmall)
@@ -513,7 +520,22 @@ private fun AreaDialog(
     )
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Training Areas") },
+        title = {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text("Training Areas", modifier = Modifier.weight(1f))
+                Button(
+                    onClick = {
+                        onSave(choices.mapNotNull { (area, strength) ->
+                            strength?.let { AreaAssignment(area, it) }
+                        })
+                    },
+                    contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp),
+                ) { Text("Save") }
+            }
+        },
         text = {
             Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 BodyMapPicker(
@@ -545,10 +567,7 @@ private fun AreaDialog(
                 }
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End, verticalAlignment = Alignment.CenterVertically) {
                     TextButton(onClick = onDismiss, contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp)) { Text("Cancel") }
-                    Button(
-                        onClick = { onSave(choices.mapNotNull { (area, strength) -> strength?.let { AreaAssignment(area, it) } }) },
-                        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp),
-                    ) { Text("Save") }
+
                 }
             }
         },

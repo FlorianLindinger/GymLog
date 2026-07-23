@@ -57,14 +57,14 @@ fun StatsScreen(
     val cutoff = statsCutoff(window)
     val visible = history.filter { cutoff == null || it.performedAt >= cutoff }
     val zone = ZoneId.systemDefault()
-    val sessions = visible.groupBy { Instant.ofEpochMilli(it.performedAt).atZone(zone).toLocalDate() }.toSortedMap()
+    val sessions = visible.groupBy { trainingDate(it.performedAt, zone) }.toSortedMap()
     val durations = sessions.mapValues { (_, sets) ->
         if (sets.size < 2) 0.0 else Duration.ofMillis(sets.maxOf { it.performedAt } - sets.minOf { it.performedAt }).toMinutes().toDouble()
     }
     val last30Cutoff = Instant.now().minus(Duration.ofDays(30)).toEpochMilli()
-    val allSessions = history.groupBy { Instant.ofEpochMilli(it.performedAt).atZone(zone).toLocalDate() }
+    val allSessions = history.groupBy { trainingDate(it.performedAt, zone) }
     val last30Durations = (29 downTo 0).map { daysAgo ->
-        val day = LocalDate.now().minusDays(daysAgo.toLong())
+        val day = trainingDate(System.currentTimeMillis(), zone).minusDays(daysAgo.toLong())
         val entries = allSessions[day].orEmpty()
         if (entries.size < 2) 0.0 else Duration.ofMillis(entries.maxOf { it.performedAt } - entries.minOf { it.performedAt }).toMinutes().toDouble()
     }
@@ -80,7 +80,7 @@ fun StatsScreen(
     val increases = weightMachines.flatMap { it.weightIncreases() }
         .filter { cutoff == null || it.changedAt >= cutoff }
     val increaseWeeksByDate = increases.groupingBy {
-        val date = Instant.ofEpochMilli(it.changedAt).atZone(zone).toLocalDate()
+        val date = trainingDate(it.changedAt, zone)
         date.minusDays((date.dayOfWeek.value - 1).toLong())
     }.eachCount()
     val thisMonday = LocalDate.now().minusDays((LocalDate.now().dayOfWeek.value - 1).toLong())
@@ -88,7 +88,7 @@ fun StatsScreen(
         (increaseWeeksByDate[thisMonday.minusWeeks(weeksAgo.toLong())] ?: 0).toDouble()
     }
     val increasesByDate = increases.groupingBy {
-        Instant.ofEpochMilli(it.changedAt).atZone(zone).toLocalDate()
+        trainingDate(it.changedAt, zone)
     }.eachCount()
     val upgradesPerGymDay = sessions.keys.map { date -> (increasesByDate[date] ?: 0).toDouble() }.takeLast(24)
     val averageUpgradesPerGymDay = if (sessions.isEmpty()) 0.0 else increases.size.toDouble() / sessions.size

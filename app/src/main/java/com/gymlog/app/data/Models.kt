@@ -15,21 +15,21 @@ data class Machine(
 )
 
 enum class BodyArea(val label: String, val color: Long) {
-    CHEST("Chest", 0xFFE6194B),
-    UPPER_BACK("Lats / upper back", 0xFF4363D8),
-    LOWER_BACK("Lower back", 0xFF00A6D6),
-    TRAPS("Traps", 0xFF3F007D),
-    SHOULDERS("Shoulders", 0xFFF58231),
-    BICEPS("Biceps", 0xFF911EB4),
-    TRICEPS("Triceps", 0xFFF032E6),
-    FOREARMS("Forearms", 0xFF800000),
-    CORE("Core", 0xFFFFD700),
-    GLUTES("Glutes", 0xFF008080),
-    QUADS("Quads", 0xFF3CB44B),
-    ADDUCTORS("Adductors", 0xFF9A6324),
-    ABDUCTORS("Hip abductors", 0xFF000075),
-    HAMSTRINGS("Hamstrings", 0xFFE64A19),
-    CALVES("Calves", 0xFFBFEF45),
+    CHEST("Chest / Brust", 0xFFE6194B),
+    UPPER_BACK("Lats / upper back / Latissimus / oberer Rücken", 0xFF4363D8),
+    LOWER_BACK("Lower back / unterer Rücken", 0xFF00A6D6),
+    TRAPS("Traps / Trapezmuskel", 0xFF3F007D),
+    SHOULDERS("Shoulders / Schultern", 0xFFF58231),
+    BICEPS("Biceps / Bizeps", 0xFF911EB4),
+    TRICEPS("Triceps / Trizeps", 0xFFF032E6),
+    FOREARMS("Forearms / Unterarme", 0xFF800000),
+    CORE("Core / Rumpf", 0xFFFFD700),
+    GLUTES("Glutes / Gesäß", 0xFF008080),
+    QUADS("Quads / Quadrizeps", 0xFF3CB44B),
+    ADDUCTORS("Adductors / Adduktoren", 0xFF9A6324),
+    ABDUCTORS("Hip abductors / Hüftabduktoren", 0xFF000075),
+    HAMSTRINGS("Hamstrings / hintere Oberschenkel", 0xFFE64A19),
+    CALVES("Calves / Waden", 0xFFBFEF45),
 }
 
 enum class Strength(val label: String, val value: Double) {

@@ -62,7 +62,7 @@ fun HistoryScreen(
 ) {
     val zone = ZoneId.systemDefault()
     val byDate = remember(history) {
-        history.groupBy { Instant.ofEpochMilli(it.performedAt).atZone(zone).toLocalDate() }
+        history.groupBy { trainingDate(it.performedAt, zone) }
     }
     var month by remember { mutableStateOf(YearMonth.now()) }
     var selectedDate by remember { mutableStateOf<LocalDate?>(null) }
@@ -175,7 +175,7 @@ private fun WeeklyVolumeCard(history: List<HistorySet>) {
     val volumes = starts.map { start ->
         val end = start.plusDays(7)
         history.filter {
-            val date = Instant.ofEpochMilli(it.performedAt).atZone(ZoneId.systemDefault()).toLocalDate()
+            val date = trainingDate(it.performedAt)
             !date.isBefore(start) && date.isBefore(end)
         }.size.toDouble()
     }
@@ -338,7 +338,7 @@ private fun HistorySetRow(set: HistorySet, onEdit: (HistorySet) -> Unit, onDelet
 private data class ExerciseDayDeletion(val machineId: Long, val machineName: String, val date: LocalDate)
 
 private fun dayBounds(date: LocalDate, zone: ZoneId): Pair<Long, Long> =
-    date.atStartOfDay(zone).toInstant().toEpochMilli() to date.plusDays(1).atStartOfDay(zone).toInstant().toEpochMilli()
+    date.atTime(6, 0).atZone(zone).toInstant().toEpochMilli() to date.plusDays(1).atTime(6, 0).atZone(zone).toInstant().toEpochMilli()
 
 @Composable
 private fun ConfirmDeleteDialog(title: String, message: String, onDismiss: () -> Unit, onConfirm: () -> Unit) {
@@ -364,37 +364,29 @@ fun EditSetDialog(
     var weight by remember(initialWeight) { mutableStateOf(formatHistoryAmount(initialWeight)) }
     val parsedReps = reps.toIntOrNull()
     val parsedWeight = weight.replace(',', '.').toDoubleOrNull()
+    val hasChanges = reps != initialReps.toString() || weight != formatHistoryAmount(initialWeight)
+    var confirmDiscard by remember { mutableStateOf(false) }
+    val requestDismiss = { if (hasChanges) confirmDiscard = true else onDismiss() }
     AlertDialog(
-        onDismissRequest = onDismiss,
+        onDismissRequest = requestDismiss,
         title = { Text(title) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                if (trackingMode != "DURATION") OutlinedTextField(
-                    value = reps,
-                    onValueChange = { reps = it.filter(Char::isDigit) },
-                    label = { Text(if (trackingMode == "STRENGTH") "Level" else "Reps") },
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                    singleLine = true,
-                )
-                OutlinedTextField(
-                    value = weight,
-                    onValueChange = { weight = it.filter { char -> char.isDigit() || char == '.' || char == ',' } },
-                    label = { Text(if (trackingMode == "WEIGHT") "Weight (kg)" else "Minutes") },
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                    singleLine = true,
-                )
+                if (trackingMode != "DURATION") OutlinedTextField(reps, { reps = it.filter(Char::isDigit) }, label = { Text(if (trackingMode == "STRENGTH") "Level" else "Reps") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), singleLine = true)
+                OutlinedTextField(weight, { weight = it.filter { char -> char.isDigit() || char == '.' || char == ',' } }, label = { Text(if (trackingMode == "WEIGHT") "Weight (kg)" else "Minutes") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal), singleLine = true)
             }
         },
-        confirmButton = {
-            Button(
-                onClick = { onSave(if (trackingMode == "DURATION") initialReps else parsedReps ?: 1, parsedWeight ?: 0.0) },
-                enabled = parsedWeight != null && parsedWeight >= 0 && (trackingMode == "DURATION" || parsedReps != null && parsedReps > 0),
-            ) { Text("Save") }
-        },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+        confirmButton = { Button(onClick = { onSave(if (trackingMode == "DURATION") initialReps else parsedReps ?: 1, parsedWeight ?: 0.0) }, enabled = parsedWeight != null && parsedWeight >= 0 && (trackingMode == "DURATION" || parsedReps != null && parsedReps > 0)) { Text("Save") } },
+        dismissButton = { TextButton(onClick = requestDismiss) { Text("Cancel") } },
+    )
+    if (confirmDiscard) AlertDialog(
+        onDismissRequest = { confirmDiscard = false },
+        title = { Text("Discard changes?") },
+        text = { Text("Your edits to reps or minutes will be lost.") },
+        confirmButton = { Button(onClick = onDismiss) { Text("Discard") } },
+        dismissButton = { TextButton(onClick = { confirmDiscard = false }) { Text("Keep editing") } },
     )
 }
-
 private fun formatVolume(volume: Double): String = if (volume >= 1000) String.format(Locale.US, "%.1f t", volume / 1000) else "${volume.toInt()} kg"
 
 private fun formatSessionTotals(sets: List<HistorySet>): String {

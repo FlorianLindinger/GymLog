@@ -549,8 +549,12 @@ private fun clashingAreas(current: MachineSummary, previous: MachineSummary): Se
     return current.areas.mapNotNullTo(mutableSetOf()) { it.area.takeIf(previousAreas::contains) }
 }
 
-private fun SetRecord.performedDate(zone: ZoneId): LocalDate =
-    Instant.ofEpochMilli(performedAt).atZone(zone).toLocalDate()
+fun trainingDate(timestamp: Long, zone: ZoneId = ZoneId.systemDefault()): LocalDate {
+    val local = Instant.ofEpochMilli(timestamp).atZone(zone)
+    return local.toLocalDate().minusDays(if (local.hour < 6) 1 else 0)
+}
+
+private fun SetRecord.performedDate(zone: ZoneId): LocalDate = trainingDate(performedAt, zone)
 
 private fun sessionPatternText(summary: MachineSummary): AnnotatedString {
     val batches = groupSetBatches(summary.recentSets)
