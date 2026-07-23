@@ -556,6 +556,8 @@ private fun AreaDialog(
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                         )
+                        Box(Modifier.width(18.dp).height(18.dp).background(Color(colors[area] ?: area.color), CircleShape).border(1.dp, MaterialTheme.colorScheme.outline, CircleShape).clickable { colorArea = area })
+                        Spacer(Modifier.width(4.dp))
                         AreaStrengthChoice("½", choices[area] == Strength.HALF) {
                             choices[area] = if (choices[area] == Strength.HALF) null else Strength.HALF
                         }
@@ -649,7 +651,7 @@ private fun ColorPaletteDialog(area: BodyArea, selected: Long, onDismiss: () -> 
 
 private fun timeSince(timestamp: Long): String {
     val duration = Duration.between(Instant.ofEpochMilli(timestamp), Instant.now()).coerceAtLeast(Duration.ZERO)
-    val days = duration.toDays()
+    val days = kotlin.math.ceil(duration.toMillis() / 86_400_000.0).toLong()
     return when {
         days >= 365 -> "${days / 365}y ${days % 365 / 30}mo"
         days >= 30 -> "${days / 30}mo ${days % 30}d"
