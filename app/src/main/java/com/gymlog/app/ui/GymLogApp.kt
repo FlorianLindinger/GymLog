@@ -337,8 +337,8 @@ fun GymLogApp(
 
     if (showAdd) AddMachineDialog(
         onDismiss = { showAdd = false },
-        onAdd = { name, weight, trackingMode ->
-            val id = repository.addMachine(name, weight, trackingMode)
+        onAdd = { name, weight, trackingMode, note ->
+            val id = repository.addMachine(name, weight, trackingMode, note)
             refresh()
             showAdd = false
             selectedId = id

@@ -119,7 +119,7 @@ fun BodyOverviewScreen(
             }
             item {
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                    listOf("1M", "3M", "6M", "1Y", "3Y", "ALL").forEach { preset ->
+                    listOf("1W", "2W", "3W", "1M", "3M", "6M", "1Y", "3Y", "ALL").forEach { preset ->
                         val selected = window == preset
                         Text(
                             if (preset == "ALL") "All" else preset,

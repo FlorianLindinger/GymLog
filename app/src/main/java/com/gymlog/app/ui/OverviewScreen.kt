@@ -713,10 +713,11 @@ fun QuickRepDialog(
 }
 
 @Composable
-fun AddMachineDialog(onDismiss: () -> Unit, onAdd: (String, Double, String) -> Unit) {
+fun AddMachineDialog(onDismiss: () -> Unit, onAdd: (String, Double, String, String) -> Unit) {
     var name by remember { mutableStateOf("") }
     var weight by remember { mutableStateOf("") }
     var trackingMode by remember { mutableStateOf("WEIGHT") }
+    var note by remember { mutableStateOf("") }
     val parsedWeight = weight.replace(',', '.').toDoubleOrNull()
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -752,7 +753,7 @@ fun AddMachineDialog(onDismiss: () -> Unit, onAdd: (String, Double, String) -> U
         },
         confirmButton = {
             Button(
-                onClick = { onAdd(name.trim(), parsedWeight ?: 0.0, trackingMode) },
+                onClick = { onAdd(name.trim(), parsedWeight ?: 0.0, trackingMode, note.trim()) },
                 enabled = name.isNotBlank() && parsedWeight != null && parsedWeight >= 0,
             ) { Text("Add") }
         },

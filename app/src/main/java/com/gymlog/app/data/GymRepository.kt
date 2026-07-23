@@ -306,7 +306,7 @@ class GymRepository(context: Context) {
         }
     }
 
-    fun addMachine(name: String, weight: Double, trackingMode: String): Long {
+    fun addMachine(name: String, weight: Double, trackingMode: String, titleNote: String = ""): Long {
         val database = db.writableDatabase
         val planId = ensureTrainingPlan(database)
         val nextOrder = database.rawQuery("SELECT COALESCE(MAX(sort_order),-1)+1 FROM machines WHERE plan_id=?", arrayOf(planId.toString()))
@@ -315,6 +315,7 @@ class GymRepository(context: Context) {
             put("name", capitalizeName(name))
             put("plan_id", planId)
             put("notes", "")
+            put("title_note", titleNote.trim())
             put("tracking_mode", trackingMode)
             put("current_weight", weight)
             put("sort_order", nextOrder)
