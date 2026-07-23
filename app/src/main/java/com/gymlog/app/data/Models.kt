@@ -12,6 +12,9 @@ data class Machine(
     val currentWeight: Double,
     val sortOrder: Int,
     val pinned: Boolean = false,
+    val rankingPriority: Int = 0,
+    val excludedFromAutoRanking: Boolean = false,
+    val showTrend: Boolean = true,
 )
 
 enum class BodyArea(val label: String, val color: Long) {

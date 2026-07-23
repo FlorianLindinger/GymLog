@@ -291,6 +291,9 @@ class GymRepository(context: Context) {
                     currentWeight = cursor.getDouble(8),
                     sortOrder = cursor.getInt(9),
                     pinned = cursor.getInt(10) != 0,
+                    rankingPriority = preferences.getInt("ranking_priority_${cursor.getLong(0)}", 0),
+                    excludedFromAutoRanking = preferences.getBoolean("ranking_excluded_${cursor.getLong(0)}", false),
+                    showTrend = preferences.getBoolean("show_trend_${cursor.getLong(0)}", true),
                 )
             }
         }
@@ -375,6 +378,17 @@ class GymRepository(context: Context) {
         db.writableDatabase.update("machines", ContentValues().apply { put("trailing_average", amount) }, "id=?", arrayOf(id.toString()))
     }
 
+    fun changeRankingPriority(id: Long, delta: Int) {
+        preferences.edit().putInt("ranking_priority_$id", (preferences.getInt("ranking_priority_$id", 0) + delta).coerceIn(-20, 20)).apply()
+    }
+
+    fun setExcludedFromAutoRanking(id: Long, excluded: Boolean) {
+        preferences.edit().putBoolean("ranking_excluded_$id", excluded).apply()
+    }
+
+    fun setShowTrend(id: Long, show: Boolean) {
+        preferences.edit().putBoolean("show_trend_$id", show).apply()
+    }
     fun setAreaColor(area: BodyArea, color: Long) {
         db.writableDatabase.insertWithOnConflict("area_colors", null, ContentValues().apply {
             put("area", area.name)
@@ -432,7 +446,7 @@ class GymRepository(context: Context) {
                 "sets",
                 setValues,
                 "machine_id=? AND performed_at>=?",
-                arrayOf(id.toString(), (now - TRAINING_UNIT_MILLIS).toString()),
+                arrayOf(id.toString(), trainingDayStart(now).toString()),
             )
         }
     }
@@ -470,7 +484,7 @@ class GymRepository(context: Context) {
             database.delete(
                 "sets",
                 "machine_id=? AND performed_at>=?",
-                arrayOf(machineId.toString(), (now - TRAINING_UNIT_MILLIS).toString()),
+                arrayOf(machineId.toString(), trainingDayStart(now).toString()),
             )
             database.insertOrThrow("sets", null, ContentValues().apply {
                 put("machine_id", machineId)
@@ -488,7 +502,7 @@ class GymRepository(context: Context) {
             database.delete(
                 "sets",
                 "machine_id=? AND performed_at>=?",
-                arrayOf(machineId.toString(), (now - TRAINING_UNIT_MILLIS).toString()),
+                arrayOf(machineId.toString(), trainingDayStart(now).toString()),
             )
             reps.filter { it > 0 }.forEachIndexed { index, amount ->
                 database.insertOrThrow("sets", null, ContentValues().apply {
@@ -539,12 +553,12 @@ class GymRepository(context: Context) {
     }
 
     fun deleteCurrentExerciseSets(machineId: Long) {
-        db.writableDatabase.delete("sets", "machine_id=? AND performed_at>=?", arrayOf(machineId.toString(), (System.currentTimeMillis() - TRAINING_UNIT_MILLIS).toString()))
+        db.writableDatabase.delete("sets", "machine_id=? AND performed_at>=?", arrayOf(machineId.toString(), trainingDayStart(System.currentTimeMillis()).toString()))
     }
 
     fun deleteCurrentTraining() {
         val planId = activeTrainingPlanId()
-        val cutoff = System.currentTimeMillis() - TRAINING_UNIT_MILLIS
+        val cutoff = trainingDayStart(System.currentTimeMillis())
         db.writableDatabase.delete(
             "sets",
             "performed_at>=? AND machine_id IN (SELECT id FROM machines WHERE plan_id=?)",
@@ -836,6 +850,12 @@ class GymRepository(context: Context) {
         if (it.isLowerCase()) it.titlecase() else it.toString()
     }
 
+    /** A training day runs from 06:00 to 05:59, so late-night sessions remain one training. */
+    private fun trainingDayStart(timestamp: Long): Long {
+        val local = java.time.Instant.ofEpochMilli(timestamp).atZone(java.time.ZoneId.systemDefault())
+        val date = local.toLocalDate().minusDays(if (local.hour < 6) 1 else 0)
+        return date.atTime(6, 0).atZone(local.zone).toInstant().toEpochMilli()
+    }
     private fun ensureTrainingPlan(database: SQLiteDatabase): Long {
         val preferred = preferences.getLong("active_training_plan", -1L)
         if (preferred > 0 && database.rawQuery("SELECT 1 FROM training_plans WHERE id=?", arrayOf(preferred.toString())).use { it.moveToFirst() }) return preferred

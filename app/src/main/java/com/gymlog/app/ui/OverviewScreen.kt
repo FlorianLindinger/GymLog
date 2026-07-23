@@ -2,6 +2,7 @@ package com.gymlog.app.ui
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -43,6 +44,7 @@ import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.toMutableStateList
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -73,6 +75,7 @@ import java.time.format.DateTimeFormatter
 import java.util.Locale
 import kotlin.math.abs
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.currentStateAsState
@@ -101,6 +104,8 @@ fun OverviewScreen(
     onSetPinned: (MachineSummary, Boolean) -> Unit,
     onMovePinned: (MachineSummary, Int) -> Unit,
     onHide: (MachineSummary) -> Unit,
+    onRankingChange: (MachineSummary, Int) -> Unit,
+    onRankingExcluded: (MachineSummary, Boolean) -> Unit,
 ) {
     val zone = ZoneId.systemDefault()
     var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
@@ -113,13 +118,12 @@ fun OverviewScreen(
         }
     }
     val latestTrainingEntry = machines.flatMap { it.recentSets }.maxOfOrNull { it.performedAt }
-    val trainingUnitCutoff = latestTrainingEntry
-        ?.takeIf { now - it <= TRAINING_UNIT_MILLIS }
-        ?.let { now - TRAINING_UNIT_MILLIS }
-        ?: Long.MAX_VALUE
+    val todayTrainingDate = trainingDate(now, zone)
+    val hasCurrentTraining = latestTrainingEntry?.let { trainingDate(it, zone) == todayTrainingDate } == true
+    val trainingUnitCutoff = if (hasCurrentTraining) trainingDayStart(now, zone) else Long.MAX_VALUE
     val lastExerciseInUnit = mostRecentlyTrainedInUnit(machines, trainingUnitCutoff)
     val listState = rememberLazyListState()
-    val hasCurrentTraining = latestTrainingEntry != null && now - latestTrainingEntry <= TRAINING_UNIT_MILLIS
+    val scope = rememberCoroutineScope()
     val rankedMachines = remember(machines, orderingMode, hasCurrentTraining) {
         rankOverviewMachines(machines, orderingMode, trainingUnitCutoff, lastExerciseInUnit)
     }
@@ -172,9 +176,14 @@ fun OverviewScreen(
                     val reorderable = orderingMode == ExerciseOrderingMode.FIXED ||
                         orderingMode == ExerciseOrderingMode.MIXED && summary.machine.pinned
                     MachineCard(
-                        summary, lastExerciseInUnit, trainingUnitCutoff, areaFrequency, onMachine, onQuickSet, onDeleteCurrentExerciseSets,
+                        summary, lastExerciseInUnit, trainingUnitCutoff, areaFrequency, onMachine, { machine, reps ->
+                            val firstEntry = !hasCurrentTraining
+                            onQuickSet(machine, reps)
+                            if (firstEntry) scope.launch { listState.animateScrollToItem(0) }
+                        }, onDeleteCurrentExerciseSets,
                         onMetricChange, onMetricChangeForSession, progressionSettings,
-                        modifier = Modifier.pointerInput(id) { detectTapGestures(onLongPress = { longPressed = summary }) },
+                        modifier = Modifier,
+                        onLongPress = { longPressed = summary },
                         isDragging = false,
                         isReordering = false,
                     )
@@ -212,6 +221,18 @@ fun OverviewScreen(
             title = { Text(summary.machine.name) },
             text = { Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(if (pinned) "This exercise is fixed in the manual order." else "Fix this exercise to include it in the manual fixed order.")
+                Text(
+                    if (summary.machine.excludedFromAutoRanking) "Excluded from automatic ranking"
+                    else "Automatic ranking adjustment: ${summary.machine.rankingPriority}",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    FilledTonalButton(onClick = { onRankingChange(summary, -1) }) { Text("Prioritize") }
+                    FilledTonalButton(onClick = { onRankingChange(summary, 1) }) { Text("Deprioritize") }
+                }
+                TextButton(onClick = { onRankingExcluded(summary, !summary.machine.excludedFromAutoRanking) }) {
+                    Text(if (summary.machine.excludedFromAutoRanking) "Use automatic ranking" else "Exclude from automatic ranking")
+                }
                 if (pinned) Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     FilledTonalButton(onClick = { onMovePinned(summary, -1); longPressed = null }) { Text("Move up") }
                     FilledTonalButton(onClick = { onMovePinned(summary, 1); longPressed = null }) { Text("Move down") }
@@ -231,7 +252,7 @@ private fun OverviewButtonLabel(text: String) {
 private fun TrainingDurationCard(machines: List<MachineSummary>, activePlanName: String, now: Long, zone: ZoneId) {
     val allSets = machines.flatMap { it.recentSets }
     val last = allSets.maxOfOrNull { it.performedAt }
-    val sessionSets = last?.let { latest -> allSets.filter { it.performedAt >= latest - TRAINING_UNIT_MILLIS } }.orEmpty()
+    val sessionSets = last?.let { latest -> allSets.filter { trainingDate(it.performedAt, zone) == trainingDate(latest, zone) } }.orEmpty()
     val first = sessionSets.minOfOrNull { it.performedAt }
     val firstSet = sessionSets.minByOrNull { it.performedAt }
     val firstMode = firstSet?.let { set -> machines.firstOrNull { it.machine.id == set.machineId }?.machine?.trackingMode }
@@ -287,6 +308,13 @@ private fun TrainingDurationCard(machines: List<MachineSummary>, activePlanName:
                     style = MaterialTheme.typography.labelSmall,
                     color = if (isActive) MaterialTheme.colorScheme.primary else Color(0xFF2E7D32),
                 )
+                if (!isActive && last != null) {
+                    Text(
+                        "Completed ${completedTrainingDateLabel(trainingDate(last, zone), trainingDate(now, zone))}",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
             }
         }
     }
@@ -352,6 +380,7 @@ private fun progressionWarning(summary: MachineSummary, settings: ProgressionSet
     }
     return reasons.takeIf { it.isNotEmpty() }?.joinToString(" · ", prefix = "Progress warning: ")
 }
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
 private fun MachineCard(
     summary: MachineSummary,
@@ -365,11 +394,13 @@ private fun MachineCard(
     onMetricChangeForSession: (MachineSummary, Double) -> Unit,
     progressionSettings: ProgressionSettings,
     modifier: Modifier = Modifier,
+    onLongPress: () -> Unit = {},
     isDragging: Boolean = false,
     isReordering: Boolean = false,
 ) {
     var quickReps by remember(summary.machine.id) { mutableStateOf(false) }
     var changeMetric by remember(summary.machine.id) { mutableStateOf(false) }
+    var confirmDeleteSets by remember(summary.machine.id) { mutableStateOf(false) }
     val trainedInUnit = summary.recentSets.any { it.performedAt >= trainingUnitCutoff }
     val currentUnitSets = currentTrainingUnitSets(summary)
     val isChangingTrainingUnit = currentUnitSets.isNotEmpty()
@@ -384,7 +415,7 @@ private fun MachineCard(
         else -> Color(0xFF43A047)
     }
     Card(
-        modifier = modifier.fillMaxWidth().clickable(enabled = !isReordering) { onMachine(summary.machine.id) },
+        modifier = modifier.fillMaxWidth().combinedClickable(enabled = !isReordering, onClick = { onMachine(summary.machine.id) }, onLongClick = onLongPress),
         elevation = CardDefaults.cardElevation(defaultElevation = if (isDragging) 10.dp else 1.dp),
         border = when {
             isLastDone -> BorderStroke(3.dp, outlineColor)
@@ -454,7 +485,7 @@ private fun MachineCard(
                     formatMetric(summary.machine.currentWeight, summary.machine.trackingMode),
                     modifier = Modifier.clickable(enabled = !isReordering) { changeMetric = true }.padding(horizontal = 6.dp, vertical = 4.dp),
                     style = MaterialTheme.typography.titleSmall,
-                    color = MaterialTheme.colorScheme.primary,
+                    color = sessionTrendColor(summary),
                 )
             }
         }
@@ -466,7 +497,7 @@ private fun MachineCard(
                 isChange = isChangingTrainingUnit,
                 onDismiss = { quickReps = false },
                 onAdd = { onQuickSet(summary, listOf(it)); quickReps = false },
-                onDelete = if (isChangingTrainingUnit) { { onDeleteCurrentExerciseSets(summary); quickReps = false } } else null,
+                onDelete = if (isChangingTrainingUnit) { { confirmDeleteSets = true } } else null,
             )
         } else {
             QuickRepDialog(
@@ -475,10 +506,17 @@ private fun MachineCard(
                 isChange = isChangingTrainingUnit,
                 onDismiss = { quickReps = false },
                 onAdd = { onQuickSet(summary, it); quickReps = false },
-                onDelete = if (isChangingTrainingUnit) { { onDeleteCurrentExerciseSets(summary); quickReps = false } } else null,
+                onDelete = if (isChangingTrainingUnit) { { confirmDeleteSets = true } } else null,
             )
         }
     }
+    if (confirmDeleteSets) AlertDialog(
+        onDismissRequest = { confirmDeleteSets = false },
+        title = { Text("Delete this exercise's sets?") },
+        text = { Text("All sets for this exercise in the current training day will be removed.") },
+        confirmButton = { Button(onClick = { onDeleteCurrentExerciseSets(summary); confirmDeleteSets = false; quickReps = false }) { Text("Delete") } },
+        dismissButton = { TextButton(onClick = { confirmDeleteSets = false }) { Text("Cancel") } },
+    )
     if (changeMetric) MetricValueDialog(
         current = summary.machine.currentWeight,
         trackingMode = summary.machine.trackingMode,
@@ -529,6 +567,8 @@ private fun rankOverviewMachines(
             { it.machine.id != currentId && it.recentSets.any { set -> set.performedAt >= currentTrainingCutoff } },
             { if (current == null || it.machine.id == currentId) -1.0 else strongestClash(it, current) ?: 0.0 },
             { previousTrainingDate != null && it.recentSets.any { set -> set.performedDate(zone) == previousTrainingDate } },
+            { it.machine.excludedFromAutoRanking },
+            { it.machine.rankingPriority },
             { trainingCounts[it.machine.id] ?: 0 },
             { it.machine.name.lowercase(Locale.getDefault()) },
         ),
@@ -563,6 +603,17 @@ fun trainingDate(timestamp: Long, zone: ZoneId = ZoneId.systemDefault()): LocalD
 }
 
 private fun SetRecord.performedDate(zone: ZoneId): LocalDate = trainingDate(performedAt, zone)
+private fun completedTrainingDateLabel(date: LocalDate, today: LocalDate): String = when (val days = java.time.temporal.ChronoUnit.DAYS.between(date, today)) {
+    0L -> "today"
+    1L -> "yesterday"
+    in 2L..7L -> "last ${date.dayOfWeek.getDisplayName(java.time.format.TextStyle.FULL, Locale.getDefault())}"
+    else -> date.format(DateTimeFormatter.ofPattern("d MMM"))
+}
+private fun trainingDayStart(timestamp: Long, zone: ZoneId = ZoneId.systemDefault()): Long {
+    val local = Instant.ofEpochMilli(timestamp).atZone(zone)
+    val date = local.toLocalDate().minusDays(if (local.hour < 6) 1 else 0)
+    return date.atTime(6, 0).atZone(zone).toInstant().toEpochMilli()
+}
 
 private fun sessionPatternText(summary: MachineSummary): AnnotatedString {
     val batches = groupSetBatches(summary.recentSets)
@@ -655,9 +706,10 @@ private fun sessionTrendColor(summary: MachineSummary): Color {
 
 private const val TRAINING_UNIT_MILLIS = 6L * 60L * 60L * 1000L
 
-fun currentTrainingUnitSets(summary: MachineSummary, now: Long = System.currentTimeMillis()): List<SetRecord> =
-    summary.recentSets.filter { it.performedAt >= now - TRAINING_UNIT_MILLIS }.sortedBy { it.performedAt }
-
+fun currentTrainingUnitSets(summary: MachineSummary, now: Long = System.currentTimeMillis()): List<SetRecord> {
+    val day = trainingDate(now)
+    return summary.recentSets.filter { trainingDate(it.performedAt) == day }.sortedBy { it.performedAt }
+}
 fun previousTrainingUnitReps(summary: MachineSummary, current: List<SetRecord> = currentTrainingUnitSets(summary)): List<Int> {
     val currentIds = current.mapTo(mutableSetOf()) { it.id }
     val previousNewest = summary.recentSets.firstOrNull { it.id !in currentIds } ?: return emptyList()

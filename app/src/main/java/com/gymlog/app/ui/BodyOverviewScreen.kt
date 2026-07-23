@@ -443,14 +443,19 @@ private fun bodyLinearFit(values: List<BodyMeasurement>): BodyFit {
     return BodyFit(fitted, slope, fitted.last())
 }
 
-private fun formatBodyEta(days: Double): String = when {
-    days < 1.0 -> "less than a day"
-    days < 14.0 -> "${days.toInt().coerceAtLeast(1)} days"
-    days < 60.0 -> String.format(Locale.US, "%.1f weeks", days / 7.0)
-    days < 730.0 -> String.format(Locale.US, "%.1f months", days / 30.44)
-    else -> String.format(Locale.US, "%.1f years", days / 365.25)
+private fun formatBodyEta(days: Double): String {
+    val totalDays = kotlin.math.ceil(days).toLong().coerceAtLeast(1)
+    val years = totalDays / 365
+    val months = (totalDays % 365) / 30
+    val weeks = (totalDays % 30) / 7
+    val remainingDays = totalDays % 7
+    return buildList {
+        if (years > 0) add("$years year${if (years == 1L) "" else "s"}")
+        if (months > 0) add("$months month${if (months == 1L) "" else "s"}")
+        if (weeks > 0) add("$weeks week${if (weeks == 1L) "" else "s"}")
+        if (remainingDays > 0 && isEmpty()) add("$remainingDays day${if (remainingDays == 1L) "" else "s"}")
+    }.take(2).joinToString(" ")
 }
-
 private fun bodyCutoff(window: String): Long? {
     val days = when (window) {
         "1W" -> 7L

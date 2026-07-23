@@ -152,8 +152,9 @@ fun DetailScreen(
                 }
                 val cutoff = chartCutoff(machine.chartWindow)
                 val visibleSets = summary.recentSets.filter { cutoff == null || it.performedAt >= cutoff }
-                SessionMetricsChart(visibleSets, 0, machine.trackingMode)
-                Text("${summary.weightChanges.size} ${metricName(machine.trackingMode)} changes · ${summary.recentSets.size} recorded sets", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                FilterChip(selected = machine.showTrend, onClick = { repository.setShowTrend(machine.id, !machine.showTrend); onChanged() }, label = { Text("Trend line") })
+                SessionMetricsChart(visibleSets, 0, machine.trackingMode, machine.showTrend)
+                Text("${(summary.weightChanges.size - 1).coerceAtLeast(0)} ${metricName(machine.trackingMode)} changes · ${summary.recentSets.size} recorded sets", color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
 
@@ -173,10 +174,7 @@ fun DetailScreen(
                             fontWeight = FontWeight.Medium,
                         )
                         Text(if (expandedBatch == batchKey) "Close" else "Edit", Modifier.clickable { expandedBatch = if (expandedBatch == batchKey) null else batchKey }.padding(horizontal = 6.dp, vertical = 3.dp), color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelMedium)
-                        Text("Delete", Modifier.clickable {
-                            batch.forEach { repository.deleteSet(it.id) }
-                            onChanged()
-                        }.padding(horizontal = 6.dp, vertical = 3.dp), color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.labelMedium)
+                        Text("Delete", Modifier.clickable { deletingSets = batch }.padding(horizontal = 6.dp, vertical = 3.dp), color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.labelMedium)
                     }
                     if (expandedBatch == batchKey) ordered.forEachIndexed { setIndex, set ->
                         Row(Modifier.fillMaxWidth().padding(start = 12.dp, top = 1.dp, bottom = 1.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -261,7 +259,7 @@ private fun CompactChoice(selected: Boolean, onClick: () -> Unit, label: String)
 }
 
 @Composable
-private fun SessionMetricsChart(sets: List<SetRecord>, trailingAverage: Int, trackingMode: String) {
+private fun SessionMetricsChart(sets: List<SetRecord>, trailingAverage: Int, trackingMode: String, showTrend: Boolean) {
     val allSessions = groupSetBatches(sets).asReversed()
     val sessions = allSessions.takeLast(24)
     if (sessions.isEmpty()) { Text("No training data in this window.", color = MaterialTheme.colorScheme.onSurfaceVariant); return }
@@ -270,13 +268,13 @@ private fun SessionMetricsChart(sets: List<SetRecord>, trailingAverage: Int, tra
     val repsPerSet = movingAverage(sessions.map { session -> session.map { it.reps }.average() }, trailingAverage)
     val minutes = movingAverage(sessions.map { session -> session.sumOf { it.weight } }, trailingAverage)
     Text("Training Session Graph", style = MaterialTheme.typography.labelLarge)
-    if (trackingMode == "DURATION") AxisMetricPlot("Minutes", minutes, MaterialTheme.colorScheme.primary)
-    else DualAxisSessionPlot(repsPerSet, weight, volume, sessions, strength = trackingMode == "STRENGTH")
+    if (trackingMode == "DURATION") AxisMetricPlot("Minutes", minutes, MaterialTheme.colorScheme.primary, showTrend)
+    else DualAxisSessionPlot(repsPerSet, weight, volume, sessions, strength = trackingMode == "STRENGTH", showTrend = showTrend)
     if (allSessions.size > 24) Text("Showing the 24 most recent training sessions", style = MaterialTheme.typography.bodySmall)
 }
 
 @Composable
-private fun DualAxisSessionPlot(reps: List<Double>, weight: List<Double>, volume: List<Double>, sessions: List<List<SetRecord>>, strength: Boolean) {
+private fun DualAxisSessionPlot(reps: List<Double>, weight: List<Double>, volume: List<Double>, sessions: List<List<SetRecord>>, strength: Boolean, showTrend: Boolean) {
     val repsFit = fittedSeries(reps).first
     val weightFit = fittedSeries(weight).first
     val volumeFit = fittedSeries(volume).first
@@ -316,12 +314,12 @@ private fun DualAxisSessionPlot(reps: List<Double>, weight: List<Double>, volume
                         points.zipWithNext().forEach { (a, b) -> drawLine(color, a, b, strokeWidth = 4f, cap = StrokeCap.Round) }
                         points.forEach { drawCircle(color, 4.2f, it) }
                         val trend = fit.mapIndexed { index, value -> Offset(x(index, fit.size), y(value, min, max)) }
-                        trend.zipWithNext().forEach { (a, b) -> drawLine(color.copy(alpha = .6f), a, b, strokeWidth = 2.5f, cap = StrokeCap.Round, pathEffect = PathEffect.dashPathEffect(floatArrayOf(9f, 7f))) }
+                        if (showTrend) trend.zipWithNext().forEach { (a, b) -> drawLine(color.copy(alpha = .6f), a, b, strokeWidth = 2.5f, cap = StrokeCap.Round, pathEffect = PathEffect.dashPathEffect(floatArrayOf(9f, 7f))) }
                     }
                     drawMetric(reps, repsFit, repsMin, repsMax, repsColor)
                     drawMetric(weight, weightFit, weightMin, weightMax, weightColor)
                     val volumeTrend = volumeFit.mapIndexed { index, value -> Offset(x(index, volumeFit.size), y(value, volumeMin, volumeMax)) }
-                    volumeTrend.zipWithNext().forEach { (a, b) -> drawLine(Color(0xFF007C91), a, b, strokeWidth = 2.5f, cap = StrokeCap.Round, pathEffect = PathEffect.dashPathEffect(floatArrayOf(9f, 7f))) }
+                    if (showTrend) volumeTrend.zipWithNext().forEach { (a, b) -> drawLine(Color(0xFF007C91), a, b, strokeWidth = 2.5f, cap = StrokeCap.Round, pathEffect = PathEffect.dashPathEffect(floatArrayOf(9f, 7f))) }
                 }
             }
         }
@@ -343,7 +341,7 @@ private fun AxisLabels(label: String, max: Double, min: Double, color: Color, mo
     }
 }
 @Composable
-private fun AxisMetricPlot(label: String, values: List<Double>, color: Color) {
+private fun AxisMetricPlot(label: String, values: List<Double>, color: Color, showTrend: Boolean) {
     val fit = fittedSeries(values).first
     val min = values.minOrNull() ?: 0.0
     val max = values.maxOrNull() ?: 0.0
@@ -369,7 +367,7 @@ private fun AxisMetricPlot(label: String, values: List<Double>, color: Color) {
                     points.zipWithNext().forEach { (a, b) -> drawLine(color, a, b, strokeWidth = 4f, cap = StrokeCap.Round) }
                     points.forEach { drawCircle(color, 4.5f, it) }
                     val trendPoints = fit.mapIndexed { index, value -> Offset(if (fit.size == 1) size.width / 2f else index * size.width / (fit.size - 1), y(value)) }
-                    trendPoints.zipWithNext().forEach { (a, b) -> drawLine(color.copy(alpha = .58f), a, b, strokeWidth = 2.5f, cap = StrokeCap.Round, pathEffect = PathEffect.dashPathEffect(floatArrayOf(9f, 7f))) }
+                    if (showTrend) trendPoints.zipWithNext().forEach { (a, b) -> drawLine(color.copy(alpha = .58f), a, b, strokeWidth = 2.5f, cap = StrokeCap.Round, pathEffect = PathEffect.dashPathEffect(floatArrayOf(9f, 7f))) }
                 }
             }
         }
@@ -579,16 +577,17 @@ private fun AreaStrengthChoice(label: String, selected: Boolean, onClick: () -> 
         label,
         modifier = Modifier
             .background(
-                if (selected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant,
+                if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
                 RoundedCornerShape(7.dp),
             )
+            .border(1.dp, if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline, RoundedCornerShape(7.dp))
             .clickable(onClick = onClick)
-            .padding(horizontal = 8.dp, vertical = 4.dp),
-        color = if (selected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
-        style = MaterialTheme.typography.labelSmall,
+            .padding(horizontal = 10.dp, vertical = 6.dp),
+        color = if (selected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
+        fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
+        style = MaterialTheme.typography.labelMedium,
     )
 }
-
 private fun formatAreaUsage(value: Double): String =
     if (value % 1.0 == 0.0) value.toInt().toString() else String.format(Locale.US, "%.1f", value)
 

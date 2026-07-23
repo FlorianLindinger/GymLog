@@ -255,6 +255,8 @@ fun GymLogApp(
                 onSetPinned = { machine, pinned -> repository.setMachinePinned(machine.machine.id, pinned); refresh() },
                 onMovePinned = { machine, direction -> repository.movePinnedMachine(machine.machine.id, direction); refresh() },
                 onHide = { machine -> repository.setMachineHidden(machine.machine.id, true); refresh() },
+                onRankingChange = { machine, delta -> repository.changeRankingPriority(machine.machine.id, delta); refresh() },
+                onRankingExcluded = { machine, excluded -> repository.setExcludedFromAutoRanking(machine.machine.id, excluded); refresh() },
             )
             Screen.BODY -> BodyOverviewScreen(
                 snapshot = bodyData,
