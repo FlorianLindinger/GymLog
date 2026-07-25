@@ -3,12 +3,10 @@ package com.gymlog.app.ui
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.awaitEachGesture
-import androidx.compose.foundation.gestures.awaitFirstDown
-import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -17,6 +15,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
@@ -90,8 +89,6 @@ fun BodyOverviewScreen(
     var showCustomRange by remember { mutableStateOf(false) }
     var customStart by remember { mutableStateOf(preferences.getLong("custom_start", 0L).takeIf { it > 0L }) }
     var customEnd by remember { mutableStateOf(preferences.getLong("custom_end", 0L).takeIf { it > 0L }) }
-    var isRefreshing by remember { mutableStateOf(false) }
-    val listState = rememberLazyListState()
     val settings = remember {
         mutableStateMapOf<BodyMetric, BodyChartSettings>().apply {
             bodyMetricDisplayOrder.forEach { metric ->
@@ -107,7 +104,7 @@ fun BodyOverviewScreen(
         }
     }
     val newestMeasurement = snapshot.measurements.maxOfOrNull { it.measuredAt } ?: System.currentTimeMillis()
-    val xEnd = newestMeasurement
+    val xEnd = if (window == "CUSTOM") customEnd ?: newestMeasurement else newestMeasurement
     val oldestMeasurement = snapshot.measurements.minOfOrNull { it.measuredAt }
     val xStart = if (window == "CUSTOM") customStart ?: bodyWindowStart("1M", newestMeasurement, oldestMeasurement)
     else bodyWindowStart(window, newestMeasurement, oldestMeasurement)
@@ -122,7 +119,7 @@ fun BodyOverviewScreen(
             item {
                 Card(Modifier.fillMaxWidth()) {
                     Text(
-                        if (isRefreshing) "Syncing Health Connect…" else snapshot.syncedAt?.let { "Last synced ${formatBodySyncTime(it)}" } ?: "Not synced yet",
+                        syncStatus.ifBlank { snapshot.syncedAt?.let { "Last synced ${formatBodySyncTime(it)}" } ?: "Not synced yet" },
                         modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp),
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -207,6 +204,7 @@ fun BodyOverviewScreen(
             onDismiss = { showCustomRange = false },
             onSave = { start, end ->
                 customStart = start
+                customEnd = end
                 window = "CUSTOM"
                 preferences.edit().putLong("custom_start", start).putLong("custom_end", end).putString("window", "CUSTOM").apply()
                 showCustomRange = false
@@ -299,49 +297,72 @@ private fun BodyGraph(
     val max = ticks.last()
     val range = max - min
     val dates = bodyDateTicks(xStart, xEnd)
+    val scrollState = rememberScrollState()
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
         Column(
-            Modifier.width(42.dp).height(180.dp).padding(end = 4.dp),
+            Modifier.width(42.dp).height(BODY_CHART_HEIGHT).padding(end = 4.dp),
             verticalArrangement = Arrangement.SpaceBetween,
             horizontalAlignment = Alignment.End,
         ) {
             ticks.asReversed().forEach { tick -> Text(formatBodyValue(tick), style = MaterialTheme.typography.labelSmall) }
         }
-        Canvas(Modifier.weight(1f).height(180.dp)) {
-            fun y(value: Double) = size.height - ((value - min) / range).toFloat() * size.height
-            fun x(timestamp: Long) = ((timestamp - xStart).toDouble() / (xEnd - xStart).coerceAtLeast(1L))
-                .coerceIn(0.0, 1.0).toFloat() * size.width
-            ticks.forEach { tick ->
-                drawLine(gridColor.copy(alpha = .78f), Offset(0f, y(tick)), Offset(size.width, y(tick)), strokeWidth = 1.5f)
+        BoxWithConstraints(Modifier.weight(1f)) {
+            val graphWidth = maxOf(maxWidth, (values.size * 44).dp)
+            LaunchedEffect(scrollState.maxValue, xStart, xEnd) {
+                if (scrollState.maxValue > 0) scrollState.scrollTo(scrollState.maxValue)
             }
-            dates.forEach { date ->
-                drawLine(gridColor.copy(alpha = .78f), Offset(x(date), 0f), Offset(x(date), size.height), strokeWidth = 1.5f)
-            }
-            val axis = gridColor.copy(alpha = .9f)
-            drawLine(axis, Offset(0f, 0f), Offset(0f, size.height), strokeWidth = 2f)
-            ticks.forEach { tick -> drawLine(axis, Offset(0f, y(tick)), Offset(7f, y(tick)), strokeWidth = 2f) }
-            settings.target?.let { target ->
-                settings.acceptance?.let { tolerance ->
-                    val top = y(target + tolerance)
-                    val bottom = y(target - tolerance)
-                    drawRect(targetColor.copy(alpha = .14f), Offset(0f, top), Size(size.width, (bottom - top).coerceAtLeast(1f)))
+            Column(Modifier.fillMaxWidth().horizontalScroll(scrollState)) {
+                Canvas(Modifier.width(graphWidth).height(BODY_CHART_HEIGHT)) {
+                    fun y(value: Double) = size.height - BODY_PLOT_INSET - ((value - min) / range).toFloat() * (size.height - BODY_PLOT_INSET * 2f)
+                    fun x(timestamp: Long) = ((timestamp - xStart).toDouble() / (xEnd - xStart).coerceAtLeast(1L))
+                        .coerceIn(0.0, 1.0).toFloat() * size.width
+                    ticks.forEach { tick ->
+                        drawLine(gridColor.copy(alpha = .78f), Offset(0f, y(tick)), Offset(size.width, y(tick)), strokeWidth = 1.5f)
+                    }
+                    val axis = gridColor.copy(alpha = .95f)
+                    dates.forEach { date ->
+                        val tickX = x(date)
+                        drawLine(gridColor.copy(alpha = .78f), Offset(tickX, 0f), Offset(tickX, size.height), strokeWidth = 1.5f)
+                        drawLine(axis, Offset(tickX, size.height), Offset(tickX, size.height - 9f), strokeWidth = 2.5f)
+                    }
+                    drawLine(axis, Offset(0f, size.height), Offset(size.width, size.height), strokeWidth = 2f)
+                    settings.target?.let { target ->
+                        settings.acceptance?.let { tolerance ->
+                            val top = y(target + tolerance)
+                            val bottom = y(target - tolerance)
+                            drawRect(targetColor.copy(alpha = .14f), Offset(0f, top), Size(size.width, (bottom - top).coerceAtLeast(1f)))
+                        }
+                        drawLine(targetColor, Offset(0f, y(target)), Offset(size.width, y(target)), strokeWidth = 3f)
+                    }
+                    fun points(series: List<Double>) = series.mapIndexed { index, value ->
+                        Offset(x(values[index].measuredAt).coerceIn(BODY_PLOT_INSET, size.width - BODY_PLOT_INSET), y(value))
+                    }
+                    val points = points(values.map { it.value })
+                    points.zipWithNext().forEach { (a, b) -> drawLine(dataColor, a, b, strokeWidth = 3.5f) }
+                    points.forEach { drawCircle(dataColor, 4.5f, it) }
+                    points(fit).zipWithNext().forEach { (a, b) -> drawLine(fitColor, a, b, strokeWidth = 3f) }
                 }
-                drawLine(targetColor, Offset(0f, y(target)), Offset(size.width, y(target)), strokeWidth = 3f)
+                BodyDateLabels(dates, graphWidth)
             }
-            fun points(series: List<Double>) = series.mapIndexed { index, value -> Offset(x(values[index].measuredAt), y(value)) }
-            val points = points(values.map { it.value })
-            points.zipWithNext().forEach { (a, b) -> drawLine(dataColor, a, b, strokeWidth = 3.5f) }
-            points.forEach { drawCircle(dataColor, 4.5f, it) }
-            points(fit).zipWithNext().forEach { (a, b) -> drawLine(fitColor, a, b, strokeWidth = 3f) }
-        }
-    }
-    Row(Modifier.fillMaxWidth().padding(start = 46.dp), horizontalArrangement = Arrangement.SpaceBetween) {
-        val formatter = DateTimeFormatter.ofPattern("d MMM yy")
-        dates.forEach { date ->
-            Text(Instant.ofEpochMilli(date).atZone(ZoneId.systemDefault()).format(formatter), style = MaterialTheme.typography.labelSmall)
         }
     }
 }
+
+@Composable
+private fun BodyDateLabels(dates: List<Long>, width: androidx.compose.ui.unit.Dp) {
+    Row(Modifier.width(width).height(20.dp), horizontalArrangement = Arrangement.SpaceBetween) {
+        dates.forEach { date ->
+            Text(
+                Instant.ofEpochMilli(date).atZone(ZoneId.systemDefault()).format(DateTimeFormatter.ofPattern("d MMM yy")),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+private val BODY_CHART_HEIGHT = 124.dp
+private const val BODY_PLOT_INSET = 6f
 private fun bodyNiceTicks(rawMin: Double, rawMax: Double): List<Double> {
     val span = (rawMax - rawMin).takeIf { it > 0.0 } ?: kotlin.math.abs(rawMax).coerceAtLeast(1.0)
     val roughStep = span / 4.0

@@ -36,6 +36,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
@@ -129,11 +130,16 @@ fun DetailScreen(
                     CompactChoice(machine.chartWindow == "CUSTOM", { showCustomChartRange = true }, "Custom", Modifier.weight(1f))
                     CompactChoice(machine.showTrend, { repository.setShowTrend(machine.id, !machine.showTrend); onChanged() }, "Trend", Modifier.weight(1f))
                 }
+                val now = System.currentTimeMillis()
                 val cutoff = if (machine.chartWindow == "CUSTOM") customChartStart else chartCutoff(machine.chartWindow)
+                val chartEnd = if (machine.chartWindow == "CUSTOM") customChartEnd ?: now else now
                 val visibleSets = summary.recentSets.filter { set ->
-                    (cutoff == null || set.performedAt >= cutoff) && (machine.chartWindow != "CUSTOM" || customChartEnd == null || set.performedAt <= customChartEnd!!)
+                    (cutoff == null || set.performedAt >= cutoff) && set.performedAt <= chartEnd
                 }
-                SessionMetricsChart(visibleSets, 0, machine.trackingMode, machine.showTrend)
+                val chartStart = cutoff
+                    ?: visibleSets.minOfOrNull { it.performedAt }
+                    ?: chartEnd - Duration.ofDays(1).toMillis()
+                SessionMetricsChart(visibleSets, machine.trackingMode, machine.showTrend, chartStart, chartEnd)
                 Text("${(summary.weightChanges.size - 1).coerceAtLeast(0)} ${metricName(machine.trackingMode)} changes · ${summary.recentSets.size} recorded sets", color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
@@ -271,15 +277,6 @@ fun DetailScreen(
 }
 
 @Composable
-private fun Stat(label: String, value: String, modifier: Modifier = Modifier) {
-    Card(modifier) {
-        Column(Modifier.fillMaxWidth().padding(vertical = 7.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-            Text(value, fontWeight = FontWeight.Bold)
-            Text(label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        }
-    }
-}
-@Composable
 private fun CompactChoice(selected: Boolean, onClick: () -> Unit, label: String, modifier: Modifier = Modifier) {
     Text(
         label,
@@ -294,22 +291,38 @@ private fun CompactChoice(selected: Boolean, onClick: () -> Unit, label: String,
 }
 
 @Composable
-private fun SessionMetricsChart(sets: List<SetRecord>, trailingAverage: Int, trackingMode: String, showTrend: Boolean) {
-    val allSessions = groupSetBatches(sets).asReversed()
-    val sessions = allSessions.takeLast(24)
+private fun SessionMetricsChart(
+    sets: List<SetRecord>,
+    trackingMode: String,
+    showTrend: Boolean,
+    rangeStart: Long,
+    rangeEnd: Long,
+) {
+    val sessions = groupSetBatches(sets).asReversed()
     if (sessions.isEmpty()) { Text("No training data in this window.", color = MaterialTheme.colorScheme.onSurfaceVariant); return }
-    val weight = movingAverage(sessions.map { it.first().weight }, trailingAverage)
-    val volume = movingAverage(sessions.map { session -> session.sumOf { it.weight * it.reps } }, trailingAverage)
-    val repsPerSet = movingAverage(sessions.map { session -> session.map { it.reps }.average() }, trailingAverage)
-    val minutes = movingAverage(sessions.map { session -> session.sumOf { it.weight } }, trailingAverage)
+    val weight = sessions.map { it.first().weight }
+    val volume = sessions.map { session -> session.sumOf { it.weight * it.reps } }
+    val repsPerSet = sessions.map { session -> session.map { it.reps }.average() }
+    val minutes = sessions.map { session -> session.sumOf { it.weight } }
     Text("Training Session Graph", style = MaterialTheme.typography.labelLarge)
-    if (trackingMode == "DURATION") AxisMetricPlot("Minutes", minutes, MaterialTheme.colorScheme.primary, showTrend)
-    else DualAxisSessionPlot(repsPerSet, weight, volume, sessions, strength = trackingMode == "STRENGTH", showTrend = showTrend)
-    if (allSessions.size > 24) Text("Showing the 24 most recent training sessions", style = MaterialTheme.typography.bodySmall)
+    if (trackingMode == "DURATION") {
+        AxisMetricPlot("Minutes", minutes, sessions, rangeStart, rangeEnd, MaterialTheme.colorScheme.primary, showTrend)
+    } else {
+        DualAxisSessionPlot(repsPerSet, weight, volume, sessions, rangeStart, rangeEnd, strength = trackingMode == "STRENGTH", showTrend = showTrend)
+    }
 }
 
 @Composable
-private fun DualAxisSessionPlot(reps: List<Double>, weight: List<Double>, volume: List<Double>, sessions: List<List<SetRecord>>, strength: Boolean, showTrend: Boolean) {
+private fun DualAxisSessionPlot(
+    reps: List<Double>,
+    weight: List<Double>,
+    volume: List<Double>,
+    sessions: List<List<SetRecord>>,
+    rangeStart: Long,
+    rangeEnd: Long,
+    strength: Boolean,
+    showTrend: Boolean,
+) {
     val repsFit = fittedSeries(reps).first
     val weightFit = fittedSeries(weight).first
     val volumeFit = fittedSeries(volume).first
@@ -324,6 +337,9 @@ private fun DualAxisSessionPlot(reps: List<Double>, weight: List<Double>, volume
     val volumeColor = Color(0xFF00BCD4)
     val grid = MaterialTheme.colorScheme.outlineVariant.copy(alpha = .72f)
     val axis = MaterialTheme.colorScheme.outline.copy(alpha = .9f)
+    val dates = chartDateTicks(rangeStart, rangeEnd)
+    val timestamps = sessions.map { session -> session.maxOf { it.performedAt } }
+    val scrollState = rememberScrollState()
     Row(horizontalArrangement = Arrangement.spacedBy(3.dp), verticalAlignment = Alignment.CenterVertically) {
         Text(if (strength) "Level" else "Reps / set", color = repsColor, style = MaterialTheme.typography.labelSmall)
         Text("/", style = MaterialTheme.typography.labelSmall)
@@ -333,139 +349,149 @@ private fun DualAxisSessionPlot(reps: List<Double>, weight: List<Double>, volume
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
         AxisLabels(repsMax, repsMin, repsColor, Modifier.width(42.dp))
         BoxWithConstraints(Modifier.weight(1f)) {
-            val graphWidth = maxOf(maxWidth, (reps.size * 28).dp)
-            Box(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
-                Canvas(Modifier.width(graphWidth).height(164.dp).padding(vertical = 5.dp)) {
-                    fun x(index: Int, count: Int) = if (count == 1) size.width / 2f else index * size.width / (count - 1)
+            val graphWidth = maxOf(maxWidth, (reps.size * 44).dp)
+            LaunchedEffect(scrollState.maxValue, rangeStart, rangeEnd) {
+                if (scrollState.maxValue > 0) scrollState.scrollTo(scrollState.maxValue)
+            }
+            Column(Modifier.fillMaxWidth().horizontalScroll(scrollState)) {
+                Canvas(Modifier.width(graphWidth).height(CHART_HEIGHT)) {
+                    fun x(timestamp: Long) = chartX(timestamp, rangeStart, rangeEnd, size.width)
                     fun y(value: Double, min: Double, max: Double): Float {
                         val range = (max - min).takeIf { it > 0.0 } ?: 1.0
-                        return size.height - 5f - ((value - min) / range).toFloat() * (size.height - 10f)
+                        return size.height - PLOT_INSET - ((value - min) / range).toFloat() * (size.height - PLOT_INSET * 2f)
                     }
                     repeat(3) { index ->
                         val lineY = index * size.height / 2f
                         drawLine(grid, Offset(0f, lineY), Offset(size.width, lineY), strokeWidth = 1.2f)
                     }
-                    drawLine(repsColor, Offset(0f, 0f), Offset(0f, size.height), strokeWidth = 2f)
-                    drawLine(weightColor, Offset(size.width, 0f), Offset(size.width, size.height), strokeWidth = 2f)
+                    dates.forEach { date ->
+                        val tickX = x(date)
+                        drawLine(grid, Offset(tickX, 0f), Offset(tickX, size.height), strokeWidth = 1.5f)
+                        drawLine(axis, Offset(tickX, size.height), Offset(tickX, size.height - 9f), strokeWidth = 2.5f)
+                    }
+                    drawLine(axis, Offset(0f, size.height), Offset(size.width, size.height), strokeWidth = 2f)
                     repeat(3) { index ->
                         val tickY = index * size.height / 2f
                         drawLine(repsColor, Offset(0f, tickY), Offset(7f, tickY), strokeWidth = 2f)
                         drawLine(weightColor, Offset(size.width, tickY), Offset(size.width - 7f, tickY), strokeWidth = 2f)
                     }
                     val volumePoints = volume.mapIndexed { index, value ->
-                        Offset(x(index, volume.size), y(value, volumeMin, volumeMax))
+                        Offset(x(timestamps[index]).coerceIn(PLOT_INSET, size.width - PLOT_INSET), y(value, volumeMin, volumeMax))
                     }
                     volumePoints.zipWithNext().forEach { (a, b) -> drawLine(volumeColor, a, b, strokeWidth = 3.5f, cap = StrokeCap.Round) }
                     volumePoints.forEach { drawCircle(volumeColor, 3.8f, it) }
                     fun drawMetric(values: List<Double>, fit: List<Double>, min: Double, max: Double, color: Color) {
-                        val points = values.mapIndexed { index, value -> Offset(x(index, values.size), y(value, min, max)) }
+                        val points = values.mapIndexed { index, value -> Offset(x(timestamps[index]).coerceIn(PLOT_INSET, size.width - PLOT_INSET), y(value, min, max)) }
                         points.zipWithNext().forEach { (a, b) -> drawLine(color, a, b, strokeWidth = 4f, cap = StrokeCap.Round) }
                         points.forEach { drawCircle(color, 4.2f, it) }
-                        val trend = fit.mapIndexed { index, value -> Offset(x(index, fit.size), y(value, min, max)) }
+                        val trend = fit.mapIndexed { index, value -> Offset(x(timestamps[index]).coerceIn(PLOT_INSET, size.width - PLOT_INSET), y(value, min, max)) }
                         if (showTrend) trend.zipWithNext().forEach { (a, b) -> drawLine(color.copy(alpha = .6f), a, b, strokeWidth = 2.5f, cap = StrokeCap.Round, pathEffect = PathEffect.dashPathEffect(floatArrayOf(9f, 7f))) }
                     }
                     drawMetric(reps, repsFit, repsMin, repsMax, repsColor)
                     drawMetric(weight, weightFit, weightMin, weightMax, weightColor)
-                    val volumeTrend = volumeFit.mapIndexed { index, value -> Offset(x(index, volumeFit.size), y(value, volumeMin, volumeMax)) }
+                    val volumeTrend = volumeFit.mapIndexed { index, value -> Offset(x(timestamps[index]).coerceIn(PLOT_INSET, size.width - PLOT_INSET), y(value, volumeMin, volumeMax)) }
                     if (showTrend) volumeTrend.zipWithNext().forEach { (a, b) -> drawLine(Color(0xFF007C91), a, b, strokeWidth = 2.5f, cap = StrokeCap.Round, pathEffect = PathEffect.dashPathEffect(floatArrayOf(9f, 7f))) }
                 }
+                ChartDateLabels(dates, graphWidth)
             }
         }
         AxisLabels(weightMax, weightMin, weightColor, Modifier.width(42.dp))
-    }
-    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-        val dates = listOf(sessions.first(), sessions[sessions.lastIndex / 2], sessions.last())
-            .map { session -> session.maxOf { it.performedAt } }
-            .distinct()
-        dates.forEach { timestamp ->
-            Text(formatTimestamp(timestamp), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        }
     }
 }
 
 @Composable
 private fun AxisLabels(max: Double, min: Double, color: Color, modifier: Modifier) {
-    Column(modifier.height(164.dp), verticalArrangement = Arrangement.SpaceBetween, horizontalAlignment = Alignment.End) {
+    Column(modifier.height(CHART_HEIGHT), verticalArrangement = Arrangement.SpaceBetween, horizontalAlignment = Alignment.End) {
         Text(formatAxisValue(max), style = MaterialTheme.typography.labelSmall, color = color)
         Text(formatAxisValue((max + min) / 2.0), style = MaterialTheme.typography.labelSmall, color = color)
         Text(formatAxisValue(min), style = MaterialTheme.typography.labelSmall, color = color)
     }
 }
 @Composable
-private fun AxisMetricPlot(label: String, values: List<Double>, color: Color, showTrend: Boolean) {
+private fun AxisMetricPlot(
+    label: String,
+    values: List<Double>,
+    sessions: List<List<SetRecord>>,
+    rangeStart: Long,
+    rangeEnd: Long,
+    color: Color,
+    showTrend: Boolean,
+) {
     val fit = fittedSeries(values).first
     val min = values.minOrNull() ?: 0.0
     val max = values.maxOrNull() ?: 0.0
     val grid = MaterialTheme.colorScheme.outlineVariant.copy(alpha = .72f)
     val axis = MaterialTheme.colorScheme.outline.copy(alpha = .9f)
+    val dates = chartDateTicks(rangeStart, rangeEnd)
+    val timestamps = sessions.map { session -> session.maxOf { it.performedAt } }
+    val scrollState = rememberScrollState()
     Text("$label: ${formatAxisValue(min)}–${formatAxisValue(max)}", color = color, style = MaterialTheme.typography.labelSmall)
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
-        Column(Modifier.width(50.dp).height(112.dp), verticalArrangement = Arrangement.SpaceBetween, horizontalAlignment = Alignment.End) {
+        Column(Modifier.width(50.dp).height(CHART_HEIGHT), verticalArrangement = Arrangement.SpaceBetween, horizontalAlignment = Alignment.End) {
             Text(formatAxisValue(max), style = MaterialTheme.typography.labelSmall)
             Text(formatAxisValue((min + max) / 2), style = MaterialTheme.typography.labelSmall)
             Text(formatAxisValue(min), style = MaterialTheme.typography.labelSmall)
         }
         BoxWithConstraints(Modifier.weight(1f)) {
-            val graphWidth = maxOf(maxWidth, (values.size * 28).dp)
-            Box(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
-                Canvas(Modifier.width(graphWidth).height(112.dp).padding(vertical = 5.dp)) {
+            val graphWidth = maxOf(maxWidth, (values.size * 44).dp)
+            LaunchedEffect(scrollState.maxValue, rangeStart, rangeEnd) {
+                if (scrollState.maxValue > 0) scrollState.scrollTo(scrollState.maxValue)
+            }
+            Column(Modifier.fillMaxWidth().horizontalScroll(scrollState)) {
+                Canvas(Modifier.width(graphWidth).height(CHART_HEIGHT)) {
                     val range = (max - min).takeIf { it > 0 } ?: 1.0
-                    fun y(value: Double) = size.height - 4f - ((value - min) / range).toFloat() * (size.height - 8f)
+                    fun y(value: Double) = size.height - PLOT_INSET - ((value - min) / range).toFloat() * (size.height - PLOT_INSET * 2f)
+                    fun x(timestamp: Long) = chartX(timestamp, rangeStart, rangeEnd, size.width)
                     repeat(3) { index ->
                         val lineY = index * size.height / 2f
                         drawLine(grid, Offset(0f, lineY), Offset(size.width, lineY), strokeWidth = 1.2f)
                     }
-                    drawLine(color, Offset(0f, 0f), Offset(0f, size.height), strokeWidth = 2f)
+                    dates.forEach { date ->
+                        val tickX = x(date)
+                        drawLine(grid, Offset(tickX, 0f), Offset(tickX, size.height), strokeWidth = 1.5f)
+                        drawLine(axis, Offset(tickX, size.height), Offset(tickX, size.height - 9f), strokeWidth = 2.5f)
+                    }
+                    drawLine(axis, Offset(0f, size.height), Offset(size.width, size.height), strokeWidth = 2f)
                     repeat(3) { index ->
                         val tickY = index * size.height / 2f
                         drawLine(color, Offset(0f, tickY), Offset(7f, tickY), strokeWidth = 2f)
                     }
-                    val points = values.mapIndexed { index, value -> Offset(if (values.size == 1) size.width / 2f else index * size.width / (values.size - 1), y(value)) }
+                    val points = values.mapIndexed { index, value -> Offset(x(timestamps[index]).coerceIn(PLOT_INSET, size.width - PLOT_INSET), y(value)) }
                     points.zipWithNext().forEach { (a, b) -> drawLine(color, a, b, strokeWidth = 4f, cap = StrokeCap.Round) }
                     points.forEach { drawCircle(color, 4.5f, it) }
-                    val trendPoints = fit.mapIndexed { index, value -> Offset(if (fit.size == 1) size.width / 2f else index * size.width / (fit.size - 1), y(value)) }
+                    val trendPoints = fit.mapIndexed { index, value -> Offset(x(timestamps[index]).coerceIn(PLOT_INSET, size.width - PLOT_INSET), y(value)) }
                     if (showTrend) trendPoints.zipWithNext().forEach { (a, b) -> drawLine(color.copy(alpha = .58f), a, b, strokeWidth = 2.5f, cap = StrokeCap.Round, pathEffect = PathEffect.dashPathEffect(floatArrayOf(9f, 7f))) }
                 }
+                ChartDateLabels(dates, graphWidth)
             }
         }
     }
 }
 
 @Composable
-private fun VolumePerTrainingDayPlot(values: List<Double>, sessions: List<List<SetRecord>>) {
-    val fit = fittedSeries(values).first
-    val max = (values + fit).maxOrNull()?.takeIf { it > 0.0 } ?: 1.0
-    Text("Volume / training day", color = Color(0xFF00BCD4), style = MaterialTheme.typography.labelSmall)
-    BoxWithConstraints(Modifier.fillMaxWidth()) {
-        val graphWidth = maxOf(maxWidth, (values.size * 28).dp)
-        Box(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
-            Canvas(Modifier.width(graphWidth).height(132.dp).padding(vertical = 5.dp)) {
-                val barWidth = (size.width / values.size.coerceAtLeast(1) * .55f).coerceAtMost(22f)
-                values.forEachIndexed { index, value ->
-                    val x = if (values.size == 1) size.width / 2f else index * size.width / (values.size - 1)
-                    val height = (value / max).toFloat() * (size.height - 8f)
-                    drawRoundRect(Color(0xFF00BCD4), Offset(x - barWidth / 2f, size.height - 4f - height), Size(barWidth, height.coerceAtLeast(2f)), androidx.compose.ui.geometry.CornerRadius(barWidth / 2f, barWidth / 2f))
-                }
-                val trendPoints = fit.mapIndexed { index, value ->
-                    Offset(if (fit.size == 1) size.width / 2f else index * size.width / (fit.size - 1), size.height - 4f - (value / max).toFloat() * (size.height - 8f))
-                }
-                trendPoints.zipWithNext().forEach { (a, b) -> drawLine(Color(0xFF007C91), a, b, strokeWidth = 3f, cap = StrokeCap.Round, pathEffect = PathEffect.dashPathEffect(floatArrayOf(9f, 7f))) }
-            }
-        }
-    }
-    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-        val dates = listOf(sessions.first(), sessions[sessions.lastIndex / 2], sessions.last())
-            .map { session -> session.maxOf { it.performedAt } }
-            .distinct()
+private fun ChartDateLabels(dates: List<Long>, width: androidx.compose.ui.unit.Dp) {
+    Row(Modifier.width(width).height(20.dp), horizontalArrangement = Arrangement.SpaceBetween) {
         dates.forEach { timestamp ->
-            Text(formatTimestamp(timestamp), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(
+                Instant.ofEpochMilli(timestamp).atZone(ZoneId.systemDefault()).format(DateTimeFormatter.ofPattern("d MMM yy")),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
     }
 }
+
+private fun chartDateTicks(start: Long, end: Long): List<Long> =
+    listOf(start, start + (end - start) / 2L, end).distinct()
+
+private fun chartX(timestamp: Long, start: Long, end: Long, width: Float): Float =
+    (((timestamp - start).toDouble() / (end - start).coerceAtLeast(1L)).coerceIn(0.0, 1.0) * width).toFloat()
+
+private val CHART_HEIGHT = 124.dp
+private const val PLOT_INSET = 6f
+
 private fun formatAxisValue(value: Double): String = if (value % 1.0 == 0.0) value.toInt().toString()
 else String.format(Locale.US, "%.1f", value)
-
-private fun formatSignedAxisValue(value: Double): String = String.format(Locale.US, "%+.1f", value)
 
 private fun fittedSeries(values: List<Double>): Pair<List<Double>, Double> {
     if (values.size < 2) return values to 0.0
@@ -476,11 +502,6 @@ private fun fittedSeries(values: List<Double>): Pair<List<Double>, Double> {
     val intercept = meanY - slope * meanX
     val fit = values.indices.map { index -> intercept + slope * index }
     return fit to (fit.last() - fit.first())
-}
-
-private fun movingAverage(values: List<Double>, amount: Int): List<Double> {
-    if (amount <= 1) return values
-    return values.indices.map { index -> values.subList((index - amount + 1).coerceAtLeast(0), index + 1).average() }
 }
 
 private fun weightChangeDescription(changes: List<WeightChange>, trackingMode: String): String {

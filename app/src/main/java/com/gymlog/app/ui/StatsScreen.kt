@@ -24,6 +24,7 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -45,6 +46,7 @@ import java.time.Instant
 import java.time.LocalDate
 import java.time.YearMonth
 import java.time.ZoneId
+import java.time.format.DateTimeFormatter
 import java.util.Locale
 
 @Composable
@@ -62,16 +64,27 @@ fun StatsScreen(
     val durations = sessions.mapValues { (_, sets) ->
         if (sets.size < 2) 0.0 else Duration.ofMillis(sets.maxOf { it.performedAt } - sets.minOf { it.performedAt }).toMinutes().toDouble()
     }
-    val last30Cutoff = Instant.now().minus(Duration.ofDays(30)).toEpochMilli()
     val allSessions = history.groupBy { trainingDate(it.performedAt, zone) }
-    val last30Durations = (29 downTo 0).map { daysAgo ->
-        val day = trainingDate(System.currentTimeMillis(), zone).minusDays(daysAgo.toLong())
+    val last30Days = (29 downTo 0).map { daysAgo ->
+        trainingDate(System.currentTimeMillis(), zone).minusDays(daysAgo.toLong())
+    }
+    val last30Durations = last30Days.map { day ->
         val entries = allSessions[day].orEmpty()
         if (entries.size < 2) 0.0 else Duration.ofMillis(entries.maxOf { it.performedAt } - entries.minOf { it.performedAt }).toMinutes().toDouble()
     }
     val hoursLast30Days = last30Durations.sum() / 60.0
-    val weeks = sessions.entries.groupBy { (date, _) -> date.minusDays((date.dayOfWeek.value - 1).toLong()) }
-        .toSortedMap().mapValues { it.value.size.toDouble() }
+    val thisMonday = LocalDate.now().minusDays((LocalDate.now().dayOfWeek.value - 1).toLong())
+    val sessionsByWeek = sessions.keys.groupingBy { date ->
+        date.minusDays((date.dayOfWeek.value - 1).toLong())
+    }.eachCount()
+    val firstSessionWeek = cutoff?.let { timestamp ->
+        val date = trainingDate(timestamp, zone)
+        date.minusDays((date.dayOfWeek.value - 1).toLong())
+    } ?: sessionsByWeek.keys.minOrNull() ?: thisMonday
+    val sessionWeekDates = generateSequence(firstSessionWeek) { it.plusWeeks(1) }
+        .takeWhile { !it.isAfter(thisMonday) }
+        .toList()
+    val weeks = sessionWeekDates.associateWith { week -> (sessionsByWeek[week] ?: 0).toDouble() }
     val periodWeeks = when {
         visible.isEmpty() -> 1.0
         cutoff != null -> ((System.currentTimeMillis() - cutoff) / 604_800_000.0).coerceAtLeast(1.0)
@@ -84,14 +97,14 @@ fun StatsScreen(
         val date = trainingDate(it.changedAt, zone)
         date.minusDays((date.dayOfWeek.value - 1).toLong())
     }.eachCount()
-    val thisMonday = LocalDate.now().minusDays((LocalDate.now().dayOfWeek.value - 1).toLong())
-    val increasesByWeek = (19 downTo 0).map { weeksAgo ->
-        (increaseWeeksByDate[thisMonday.minusWeeks(weeksAgo.toLong())] ?: 0).toDouble()
+    val increaseWeekDates = sessionWeekDates
+    val increasesByWeek = increaseWeekDates.map { week ->
+        (increaseWeeksByDate[week] ?: 0).toDouble()
     }
     val increasesByDate = increases.groupingBy {
         trainingDate(it.changedAt, zone)
     }.eachCount()
-    val upgradesPerGymDay = sessions.keys.map { date -> (increasesByDate[date] ?: 0).toDouble() }.takeLast(24)
+    val upgradesPerGymDay = sessions.keys.map { date -> (increasesByDate[date] ?: 0).toDouble() }
     val averageUpgradesPerGymDay = if (sessions.isEmpty()) 0.0 else increases.size.toDouble() / sessions.size
     val averageUpgradesPerMonth = increases.size / (periodWeeks / 4.345).coerceAtLeast(1.0)
     val increasesByMonth = increases.groupingBy {
@@ -104,11 +117,16 @@ fun StatsScreen(
         "1Y" -> 12
         "2Y" -> 24
         "3Y" -> 36
-        else -> 36
+        else -> increasesByMonth.keys.minOrNull()?.let { oldest ->
+            (java.time.temporal.ChronoUnit.MONTHS.between(oldest, YearMonth.now()).toInt() + 1).coerceAtLeast(1)
+        } ?: 1
     }
     val currentMonth = YearMonth.now()
-    val upgradesByMonth = (plottedMonths - 1 downTo 0).map { monthsAgo ->
-        (increasesByMonth[currentMonth.minusMonths(monthsAgo.toLong())] ?: 0).toDouble()
+    val plottedMonthDates = (plottedMonths - 1 downTo 0).map { monthsAgo ->
+        currentMonth.minusMonths(monthsAgo.toLong())
+    }
+    val upgradesByMonth = plottedMonthDates.map { month ->
+        (increasesByMonth[month] ?: 0).toDouble()
     }
     val machinesById = machines.associateBy { it.machine.id }
     val bodyCounts = mutableMapOf<BodyArea, Pair<Int, Int>>()
@@ -191,12 +209,12 @@ fun StatsScreen(
             }
         }
         item { BodyAreaStatsCard(bodyAreaStats) }
-        item { StatsChart("Gym Sessions by Week", weeks.values.toList().takeLast(20), "sessions") }
-        item { StatsChart("Training Hours by Day (last 30 days)", last30Durations.map { it / 60.0 }, "hours") }
-        item { StatsChart("Gym Duration by Day", durations.values.toList().takeLast(24), "minutes") }
-        item { StatsChart("Weight Increases by Week", increasesByWeek, "increases") }
-        item { StatsChart("Weight Upgrades per Gym Day", upgradesPerGymDay, "upgrades") }
-        item { StatsChart("Weight Upgrades by Month", upgradesByMonth, "upgrades") }
+        item { StatsChart("Gym Sessions by Week", weeks.values.toList(), "sessions", weeks.keys.map(::shortDate)) }
+        item { StatsChart("Training Hours by Day (last 30 days)", last30Durations.map { it / 60.0 }, "hours", last30Days.map(::shortDate)) }
+        item { StatsChart("Gym Duration by Day", durations.values.toList(), "minutes", durations.keys.map(::shortDate)) }
+        item { StatsChart("Weight Increases by Week", increasesByWeek, "increases", increaseWeekDates.map(::shortDate)) }
+        item { StatsChart("Weight Upgrades per Gym Day", upgradesPerGymDay, "upgrades", sessions.keys.map(::shortDate)) }
+        item { StatsChart("Weight Upgrades by Month", upgradesByMonth, "upgrades", plottedMonthDates.map { it.format(DateTimeFormatter.ofPattern("MMM yy")) }) }
         item { ProgressionByExerciseCard(weightMachines, cutoff, periodWeeks) }
         item {
             Text(
@@ -275,9 +293,9 @@ private fun StatCard(label: String, value: String, modifier: Modifier = Modifier
 }
 
 @Composable
-private fun StatsChart(title: String, values: List<Double>, unit: String) {
+private fun StatsChart(title: String, values: List<Double>, unit: String, labels: List<String>) {
     Card(Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Column(Modifier.padding(horizontal = 8.dp, vertical = 6.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
             Text(title, fontWeight = FontWeight.SemiBold)
             val latest = values.lastOrNull() ?: 0.0
             Text(
@@ -298,47 +316,73 @@ private fun StatsChart(title: String, values: List<Double>, unit: String) {
             val min = combined.minOrNull()?.coerceAtMost(0.0) ?: 0.0
             val max = combined.maxOrNull()?.takeIf { it > min } ?: (min + 1.0)
             val range = max - min
+            val scrollState = rememberScrollState()
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
-                Column(Modifier.width(44.dp).height(130.dp), verticalArrangement = Arrangement.SpaceBetween, horizontalAlignment = Alignment.End) {
+                Column(Modifier.width(44.dp).height(STATS_CHART_HEIGHT), verticalArrangement = Arrangement.SpaceBetween, horizontalAlignment = Alignment.End) {
                     Text(formatStatsAxisValue(max), style = MaterialTheme.typography.labelSmall)
                     Text(formatStatsAxisValue((max + min) / 2), style = MaterialTheme.typography.labelSmall)
                     Text(formatStatsAxisValue(min), style = MaterialTheme.typography.labelSmall)
                 }
                 BoxWithConstraints(Modifier.weight(1f)) {
-                    val graphWidth = maxOf(maxWidth, (values.size * 28).dp)
-                    Box(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
-                    Canvas(Modifier.width(graphWidth).height(130.dp)) {
-                if (values.isEmpty()) return@Canvas
-                repeat(3) { index ->
-                    val y = index * size.height / 2f
-                    drawLine(grid, Offset(0f, y), Offset(size.width, y), strokeWidth = 1f)
-                }
-                repeat(5) { index ->
-                    val x = index * size.width / 4f
-                    drawLine(grid, Offset(x, 0f), Offset(x, size.height), strokeWidth = 1f)
-                }
-                drawLine(axis, Offset(0f, 0f), Offset(0f, size.height), strokeWidth = 2f)
-                repeat(3) { index ->
-                    val tickY = index * size.height / 2f
-                    drawLine(axis, Offset(0f, tickY), Offset(7f, tickY), strokeWidth = 2f)
-                }
-                fun points(series: List<Double>) = series.mapIndexed { index, value ->
-                    Offset(
-                        x = if (series.size == 1) size.width / 2f else index * size.width / (series.size - 1),
-                        y = size.height - ((value - min) / range).toFloat() * size.height,
-                    )
-                }
-                val dataPoints = points(values)
-                dataPoints.zipWithNext().forEach { (start, end) -> drawLine(primary, start, end, strokeWidth = 5f) }
-                dataPoints.forEach { drawCircle(primary, 5f, it) }
-                points(fit).zipWithNext().forEach { (start, end) -> drawLine(fitColor, start, end, strokeWidth = 3f) }
+                    val graphWidth = maxOf(maxWidth, (values.size * 44).dp)
+                    LaunchedEffect(scrollState.maxValue, values.size) {
+                        if (scrollState.maxValue > 0) scrollState.scrollTo(scrollState.maxValue)
                     }
+                    Column(Modifier.fillMaxWidth().horizontalScroll(scrollState)) {
+                        Canvas(Modifier.width(graphWidth).height(STATS_CHART_HEIGHT)) {
+                            if (values.isEmpty()) return@Canvas
+                            repeat(3) { index ->
+                                val y = index * size.height / 2f
+                                drawLine(grid, Offset(0f, y), Offset(size.width, y), strokeWidth = 1f)
+                            }
+                            repeat(3) { index ->
+                                val x = index * size.width / 2f
+                                drawLine(grid, Offset(x, 0f), Offset(x, size.height), strokeWidth = 1.5f)
+                                drawLine(axis, Offset(x, size.height), Offset(x, size.height - 9f), strokeWidth = 2.5f)
+                            }
+                            drawLine(axis, Offset(0f, 0f), Offset(0f, size.height), strokeWidth = 2f)
+                            drawLine(axis, Offset(0f, size.height), Offset(size.width, size.height), strokeWidth = 2f)
+                            repeat(3) { index ->
+                                val tickY = index * size.height / 2f
+                                drawLine(axis, Offset(0f, tickY), Offset(7f, tickY), strokeWidth = 2f)
+                            }
+                            fun points(series: List<Double>) = series.mapIndexed { index, value ->
+                                Offset(
+                                    x = (if (series.size == 1) size.width / 2f else index * size.width / (series.size - 1))
+                                        .coerceIn(STATS_PLOT_INSET, size.width - STATS_PLOT_INSET),
+                                    y = size.height - STATS_PLOT_INSET - ((value - min) / range).toFloat() * (size.height - STATS_PLOT_INSET * 2f),
+                                )
+                            }
+                            val dataPoints = points(values)
+                            dataPoints.zipWithNext().forEach { (start, end) -> drawLine(primary, start, end, strokeWidth = 5f) }
+                            dataPoints.forEach { drawCircle(primary, 5f, it) }
+                            points(fit).zipWithNext().forEach { (start, end) -> drawLine(fitColor, start, end, strokeWidth = 3f) }
+                        }
+                        StatsDateLabels(labels, graphWidth)
                     }
                 }
             }
         }
     }
 }
+
+@Composable
+private fun StatsDateLabels(labels: List<String>, width: androidx.compose.ui.unit.Dp) {
+    val visibleLabels = when {
+        labels.isEmpty() -> emptyList()
+        labels.size == 1 -> labels
+        else -> listOf(labels.first(), labels[labels.lastIndex / 2], labels.last()).distinct()
+    }
+    Row(Modifier.width(width).height(20.dp), horizontalArrangement = Arrangement.SpaceBetween) {
+        visibleLabels.forEach { label ->
+            Text(label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }
+}
+
+private fun shortDate(date: LocalDate): String = date.format(DateTimeFormatter.ofPattern("d MMM yy"))
+private val STATS_CHART_HEIGHT = 110.dp
+private const val STATS_PLOT_INSET = 6f
 
 private fun formatStatsAxisValue(value: Double): String = if (value % 1.0 == 0.0) value.toInt().toString() else String.format(Locale.US, "%.1f", value)
 
