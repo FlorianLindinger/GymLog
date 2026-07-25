@@ -1,12 +1,9 @@
 package com.gymlog.app.ui
 
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -15,7 +12,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
@@ -28,7 +24,6 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
@@ -36,21 +31,17 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import java.time.Duration
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Locale
-import kotlin.math.pow
 
 private data class BodyChartSettings(
     val showFit: Boolean = true,
@@ -104,11 +95,16 @@ fun BodyOverviewScreen(
         }
     }
     val newestMeasurement = snapshot.measurements.maxOfOrNull { it.measuredAt } ?: System.currentTimeMillis()
-    val xEnd = if (window == "CUSTOM") customEnd ?: newestMeasurement else newestMeasurement
     val oldestMeasurement = snapshot.measurements.minOfOrNull { it.measuredAt }
-    val xStart = if (window == "CUSTOM") customStart ?: bodyWindowStart("1M", newestMeasurement, oldestMeasurement)
-    else bodyWindowStart(window, newestMeasurement, oldestMeasurement)
-    val visible = snapshot.measurements.filter { it.measuredAt in xStart..xEnd }
+    val bodyChartWindow = ChartWindow(
+        durationMillis = if (window == "CUSTOM") {
+            customStart?.let { start -> customEnd?.let { end -> (end - start).coerceAtLeast(1L) } }
+        } else {
+            chartWindowDuration(window)
+        },
+        initialEnd = if (window == "CUSTOM") customEnd else newestMeasurement,
+        key = "$window:$customStart:$customEnd",
+    )
 
     Box(modifier.fillMaxSize()) {
         LazyColumn(
@@ -161,7 +157,7 @@ fun BodyOverviewScreen(
                 item(metric.name) {
                     BodyMetricCard(
                         metric = metric,
-                        values = visible.filter { it.metric == metric },
+                        values = snapshot.measurements.filter { it.metric == metric },
                         settings = settings.getValue(metric),
                         onSettings = {
                             settings[metric] = it
@@ -171,8 +167,7 @@ fun BodyOverviewScreen(
                                 .putString("${metric.name}_acceptance", it.acceptance?.toString())
                                 .apply()
                         },
-                        xStart = xStart,
-                        xEnd = xEnd,
+                        window = bodyChartWindow,
                     )
                 }
             }
@@ -219,8 +214,7 @@ private fun BodyMetricCard(
     values: List<BodyMeasurement>,
     settings: BodyChartSettings,
     onSettings: (BodyChartSettings) -> Unit,
-    xStart: Long,
-    xEnd: Long,
+    window: ChartWindow,
 ) {
     var editing by remember { mutableStateOf(false) }
     val sorted = values.sortedBy { it.measuredAt }
@@ -232,7 +226,6 @@ private fun BodyMetricCard(
     val primary = MaterialTheme.colorScheme.primary
     val fitColor = MaterialTheme.colorScheme.tertiary
     val targetColor = Color(0xFF66BB6A)
-    val grid = MaterialTheme.colorScheme.outlineVariant
     Card(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(8.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -243,7 +236,7 @@ private fun BodyMetricCard(
                         fontWeight = FontWeight.SemiBold,
                     )
                 }
-                TextButton(onClick = { editing = true }) { Text("Graph Settings") }
+                TextButton(onClick = { editing = true }) { Text("Settings") }
             }
             if (settings.showFit && sorted.size >= 2) {
                 Text(
@@ -261,7 +254,7 @@ private fun BodyMetricCard(
                     style = MaterialTheme.typography.bodySmall,
                 )
             }
-            BodyGraph(sorted, if (settings.showFit) fit.values else emptyList(), settings, primary, fitColor, targetColor, grid, xStart, xEnd)
+            BodyGraph(sorted, if (settings.showFit) fit.values else emptyList(), settings, primary, fitColor, targetColor, window)
         }
     }
     if (editing) BodyChartSettingsDialog(metric, settings, { editing = false }) {
@@ -278,106 +271,35 @@ private fun BodyGraph(
     dataColor: Color,
     fitColor: Color,
     targetColor: Color,
-    gridColor: Color,
-    xStart: Long,
-    xEnd: Long,
+    window: ChartWindow,
 ) {
     if (values.isEmpty()) {
         Box(Modifier.fillMaxWidth().height(110.dp), contentAlignment = Alignment.Center) {
-            Text("No measurements in this interval.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text("No measurements yet.", color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         return
     }
-    val acceptanceValues = settings.target?.let { target ->
-        listOf(target - (settings.acceptance ?: 0.0), target + (settings.acceptance ?: 0.0))
-    }.orEmpty()
-    val all = values.map { it.value } + fit + acceptanceValues
-    val ticks = bodyNiceTicks(all.minOrNull() ?: 0.0, all.maxOrNull() ?: 1.0)
-    val min = ticks.first()
-    val max = ticks.last()
-    val range = max - min
-    val dates = bodyDateTicks(xStart, xEnd)
-    val scrollState = rememberScrollState()
-    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
-        Column(
-            Modifier.width(42.dp).height(BODY_CHART_HEIGHT).padding(end = 4.dp),
-            verticalArrangement = Arrangement.SpaceBetween,
-            horizontalAlignment = Alignment.End,
-        ) {
-            ticks.asReversed().forEach { tick -> Text(formatBodyValue(tick), style = MaterialTheme.typography.labelSmall) }
-        }
-        BoxWithConstraints(Modifier.weight(1f)) {
-            val graphWidth = maxOf(maxWidth, (values.size * 44).dp)
-            LaunchedEffect(scrollState.maxValue, xStart, xEnd) {
-                if (scrollState.maxValue > 0) scrollState.scrollTo(scrollState.maxValue)
+    TimeWindowChart(
+        series = buildList {
+            add(TimeSeries(values.map { TimeValue(it.measuredAt, it.value) }, dataColor))
+            if (fit.isNotEmpty()) {
+                add(
+                    TimeSeries(
+                        fit.mapIndexed { index, value -> TimeValue(values[index].measuredAt, value) },
+                        fitColor,
+                        strokeWidth = 2.5f,
+                        dashed = true,
+                        showPoints = false,
+                    ),
+                )
             }
-            Column(Modifier.fillMaxWidth().horizontalScroll(scrollState)) {
-                Canvas(Modifier.width(graphWidth).height(BODY_CHART_HEIGHT)) {
-                    fun y(value: Double) = size.height - BODY_PLOT_INSET - ((value - min) / range).toFloat() * (size.height - BODY_PLOT_INSET * 2f)
-                    fun x(timestamp: Long) = ((timestamp - xStart).toDouble() / (xEnd - xStart).coerceAtLeast(1L))
-                        .coerceIn(0.0, 1.0).toFloat() * size.width
-                    ticks.forEach { tick ->
-                        drawLine(gridColor.copy(alpha = .78f), Offset(0f, y(tick)), Offset(size.width, y(tick)), strokeWidth = 1.5f)
-                    }
-                    val axis = gridColor.copy(alpha = .95f)
-                    dates.forEach { date ->
-                        val tickX = x(date)
-                        drawLine(gridColor.copy(alpha = .78f), Offset(tickX, 0f), Offset(tickX, size.height), strokeWidth = 1.5f)
-                        drawLine(axis, Offset(tickX, size.height), Offset(tickX, size.height - 9f), strokeWidth = 2.5f)
-                    }
-                    drawLine(axis, Offset(0f, size.height), Offset(size.width, size.height), strokeWidth = 2f)
-                    settings.target?.let { target ->
-                        settings.acceptance?.let { tolerance ->
-                            val top = y(target + tolerance)
-                            val bottom = y(target - tolerance)
-                            drawRect(targetColor.copy(alpha = .14f), Offset(0f, top), Size(size.width, (bottom - top).coerceAtLeast(1f)))
-                        }
-                        drawLine(targetColor, Offset(0f, y(target)), Offset(size.width, y(target)), strokeWidth = 3f)
-                    }
-                    fun points(series: List<Double>) = series.mapIndexed { index, value ->
-                        Offset(x(values[index].measuredAt).coerceIn(BODY_PLOT_INSET, size.width - BODY_PLOT_INSET), y(value))
-                    }
-                    val points = points(values.map { it.value })
-                    points.zipWithNext().forEach { (a, b) -> drawLine(dataColor, a, b, strokeWidth = 3.5f) }
-                    points.forEach { drawCircle(dataColor, 4.5f, it) }
-                    points(fit).zipWithNext().forEach { (a, b) -> drawLine(fitColor, a, b, strokeWidth = 3f) }
-                }
-                BodyDateLabels(dates, graphWidth)
-            }
-        }
-    }
-}
-
-@Composable
-private fun BodyDateLabels(dates: List<Long>, width: androidx.compose.ui.unit.Dp) {
-    Row(Modifier.width(width).height(20.dp), horizontalArrangement = Arrangement.SpaceBetween) {
-        dates.forEach { date ->
-            Text(
-                Instant.ofEpochMilli(date).atZone(ZoneId.systemDefault()).format(DateTimeFormatter.ofPattern("d MMM yy")),
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-    }
-}
-
-private val BODY_CHART_HEIGHT = 124.dp
-private const val BODY_PLOT_INSET = 6f
-private fun bodyNiceTicks(rawMin: Double, rawMax: Double): List<Double> {
-    val span = (rawMax - rawMin).takeIf { it > 0.0 } ?: kotlin.math.abs(rawMax).coerceAtLeast(1.0)
-    val roughStep = span / 4.0
-    val magnitude = 10.0.pow(kotlin.math.floor(kotlin.math.log10(roughStep)))
-    val normalized = roughStep / magnitude
-    val step = when {
-        normalized <= 1.0 -> 1.0
-        normalized <= 2.0 -> 2.0
-        normalized <= 5.0 -> 5.0
-        else -> 10.0
-    } * magnitude
-    val low = kotlin.math.floor((rawMin - step * .08) / step) * step
-    val high = kotlin.math.ceil((rawMax + step * .08) / step) * step
-    val count = ((high - low) / step).toInt().coerceAtLeast(1)
-    return (0..count).map { low + it * step }
+        },
+        window = window,
+        bands = settings.target?.let { target ->
+            listOf(TimeBand(target, settings.acceptance ?: 0.0, targetColor))
+        }.orEmpty(),
+        formatLeft = ::formatBodyValue,
+    )
 }
 
 @Composable
@@ -454,7 +376,7 @@ private fun BodyChartSettingsDialog(
     val parsedAcceptance = acceptance.replace(',', '.').toDoubleOrNull()
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("${metric.label} Graph Settings") },
+        title = { Text("${metric.label} Settings") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 TextButton(onClick = { fit = !fit }) { Text(if (fit) "Linear Fit: On" else "Linear Fit: Off") }
@@ -508,9 +430,6 @@ private fun bodyWindowStart(window: String, newest: Long, oldest: Long?): Long {
     }
     return days?.let { newest - it * DAY_MILLIS } ?: (oldest ?: newest - DAY_MILLIS)
 }
-
-private fun bodyDateTicks(start: Long, end: Long): List<Long> =
-    listOf(start, start + (end - start) / 2, end).distinct()
 
 private fun formatBodySyncTime(timestamp: Long): String =
     Instant.ofEpochMilli(timestamp).atZone(ZoneId.systemDefault()).format(DateTimeFormatter.ofPattern("d MMM yyyy, HH:mm"))

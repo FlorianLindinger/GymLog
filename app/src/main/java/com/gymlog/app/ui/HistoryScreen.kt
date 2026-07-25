@@ -1,12 +1,9 @@
 package com.gymlog.app.ui
 
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -16,7 +13,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -35,7 +31,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -180,77 +175,27 @@ private fun WeeklyVolumeCard(history: List<HistorySet>) {
             !date.isBefore(start) && date.isBefore(end)
         }.size.toDouble()
     }
-    val max = volumes.maxOrNull()?.takeIf { it > 0 } ?: 1.0
     val primary = MaterialTheme.colorScheme.primary
-    val fitColor = MaterialTheme.colorScheme.tertiary
-    val grid = MaterialTheme.colorScheme.outlineVariant
-    val axis = MaterialTheme.colorScheme.outline.copy(alpha = .9f)
+    val zone = ZoneId.systemDefault()
+    val points = starts.zip(volumes).map { (date, value) ->
+        TimeValue(date.atStartOfDay(zone).toInstant().toEpochMilli(), value)
+    }
     Card(Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Column(Modifier.padding(horizontal = 10.dp, vertical = 7.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Text("8-Week Activity Trend", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
             Text("This week: ${volumes.last().toInt()} logged sets", color = MaterialTheme.colorScheme.primary)
-            val fit = historyLinearFit(volumes)
-            Text(
-                "Linear fit: ${String.format(Locale.US, "%+.1f", fit.second)} sets over eight weeks",
-                color = MaterialTheme.colorScheme.tertiary,
-                style = MaterialTheme.typography.bodySmall,
+            TimeWindowChart(
+                series = listOf(TimeSeries(points, primary, strokeWidth = 4f, pointRadius = 5f)),
+                window = ChartWindow(
+                    durationMillis = 8L * 7L * 86_400_000L,
+                    initialEnd = System.currentTimeMillis(),
+                    key = "HISTORY_8_WEEKS",
+                ),
+                leftColor = primary,
+                formatLeft = { value -> if (value % 1.0 == 0.0) value.toInt().toString() else String.format(Locale.US, "%.1f", value) },
             )
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
-                Column(Modifier.width(44.dp).height(150.dp), verticalArrangement = Arrangement.SpaceBetween, horizontalAlignment = Alignment.End) {
-                    Text(max.toInt().toString(), style = MaterialTheme.typography.labelSmall)
-                    Text((max / 2).toInt().toString(), style = MaterialTheme.typography.labelSmall)
-                    Text("0", style = MaterialTheme.typography.labelSmall)
-                }
-                BoxWithConstraints(Modifier.weight(1f)) {
-                val graphWidth = maxOf(maxWidth, (volumes.size * 50).dp)
-                Box(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
-                Canvas(Modifier.width(graphWidth).height(150.dp)) {
-                repeat(3) { index ->
-                    val y = index * size.height / 2f
-                    drawLine(grid, Offset(0f, y), Offset(size.width, y), strokeWidth = 1f)
-                }
-                repeat(5) { index ->
-                    val x = index * size.width / 4f
-                    drawLine(grid, Offset(x, 0f), Offset(x, size.height), strokeWidth = 1f)
-                }
-                drawLine(axis, Offset(0f, 0f), Offset(0f, size.height), strokeWidth = 2f)
-                repeat(3) { index ->
-                    val tickY = index * size.height / 2f
-                    drawLine(axis, Offset(0f, tickY), Offset(7f, tickY), strokeWidth = 2f)
-                }
-                fun points(values: List<Double>) = values.mapIndexed { index, value ->
-                    Offset(
-                        x = index * size.width / (values.size - 1),
-                        y = size.height - (value / max).toFloat() * (size.height - 8f),
-                    )
-                }
-                val values = points(volumes)
-                values.zipWithNext().forEach { (start, end) -> drawLine(primary, start, end, strokeWidth = 5f) }
-                values.forEach { drawCircle(primary, 5f, it) }
-                points(fit.first).zipWithNext().forEach { (start, end) ->
-                    drawLine(fitColor, start, end, strokeWidth = 3f)
-                }
-                }
-                }
-                }
-            }
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Text(starts.first().format(DateTimeFormatter.ofPattern("d MMM")), style = MaterialTheme.typography.bodySmall)
-                Text("Now", style = MaterialTheme.typography.bodySmall)
-            }
         }
     }
-}
-
-private fun historyLinearFit(values: List<Double>): Pair<List<Double>, Double> {
-    if (values.size < 2) return values to 0.0
-    val meanX = (values.size - 1) / 2.0
-    val meanY = values.average()
-    val denominator = values.indices.sumOf { index -> (index - meanX) * (index - meanX) }
-    val slope = values.indices.sumOf { index -> (index - meanX) * (values[index] - meanY) } / denominator
-    val intercept = meanY - slope * meanX
-    val fit = values.indices.map { index -> intercept + slope * index }
-    return fit to (fit.last() - fit.first())
 }
 
 @Composable
