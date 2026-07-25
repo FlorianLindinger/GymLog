@@ -1,23 +1,56 @@
 # Windows Helper Scripts
 
-Run these commands from the repository root. Every script resolves the root automatically, so invoking one from another working directory also works.
+Run these commands from the repository root. Each script resolves the root
+automatically, so it can also be launched from another working directory.
 
-- `scripts\windows\build.bat` builds the debug APK.
-- `scripts\windows\verify.bat` compiles, tests, lints, assembles, and checks Git whitespace.
-- `scripts\windows\run_on_phone.bat [SERIAL]` builds, installs, and launches GymLog.
-- `scripts\windows\install_via_usb.bat [SERIAL]` installs the existing debug APK.
-- `scripts\windows\device_check.bat [SERIAL]` reports device and installed-app versions.
-- `scripts\windows\logcat.bat [SERIAL]` follows logs for the GymLog process.
-- `scripts\windows\screenshot.bat [SERIAL]` writes a device screenshot under `screenshots\`.
-- `scripts\windows\release.bat VERSION` verifies and produces signed APK/AAB artifacts and checksums.
+## Build and verification
 
-`_android_env.bat` is shared implementation and is not intended to be run directly. `gradlew.bat` remains in the repository root because that is the standard Gradle wrapper layout.
+- `build.bat` builds a debug APK and copies it to
+  `artifacts\debug\app-debug.apk`.
+- `verify.bat` compiles, tests, lints, assembles, and checks Git whitespace.
+- `release.bat VERSION` verifies the project and produces signed APK/AAB
+  artifacts and checksums.
 
-Finished builds are published inside the repository:
+## Google Drive publishing
 
-- Debug APK: `artifacts\debug\app-debug.apk`
-- Release files: `artifacts\release\VERSION\`
+- `build_and_sync_google_drive.bat` builds a fresh debug APK and then runs the
+  sync-only script.
+- `sync_google_drive.bat` does not compile. It copies the existing
+  `artifacts\debug\app-debug.apk` to
+  `google_drive_synced\app-debug.apk`, verifies the copied bytes, and waits for
+  a sync result when Google Drive exposes one.
 
-The ignored `artifacts` directory can be synchronized with Google Drive but is not committed to Git. Disposable Gradle intermediates remain under `%LOCALAPPDATA%\GymLog\build\app` so sync clients cannot lock Android's packaging directories. Set `GYMLOG_BUILD_DIR` before running a helper if you need another temporary location.
+Both Drive scripts start Google Drive for desktop when it is not already
+running. If no per-file sync state is available from Windows, the sync script
+waits briefly for pickup and directs you to the Drive tray app for final cloud
+confirmation.
 
-Portable output-folder launchers and signing instructions are available in [`google_drive_synced`](../../google_drive_synced/README.md).
+## Phone and debugging tools
+
+- `build_and_install_via_usb.bat [SERIAL]` builds, installs, and launches
+  GymLog on an attached Android phone.
+- `install_via_usb.bat [SERIAL]` installs the existing debug APK.
+- `device_check.bat [SERIAL]` reports the connected device and installed
+  GymLog version.
+- `launch_and_stream_gym_log_logs.bat [SERIAL]` clears the phone's existing
+  logcat buffer, force-stops and relaunches GymLog, then continuously displays
+  messages from only the new GymLog process. Press `Ctrl+C` to stop. If several
+  devices are attached, pass the serial shown by `adb devices -l`.
+- `screenshot.bat [SERIAL]` writes a device screenshot under `screenshots\`.
+
+## Internal helpers
+
+The `helpers` directory contains shared implementation and is not intended to
+be run directly:
+
+- `helpers\android_env.bat` locates Java, the Android SDK, and ADB, and keeps
+  disposable Gradle output outside the repository.
+- `helpers\google_drive_sync_status.ps1` performs a short, bounded query for a
+  Windows per-file sync status.
+
+Keeping these implementation files in `helpers` leaves the main scripts list
+focused on commands intended for direct use. `gradlew.bat` remains in the
+repository root because that is the standard Gradle wrapper layout.
+
+Finished local builds are written under `artifacts\`. Disposable Gradle
+intermediates remain under `%LOCALAPPDATA%\GymLog\build\app` by default.
