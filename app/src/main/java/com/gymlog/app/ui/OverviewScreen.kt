@@ -53,7 +53,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.KeyboardCapitalization
@@ -479,7 +478,6 @@ private fun MachineCard(
                     sessionPatternText(summary),
                     modifier = Modifier.weight(1f),
                     style = MaterialTheme.typography.bodySmall,
-                    fontFamily = FontFamily.Monospace,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
@@ -488,7 +486,6 @@ private fun MachineCard(
                     formatMetric(summary.machine.currentWeight, summary.machine.trackingMode),
                     modifier = Modifier.clickable(enabled = !isReordering) { changeMetric = true }.padding(horizontal = 6.dp, vertical = 4.dp),
                     style = MaterialTheme.typography.titleSmall,
-                    fontFamily = FontFamily.Monospace,
                     color = sessionTrendColor(summary),
                 )
             }
