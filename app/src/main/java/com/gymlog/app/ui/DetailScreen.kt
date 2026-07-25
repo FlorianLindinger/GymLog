@@ -28,6 +28,7 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -87,6 +88,7 @@ fun DetailScreen(
 ) {
     var showWeight by remember { mutableStateOf(false) }
     var showAreas by remember { mutableStateOf(false) }
+    var showPriority by remember { mutableStateOf(false) }
     var confirmDelete by remember { mutableStateOf(false) }
     var deletingSets by remember { mutableStateOf<List<SetRecord>?>(null) }
     var editingSet by remember { mutableStateOf<SetRecord?>(null) }
@@ -104,31 +106,6 @@ fun DetailScreen(
         modifier = modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(8.dp),
         verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        Card(modifier = Modifier.fillMaxWidth().clickable { onEditDetails(ExerciseEditField.OVERVIEW_NOTE) }) {
-            Column(Modifier.padding(horizontal = 10.dp, vertical = 4.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                Text("Notes", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
-                Text(if (machine.notes.isBlank()) "Click to add an Overview Note" else machine.notes, color = if (machine.notes.isBlank()) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface)
-            }
-        }
-
-        if (summary.areas.isEmpty()) {
-            OutlinedButton(onClick = { showAreas = true }, modifier = Modifier.fillMaxWidth()) { Text("+ Choose Training Areas") }
-        } else {
-            Card(modifier = Modifier.fillMaxWidth().clickable { showAreas = true }) {
-                Column(Modifier.padding(8.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                    Text("Training Areas", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
-                    summary.areas.sortedByDescending { areaUsage[it.area] ?: 0.0 }.forEach { assignment ->
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Box(Modifier.width(if (assignment.strength == Strength.FULL) 34.dp else 17.dp).height(8.dp).background(Color(assignment.displayColor), RoundedCornerShape(8.dp)))
-                            Spacer(Modifier.width(6.dp))
-                            Text(assignment.area.label, Modifier.weight(1f))
-                            Text(assignment.strength.label, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        }
-                    }
-                }
-            }
-        }
-
         Card(modifier = Modifier.fillMaxWidth().clickable { showWeight = true }) {
             Row(
                 Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 6.dp),
@@ -141,10 +118,7 @@ fun DetailScreen(
 
         Card(modifier = Modifier.fillMaxWidth()) {
             Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Stat("Started", formatMetric(first, machine.trackingMode), Modifier.weight(1f))
-                    Stat("Current", formatMetric(machine.currentWeight, machine.trackingMode), Modifier.weight(1f))
-                }
+                Text("${formatMetric(first, machine.trackingMode)} Started · ${formatMetric(machine.currentWeight, machine.trackingMode)}", modifier = Modifier.fillMaxWidth(), maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold)
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     listOf("1M", "3M", "6M", "1Y").forEach { window ->
                         CompactChoice(machine.chartWindow == window, { repository.setChartWindow(machine.id, window); onChanged() }, window, Modifier.weight(1f))
@@ -164,6 +138,31 @@ fun DetailScreen(
             }
         }
 
+        Card(modifier = Modifier.fillMaxWidth().clickable { onEditDetails(ExerciseEditField.OVERVIEW_NOTE) }) {
+            Column(Modifier.padding(horizontal = 10.dp, vertical = 7.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text("Note", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+                Text(if (machine.notes.isBlank()) "Click to add a note" else machine.notes, color = if (machine.notes.isBlank()) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface)
+            }
+        }
+        if (summary.areas.isEmpty()) {
+            OutlinedButton(onClick = { showAreas = true }, modifier = Modifier.fillMaxWidth()) { Text("Choose Training Areas") }
+        } else {
+            Card(modifier = Modifier.fillMaxWidth().clickable { showAreas = true }) {
+                Column(Modifier.padding(8.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                    Text("Training Areas", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+                    summary.areas.sortedByDescending { areaUsage[it.area] ?: 0.0 }.forEach { assignment ->
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Box(Modifier.width(if (assignment.strength == Strength.FULL) 34.dp else 17.dp).height(8.dp).background(Color(assignment.displayColor), RoundedCornerShape(8.dp)))
+                            Spacer(Modifier.width(6.dp)); Text(assignment.area.label, Modifier.weight(1f)); Text(assignment.strength.label, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    }
+                }
+            }
+        }
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            OutlinedButton(onClick = { showPriority = true }, modifier = Modifier.weight(1f)) { Text("Set Priority") }
+            OutlinedButton(onClick = { repository.setMachineHidden(machine.id, true); onChanged(); onDeleted() }, modifier = Modifier.weight(1f)) { Text("Hide exercise") }
+        }
         Card(modifier = Modifier.fillMaxWidth()) {
             Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 Text("Recent Entries", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
@@ -235,6 +234,17 @@ fun DetailScreen(
             chartPreferences.edit().putLong("${machine.id}_start", start).putLong("${machine.id}_end", end).apply()
             repository.setChartWindow(machine.id, "CUSTOM"); onChanged(); showCustomChartRange = false
         },
+    )
+    if (showPriority) AlertDialog(
+        onDismissRequest = { showPriority = false }, title = { Text("Set Priority") },
+        text = { Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(if (machine.excludedFromAutoRanking) "Excluded from automatic ranking" else "Automatic ranking adjustment: ${machine.rankingPriority}")
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FilledTonalButton(onClick = { repository.changeRankingPriority(machine.id, -1); onChanged(); showPriority = false }) { Text("Prioritize") }
+                FilledTonalButton(onClick = { repository.changeRankingPriority(machine.id, 1); onChanged(); showPriority = false }) { Text("Deprioritize") }
+            }
+            TextButton(onClick = { repository.setExcludedFromAutoRanking(machine.id, !machine.excludedFromAutoRanking); onChanged(); showPriority = false }) { Text(if (machine.excludedFromAutoRanking) "Use automatic ranking" else "Exclude from automatic ranking") }
+        } }, confirmButton = { TextButton(onClick = { showPriority = false }) { Text("Close") } },
     )
     if (showAreas) AreaDialog(summary.areas, areaUsage, areaColors, onAreaColor, onDismiss = { showAreas = false }) {
         repository.saveAreas(machine.id, it)

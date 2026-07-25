@@ -215,6 +215,7 @@ fun GymLogApp(
         when (screen) {
             Screen.OVERVIEW -> OverviewScreen(
                 machines = uiState.machines.filterNot { repository.isMachineHidden(it.machine.id) },
+                hiddenMachines = uiState.machines.filter { repository.isMachineHidden(it.machine.id) },
                 activePlanName = activePlan?.name ?: "Training plan",
                 activePlanNotes = activePlan?.notes.orEmpty(),
                 activePlanNotesPinned = activePlan?.notesPinned == true,
@@ -257,6 +258,7 @@ fun GymLogApp(
                 onHide = { machine -> repository.setMachineHidden(machine.machine.id, true); refresh() },
                 onRankingChange = { machine, delta -> repository.changeRankingPriority(machine.machine.id, delta); refresh() },
                 onRankingExcluded = { machine, excluded -> repository.setExcludedFromAutoRanking(machine.machine.id, excluded); refresh() },
+                onUnhide = { machine -> repository.setMachineHidden(machine.machine.id, false); refresh() },
             )
             Screen.BODY -> BodyOverviewScreen(
                 snapshot = bodyData,
@@ -550,17 +552,10 @@ private fun ExerciseDetailsDialog(
                     note,
                     { note = it },
                     Modifier.fillMaxWidth().focusRequester(noteFocus),
-                    label = { Text("Overview Note") },
+                    label = { Text("Note") },
                     minLines = 3,
                     keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences),
                 )
-                Row(Modifier.fillMaxWidth(), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f)) {
-                        Text("Keep at Top", style = MaterialTheme.typography.titleSmall)
-                        Text("Used by Mixed exercise ordering.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                    Switch(checked = keepAtTop, onCheckedChange = { keepAtTop = it })
-                }
             }
         },
         confirmButton = {

@@ -83,6 +83,7 @@ import androidx.lifecycle.compose.currentStateAsState
 @Composable
 fun OverviewScreen(
     machines: List<MachineSummary>,
+    hiddenMachines: List<MachineSummary>,
     activePlanName: String,
     activePlanNotes: String,
     activePlanNotesPinned: Boolean,
@@ -106,6 +107,7 @@ fun OverviewScreen(
     onHide: (MachineSummary) -> Unit,
     onRankingChange: (MachineSummary, Int) -> Unit,
     onRankingExcluded: (MachineSummary, Boolean) -> Unit,
+    onUnhide: (MachineSummary) -> Unit,
 ) {
     val zone = ZoneId.systemDefault()
     val now = System.currentTimeMillis()
@@ -123,7 +125,7 @@ fun OverviewScreen(
     var draggedId by remember { mutableStateOf<Long?>(null) }
     var dragOffset by remember { mutableFloatStateOf(0f) }
     var reorderMode by remember { mutableStateOf(false) }
-    var longPressed by remember { mutableStateOf<MachineSummary?>(null) }
+    var showHidden by remember { mutableStateOf(false) }
     Box(modifier.fillMaxSize()) {
         Column(Modifier.fillMaxSize().padding(bottom = 64.dp)) {
             if (reorderMode) {
@@ -175,12 +177,21 @@ fun OverviewScreen(
                         }, onDeleteCurrentExerciseSets,
                         onMetricChange, onMetricChangeForSession, progressionSettings,
                         modifier = Modifier,
-                        onLongPress = { longPressed = summary },
+                        onLongPress = {},
                         isDragging = false,
                         isReordering = false,
                     )
                 }
-            }
+                if (hiddenMachines.isNotEmpty()) {
+                    item { TextButton(onClick = { showHidden = !showHidden }, modifier = Modifier.fillMaxWidth()) { Text(if (showHidden) "Hide Hidden Exercises" else "Show hidden exercises") } }
+                    if (showHidden) {
+                        val rankedHidden = rankOverviewMachines(hiddenMachines, orderingMode, trainingUnitCutoff, lastExerciseInUnit)
+                        items(rankedHidden, key = { "hidden_${it.machine.id}" }) { summary ->
+                            MachineCard(summary, lastExerciseInUnit, trainingUnitCutoff, areaFrequency, onMachine, { machine, reps -> onQuickSet(machine, reps) }, onDeleteCurrentExerciseSets, onMetricChange, onMetricChangeForSession, progressionSettings, Modifier, {}, false, false)
+                            TextButton(onClick = { onUnhide(summary) }, modifier = Modifier.fillMaxWidth()) { Text("Unhide exercise") }
+                        }
+                    }
+                }            }
             }
         }
         Row(
@@ -206,34 +217,7 @@ fun OverviewScreen(
     }
 
 
-    longPressed?.let { summary ->
-        val pinned = summary.machine.pinned
-        AlertDialog(
-            onDismissRequest = { longPressed = null },
-            title = { Text(summary.machine.name) },
-            text = { Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text(if (pinned) "This exercise is fixed in the manual order." else "Fix this exercise to include it in the manual fixed order.")
-                Text(
-                    if (summary.machine.excludedFromAutoRanking) "Excluded from automatic ranking"
-                    else "Automatic ranking adjustment: ${summary.machine.rankingPriority}",
-                    style = MaterialTheme.typography.bodySmall,
-                )
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    FilledTonalButton(onClick = { onRankingChange(summary, -1) }) { Text("Prioritize") }
-                    FilledTonalButton(onClick = { onRankingChange(summary, 1) }) { Text("Deprioritize") }
-                }
-                TextButton(onClick = { onRankingExcluded(summary, !summary.machine.excludedFromAutoRanking) }) {
-                    Text(if (summary.machine.excludedFromAutoRanking) "Use automatic ranking" else "Exclude from automatic ranking")
-                }
-                if (pinned) Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    FilledTonalButton(onClick = { onMovePinned(summary, -1); longPressed = null }) { Text("Move up") }
-                    FilledTonalButton(onClick = { onMovePinned(summary, 1); longPressed = null }) { Text("Move down") }
-                }
-            } },
-            confirmButton = { Row { TextButton(onClick = { onHide(summary); longPressed = null }) { Text("Hide exercise", color = MaterialTheme.colorScheme.error) }; Button(onClick = { onSetPinned(summary, !pinned); longPressed = null }) { Text(if (pinned) "Unfix exercise" else "Fix exercise") } } },
-            dismissButton = { TextButton(onClick = { longPressed = null }) { Text("Cancel") } },
-        )
-    }
+
 }
 @Composable
 private fun OverviewButtonLabel(text: String) {
@@ -417,7 +401,7 @@ private fun MachineCard(
         else -> Color(0xFF43A047)
     }
     Card(
-        modifier = modifier.fillMaxWidth().combinedClickable(enabled = !isReordering, onClick = { onMachine(summary.machine.id) }, onLongClick = onLongPress),
+        modifier = modifier.fillMaxWidth().clickable(enabled = !isReordering) { onMachine(summary.machine.id) },
         elevation = CardDefaults.cardElevation(defaultElevation = if (isDragging) 10.dp else 1.dp),
         border = when {
             isLastDone -> BorderStroke(3.dp, outlineColor)
