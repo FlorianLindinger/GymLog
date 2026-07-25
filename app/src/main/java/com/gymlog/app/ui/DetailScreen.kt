@@ -288,6 +288,7 @@ private fun DualAxisSessionPlot(reps: List<Double>, weight: List<Double>, volume
     val weightColor = MaterialTheme.colorScheme.primary
     val volumeColor = Color(0xFF00BCD4)
     val grid = MaterialTheme.colorScheme.outlineVariant.copy(alpha = .72f)
+    val axis = MaterialTheme.colorScheme.outline.copy(alpha = .9f)
     Text(if (strength) "Level volume / training day" else "Volume / training day", color = volumeColor, style = MaterialTheme.typography.labelSmall)
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
         AxisLabels(if (strength) "Level" else "Reps / set", repsMax, repsMin, repsColor, Modifier.width(52.dp))
@@ -303,6 +304,11 @@ private fun DualAxisSessionPlot(reps: List<Double>, weight: List<Double>, volume
                     repeat(3) { index ->
                         val lineY = index * size.height / 2f
                         drawLine(grid, Offset(0f, lineY), Offset(size.width, lineY), strokeWidth = 1.2f)
+                    }
+                    drawLine(axis, Offset(0f, 0f), Offset(0f, size.height), strokeWidth = 2f)
+                    repeat(3) { index ->
+                        val tickY = index * size.height / 2f
+                        drawLine(axis, Offset(0f, tickY), Offset(7f, tickY), strokeWidth = 2f)
                     }
                     val volumePoints = volume.mapIndexed { index, value ->
                         Offset(x(index, volume.size), y(value, volumeMin, volumeMax))
@@ -346,6 +352,7 @@ private fun AxisMetricPlot(label: String, values: List<Double>, color: Color, sh
     val min = values.minOrNull() ?: 0.0
     val max = values.maxOrNull() ?: 0.0
     val grid = MaterialTheme.colorScheme.outlineVariant.copy(alpha = .72f)
+    val axis = MaterialTheme.colorScheme.outline.copy(alpha = .9f)
     Text("$label: ${formatAxisValue(min)}–${formatAxisValue(max)}", color = color, style = MaterialTheme.typography.labelSmall)
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
         Column(Modifier.width(50.dp).height(112.dp), verticalArrangement = Arrangement.SpaceBetween, horizontalAlignment = Alignment.End) {
@@ -362,6 +369,11 @@ private fun AxisMetricPlot(label: String, values: List<Double>, color: Color, sh
                     repeat(3) { index ->
                         val lineY = index * size.height / 2f
                         drawLine(grid, Offset(0f, lineY), Offset(size.width, lineY), strokeWidth = 1.2f)
+                    }
+                    drawLine(axis, Offset(0f, 0f), Offset(0f, size.height), strokeWidth = 2f)
+                    repeat(3) { index ->
+                        val tickY = index * size.height / 2f
+                        drawLine(axis, Offset(0f, tickY), Offset(7f, tickY), strokeWidth = 2f)
                     }
                     val points = values.mapIndexed { index, value -> Offset(if (values.size == 1) size.width / 2f else index * size.width / (values.size - 1), y(value)) }
                     points.zipWithNext().forEach { (a, b) -> drawLine(color, a, b, strokeWidth = 4f, cap = StrokeCap.Round) }

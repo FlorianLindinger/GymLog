@@ -183,6 +183,7 @@ private fun WeeklyVolumeCard(history: List<HistorySet>) {
     val primary = MaterialTheme.colorScheme.primary
     val fitColor = MaterialTheme.colorScheme.tertiary
     val grid = MaterialTheme.colorScheme.outlineVariant
+    val axis = MaterialTheme.colorScheme.outline.copy(alpha = .9f)
     Card(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text("8-Week Activity Trend", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
@@ -193,10 +194,16 @@ private fun WeeklyVolumeCard(history: List<HistorySet>) {
                 color = MaterialTheme.colorScheme.tertiary,
                 style = MaterialTheme.typography.bodySmall,
             )
-            BoxWithConstraints(Modifier.fillMaxWidth()) {
-            val graphWidth = maxOf(maxWidth, (volumes.size * 50).dp)
-            Box(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
-            Canvas(Modifier.width(graphWidth).height(150.dp)) {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
+                Column(Modifier.width(44.dp).height(150.dp), verticalArrangement = Arrangement.SpaceBetween, horizontalAlignment = Alignment.End) {
+                    Text(max.toInt().toString(), style = MaterialTheme.typography.labelSmall)
+                    Text((max / 2).toInt().toString(), style = MaterialTheme.typography.labelSmall)
+                    Text("0", style = MaterialTheme.typography.labelSmall)
+                }
+                BoxWithConstraints(Modifier.weight(1f)) {
+                val graphWidth = maxOf(maxWidth, (volumes.size * 50).dp)
+                Box(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
+                Canvas(Modifier.width(graphWidth).height(150.dp)) {
                 repeat(3) { index ->
                     val y = index * size.height / 2f
                     drawLine(grid, Offset(0f, y), Offset(size.width, y), strokeWidth = 1f)
@@ -204,6 +211,11 @@ private fun WeeklyVolumeCard(history: List<HistorySet>) {
                 repeat(5) { index ->
                     val x = index * size.width / 4f
                     drawLine(grid, Offset(x, 0f), Offset(x, size.height), strokeWidth = 1f)
+                }
+                drawLine(axis, Offset(0f, 0f), Offset(0f, size.height), strokeWidth = 2f)
+                repeat(3) { index ->
+                    val tickY = index * size.height / 2f
+                    drawLine(axis, Offset(0f, tickY), Offset(7f, tickY), strokeWidth = 2f)
                 }
                 fun points(values: List<Double>) = values.mapIndexed { index, value ->
                     Offset(
@@ -217,8 +229,9 @@ private fun WeeklyVolumeCard(history: List<HistorySet>) {
                 points(fit.first).zipWithNext().forEach { (start, end) ->
                     drawLine(fitColor, start, end, strokeWidth = 3f)
                 }
-            }
-            }
+                }
+                }
+                }
             }
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                 Text(starts.first().format(DateTimeFormatter.ofPattern("d MMM")), style = MaterialTheme.typography.bodySmall)

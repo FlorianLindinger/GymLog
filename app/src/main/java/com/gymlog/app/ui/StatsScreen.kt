@@ -28,6 +28,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
@@ -286,6 +287,7 @@ private fun StatsChart(title: String, values: List<Double>, unit: String) {
             val primary = MaterialTheme.colorScheme.primary
             val fitColor = MaterialTheme.colorScheme.tertiary
             val grid = MaterialTheme.colorScheme.outlineVariant
+            val axis = MaterialTheme.colorScheme.outline.copy(alpha = .9f)
             val (fit, fittedChange) = linearFit(values)
             Text(
                 "Linear fit: ${signedValue(fittedChange)} $unit over this interval",
@@ -296,10 +298,16 @@ private fun StatsChart(title: String, values: List<Double>, unit: String) {
             val min = combined.minOrNull()?.coerceAtMost(0.0) ?: 0.0
             val max = combined.maxOrNull()?.takeIf { it > min } ?: (min + 1.0)
             val range = max - min
-            BoxWithConstraints(Modifier.fillMaxWidth()) {
-                val graphWidth = maxOf(maxWidth, (values.size * 28).dp)
-                Box(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
-                Canvas(Modifier.width(graphWidth).height(130.dp)) {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
+                Column(Modifier.width(44.dp).height(130.dp), verticalArrangement = Arrangement.SpaceBetween, horizontalAlignment = Alignment.End) {
+                    Text(formatStatsAxisValue(max), style = MaterialTheme.typography.labelSmall)
+                    Text(formatStatsAxisValue((max + min) / 2), style = MaterialTheme.typography.labelSmall)
+                    Text(formatStatsAxisValue(min), style = MaterialTheme.typography.labelSmall)
+                }
+                BoxWithConstraints(Modifier.weight(1f)) {
+                    val graphWidth = maxOf(maxWidth, (values.size * 28).dp)
+                    Box(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
+                    Canvas(Modifier.width(graphWidth).height(130.dp)) {
                 if (values.isEmpty()) return@Canvas
                 repeat(3) { index ->
                     val y = index * size.height / 2f
@@ -308,6 +316,11 @@ private fun StatsChart(title: String, values: List<Double>, unit: String) {
                 repeat(5) { index ->
                     val x = index * size.width / 4f
                     drawLine(grid, Offset(x, 0f), Offset(x, size.height), strokeWidth = 1f)
+                }
+                drawLine(axis, Offset(0f, 0f), Offset(0f, size.height), strokeWidth = 2f)
+                repeat(3) { index ->
+                    val tickY = index * size.height / 2f
+                    drawLine(axis, Offset(0f, tickY), Offset(7f, tickY), strokeWidth = 2f)
                 }
                 fun points(series: List<Double>) = series.mapIndexed { index, value ->
                     Offset(
@@ -319,12 +332,15 @@ private fun StatsChart(title: String, values: List<Double>, unit: String) {
                 dataPoints.zipWithNext().forEach { (start, end) -> drawLine(primary, start, end, strokeWidth = 5f) }
                 dataPoints.forEach { drawCircle(primary, 5f, it) }
                 points(fit).zipWithNext().forEach { (start, end) -> drawLine(fitColor, start, end, strokeWidth = 3f) }
-                }
+                    }
+                    }
                 }
             }
         }
     }
 }
+
+private fun formatStatsAxisValue(value: Double): String = if (value % 1.0 == 0.0) value.toInt().toString() else String.format(Locale.US, "%.1f", value)
 
 private fun linearFit(values: List<Double>): Pair<List<Double>, Double> {
     if (values.size < 2) return values to 0.0

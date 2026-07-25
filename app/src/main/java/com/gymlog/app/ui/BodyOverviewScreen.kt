@@ -311,6 +311,11 @@ private fun BodyGraph(
             val lineX = index * size.width / 4f
             drawLine(gridColor.copy(alpha = .78f), Offset(lineX, 0f), Offset(lineX, size.height), strokeWidth = 1.5f)
         }
+        val axis = gridColor.copy(alpha = .9f)
+        drawLine(axis, Offset(0f, 0f), Offset(0f, size.height), strokeWidth = 2f)
+        ticks.forEach { tick ->
+            drawLine(axis, Offset(0f, y(tick)), Offset(7f, y(tick)), strokeWidth = 2f)
+        }
         settings.target?.let { target ->
             settings.acceptance?.let { tolerance ->
                 val top = y(target + tolerance)

@@ -606,7 +606,7 @@ private fun SetRecord.performedDate(zone: ZoneId): LocalDate = trainingDate(perf
 private fun completedTrainingDateLabel(date: LocalDate, today: LocalDate): String = when (val days = java.time.temporal.ChronoUnit.DAYS.between(date, today)) {
     0L -> "today"
     1L -> "yesterday"
-    in 2L..7L -> "last ${date.dayOfWeek.getDisplayName(java.time.format.TextStyle.FULL, Locale.getDefault())}"
+    in 2L..7L -> "last ${date.dayOfWeek.getDisplayName(java.time.format.TextStyle.FULL, Locale.ENGLISH)}"
     else -> date.format(DateTimeFormatter.ofPattern("d MMM"))
 }
 private fun trainingDayStart(timestamp: Long, zone: ZoneId = ZoneId.systemDefault()): Long {
@@ -691,16 +691,21 @@ fun QuickTrainingDialog(initialMinutes: Int, isChange: Boolean = false, onDismis
 }
 
 private fun sessionTrendColor(summary: MachineSummary): Color {
+    if (summary.machine.trackingMode == "DURATION") return Color.White
     val zone = ZoneId.systemDefault()
-    val sessions = summary.recentSets.groupBy { it.performedDate(zone) }.values.toList()
-    fun List<SetRecord>.trackedMetric(): Double =
-        if (summary.machine.trackingMode == "STRENGTH") map { it.reps }.average() else map { it.weight }.average()
-    val latest = sessions.getOrNull(0)?.trackedMetric() ?: return Color(0xFF444444)
-    val before = sessions.getOrNull(1)?.trackedMetric() ?: return Color(0xFF444444)
+    val latest = summary.weightChanges.firstOrNull() ?: return Color.White
+    val before = summary.weightChanges.getOrNull(1) ?: return Color.White
+    val currentTraining = trainingDate(System.currentTimeMillis(), zone)
+    val previousTraining = summary.recentSets
+        .map { it.performedDate(zone) }
+        .filter { it != currentTraining }
+        .maxOrNull()
+    val recentTrainingDates = setOfNotNull(currentTraining, previousTraining)
+    if (trainingDate(latest.changedAt, zone) !in recentTrainingDates) return Color.White
     return when {
-        latest > before -> Color(0xFF2E7D32)
-        latest < before -> Color(0xFFC62828)
-        else -> Color(0xFF555555)
+        latest.weight > before.weight -> Color(0xFF66BB6A)
+        latest.weight < before.weight -> Color(0xFFEF5350)
+        else -> Color.White
     }
 }
 
