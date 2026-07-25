@@ -118,33 +118,19 @@ fun DetailScreen(
 
         Card(modifier = Modifier.fillMaxWidth()) {
             Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                listOf(
-                    listOf("1W", "2W", "3W", "1M", "3M"),
-                    listOf("6M", "1Y", "3Y", "ALL", "CUSTOM"),
-                ).forEach { row ->
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                        row.forEach { preset ->
-                            CompactChoice(
-                                machine.chartWindow == preset,
-                                {
-                                    if (preset == "CUSTOM") showCustomChartRange = true
-                                    else {
-                                        repository.setChartWindow(machine.id, preset)
-                                        onChanged()
-                                    }
-                                },
-                                when (preset) { "ALL" -> "All"; "CUSTOM" -> "Custom"; else -> preset },
-                                Modifier.weight(1f),
-                            )
-                        }
-                    }
-                }
-                CompactChoice(machine.showTrend, { repository.setShowTrend(machine.id, !machine.showTrend); onChanged() }, "Trend", Modifier.fillMaxWidth())
+                ChartRangeControls(
+                    selectedWindow = machine.chartWindow,
+                    showTrend = machine.showTrend,
+                    onWindowSelected = { preset -> repository.setChartWindow(machine.id, preset); onChanged() },
+                    onCustomSelected = { showCustomChartRange = true },
+                    onTrendSelected = { repository.setShowTrend(machine.id, !machine.showTrend); onChanged() },
+                )
                 val chartWindow = ChartWindow(
                     durationMillis = if (machine.chartWindow == "CUSTOM") {
                         customChartStart?.let { start -> customChartEnd?.let { end -> (end - start).coerceAtLeast(1L) } }
                     } else chartWindowDuration(machine.chartWindow),
-                    initialEnd = if (machine.chartWindow == "CUSTOM") customChartEnd else summary.recentSets.maxOfOrNull { it.performedAt },
+                    endMillis = if (machine.chartWindow == "CUSTOM") customChartEnd else summary.recentSets.maxOfOrNull { it.performedAt },
+                    startMillis = if (machine.chartWindow == "CUSTOM") customChartStart else null,
                     key = "${machine.chartWindow}:$customChartStart:$customChartEnd",
                 )
                 SessionMetricsChart(summary.recentSets, machine.trackingMode, machine.showTrend, chartWindow)
@@ -191,8 +177,7 @@ fun DetailScreen(
                     if (index > 0) HorizontalDivider()
                     Row(Modifier.fillMaxWidth().padding(vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
                         Text(
-                            if (isDirectMetric(machine.trackingMode)) "${formatTrainingEntry(ordered.first().weight, machine.trackingMode, ordered.first().reps)} - ${formatTimestamp(batchKey)}"
-                            else "${formatMetric(ordered.first().weight, machine.trackingMode)} - ${ordered.joinToString(",") { it.reps.toString() }} - ${formatTimestamp(batchKey)}",
+                            formatRecentEntry(ordered, machine.trackingMode, batchKey),
                             modifier = Modifier.weight(1f),
                             style = MaterialTheme.typography.labelSmall,
                             fontWeight = FontWeight.Medium,
@@ -345,7 +330,9 @@ private fun DualAxisSessionPlot(
         Text(if (strength) "Minutes" else "Weight", color = weightColor, style = MaterialTheme.typography.labelSmall)
         Text("· Volume / training day", color = volumeColor, style = MaterialTheme.typography.labelSmall)
     }
-    val reps = sets.map { TimeValue(it.performedAt, it.reps.toDouble()) }
+    val reps = sessions.map { session ->
+        TimeValue(session.maxOf { it.performedAt }, session.map { it.reps }.average())
+    }
     val weight = sets.map { TimeValue(it.performedAt, it.weight) }
     val volume = sessions.map { session ->
         TimeValue(session.maxOf { it.performedAt }, session.sumOf { it.weight * it.reps })
@@ -390,26 +377,6 @@ private fun AxisMetricPlot(
 private fun formatAxisValue(value: Double): String = if (value % 1.0 == 0.0) value.toInt().toString()
 else String.format(Locale.US, "%.1f", value)
 
-private fun trendTimeSeries(points: List<TimeValue>, color: Color, axis: PlotAxis): TimeSeries {
-    if (points.size < 2) return TimeSeries(points, color, axis, showPoints = false)
-    val origin = points.first().timestamp
-    val x = points.map { (it.timestamp - origin) / 86_400_000.0 }
-    val meanX = x.average()
-    val meanY = points.map(TimeValue::value).average()
-    val denominator = x.sumOf { value -> (value - meanX) * (value - meanX) }
-    if (denominator == 0.0) return TimeSeries(points, color, axis, showPoints = false)
-    val slope = points.indices.sumOf { index -> (x[index] - meanX) * (points[index].value - meanY) } / denominator
-    val intercept = meanY - slope * meanX
-    return TimeSeries(
-        points = points.indices.map { index -> TimeValue(points[index].timestamp, intercept + slope * x[index]) },
-        color = color.copy(alpha = 0.62f),
-        axis = axis,
-        strokeWidth = 2.5f,
-        dashed = true,
-        showPoints = false,
-    )
-}
-
 private fun weightChangeDescription(changes: List<WeightChange>, trackingMode: String): String {
     val metric = metricName(trackingMode)
     val latest = changes.firstOrNull() ?: return "No $metric changes yet"
@@ -436,7 +403,7 @@ private fun chartCutoff(window: String): Long? {
     }
 }
 
-private enum class GymCustomRangeMode { START_DATE, DURATION }
+private enum class GymCustomRangeMode { INTERVAL, DURATION }
 
 @Composable
 private fun CustomGymRangeDialog(
@@ -447,13 +414,23 @@ private fun CustomGymRangeDialog(
     onSave: (Long, Long) -> Unit,
 ) {
     val zone = ZoneId.systemDefault()
-    var mode by remember { mutableStateOf(GymCustomRangeMode.START_DATE) }
-    var startText by remember { mutableStateOf(Instant.ofEpochMilli(initialStart).atZone(zone).toLocalDate().toString()) }
-    var endText by remember { mutableStateOf(Instant.ofEpochMilli(initialEnd).atZone(zone).toLocalDate().toString()) }
+    val dateFormatter = remember { DateTimeFormatter.ofPattern("dd-MM-yyyy") }
+    var mode by remember { mutableStateOf(GymCustomRangeMode.INTERVAL) }
+    var startText by remember {
+        mutableStateOf(Instant.ofEpochMilli(initialStart).atZone(zone).toLocalDate().format(dateFormatter))
+    }
+    var endText by remember {
+        mutableStateOf(Instant.ofEpochMilli(initialEnd).atZone(zone).toLocalDate().format(dateFormatter))
+    }
     var amountText by remember { mutableStateOf("2.5") }
     var durationUnit by remember { mutableStateOf("Weeks") }
-    val end = runCatching { java.time.LocalDate.parse(endText).plusDays(1).atStartOfDay(zone).toInstant().toEpochMilli() - 1L }.getOrNull()?.coerceAtMost(maxTimestamp)
-    val startFromDate = runCatching { java.time.LocalDate.parse(startText).atStartOfDay(zone).toInstant().toEpochMilli() }.getOrNull()
+    val intervalEnd = runCatching {
+        java.time.LocalDate.parse(endText, dateFormatter).plusDays(1).atStartOfDay(zone).toInstant().toEpochMilli() - 1L
+    }.getOrNull()?.coerceAtMost(maxTimestamp)
+    val end = if (mode == GymCustomRangeMode.INTERVAL) intervalEnd else maxTimestamp
+    val startFromDate = runCatching {
+        java.time.LocalDate.parse(startText, dateFormatter).atStartOfDay(zone).toInstant().toEpochMilli()
+    }.getOrNull()
     val durationMillis = when (durationUnit) {
         "Days" -> 86_400_000L
         "Months" -> (30.44 * 86_400_000L).toLong()
@@ -461,20 +438,20 @@ private fun CustomGymRangeDialog(
         else -> 7L * 86_400_000L
     }
     val startFromDuration = end?.let { value -> amountText.replace(',', '.').toDoubleOrNull()?.takeIf { it > 0.0 }?.let { value - (it * durationMillis).toLong() } }
-    val start = if (mode == GymCustomRangeMode.START_DATE) startFromDate else startFromDuration
+    val start = if (mode == GymCustomRangeMode.INTERVAL) startFromDate else startFromDuration
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Custom chart range") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedTextField(endText, { endText = it }, label = { Text("End date (YYYY-MM-DD)") }, singleLine = true)
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    listOf(GymCustomRangeMode.START_DATE to "Start date", GymCustomRangeMode.DURATION to "Duration").forEach { (choice, label) ->
+                    listOf(GymCustomRangeMode.INTERVAL to "Interval", GymCustomRangeMode.DURATION to "Duration").forEach { (choice, label) ->
                         CompactChoice(mode == choice, { mode = choice }, label, Modifier.weight(1f))
                     }
                 }
-                if (mode == GymCustomRangeMode.START_DATE) {
-                    OutlinedTextField(startText, { startText = it }, label = { Text("Start date (YYYY-MM-DD)") }, singleLine = true)
+                if (mode == GymCustomRangeMode.INTERVAL) {
+                    OutlinedTextField(startText, { startText = it }, label = { Text("Start (DD-MM-YYYY)") }, singleLine = true)
+                    OutlinedTextField(endText, { endText = it }, label = { Text("End (DD-MM-YYYY)") }, singleLine = true)
                 } else {
                     OutlinedTextField(amountText, { amountText = it.filter { char -> char.isDigit() || char == '.' || char == ',' } }, label = { Text("Duration") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal), singleLine = true)
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -681,6 +658,17 @@ private fun timeSince(timestamp: Long): String {
         duration.toHours() > 0 -> "${duration.toHours()}h"
         else -> "${duration.toMinutes().coerceAtLeast(0)} min"
     }
+}
+
+private fun formatRecentEntry(sets: List<SetRecord>, trackingMode: String, timestamp: Long): String {
+    val first = sets.first()
+    val metric = if (isDirectMetric(trackingMode)) {
+        formatTrainingEntry(first.weight, trackingMode, first.reps)
+    } else {
+        formatMetric(first.weight, trackingMode)
+    }
+    val repetitions = if (isDirectMetric(trackingMode)) "" else sets.joinToString(",") { it.reps.toString() }
+    return "${metric.take(12).padEnd(12)} - ${repetitions.take(18).padEnd(18)} - ${formatTimestamp(timestamp)}"
 }
 
 private fun formatTimestamp(timestamp: Long): String = DateTimeFormatter.ofPattern("dd.MM.yy")

@@ -188,7 +188,7 @@ private fun WeeklyVolumeCard(history: List<HistorySet>) {
                 series = listOf(TimeSeries(points, primary, strokeWidth = 4f, pointRadius = 5f)),
                 window = ChartWindow(
                     durationMillis = 8L * 7L * 86_400_000L,
-                    initialEnd = System.currentTimeMillis(),
+                    endMillis = System.currentTimeMillis(),
                     key = "HISTORY_8_WEEKS",
                 ),
                 leftColor = primary,

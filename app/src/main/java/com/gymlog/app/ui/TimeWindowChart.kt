@@ -1,31 +1,30 @@
 package com.gymlog.app.ui
 
 import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.gestures.Orientation
-import androidx.compose.foundation.gestures.rememberScrollableState
-import androidx.compose.foundation.gestures.scrollable
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableLongStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.StrokeCap
-import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -33,6 +32,10 @@ import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import kotlin.math.abs
+import kotlin.math.ceil
+import kotlin.math.floor
+import kotlin.math.log10
+import kotlin.math.pow
 
 internal data class TimeValue(val timestamp: Long, val value: Double)
 
@@ -48,114 +51,88 @@ internal data class TimeSeries(
     val showPoints: Boolean = true,
 )
 
-internal data class TimeBand(
-    val center: Double,
-    val tolerance: Double,
-    val color: Color,
-)
+internal data class TimeBand(val center: Double, val tolerance: Double, val color: Color)
 
 internal data class ChartWindow(
     val durationMillis: Long?,
-    val initialEnd: Long? = null,
+    val endMillis: Long? = null,
+    val startMillis: Long? = null,
     val key: Any,
 )
 
-internal data class ChartTimeline(
-    val contentStart: Long,
-    val contentEnd: Long,
-    val viewportDuration: Long,
-    val initialStart: Long,
-) {
-    val latestStart: Long get() = (contentEnd - viewportDuration).coerceAtLeast(contentStart)
+internal data class VisibleTimeRange(val start: Long, val end: Long) {
+    val duration: Long get() = (end - start).coerceAtLeast(1L)
 }
 
-internal fun calculateChartTimeline(dataStart: Long, dataEnd: Long, window: ChartWindow): ChartTimeline {
-    val requestedDuration = window.durationMillis?.coerceAtLeast(1L)
-    val contentEnd = maxOf(dataEnd, window.initialEnd ?: dataEnd)
-    val contentStart = if (requestedDuration == null) dataStart else minOf(dataStart, contentEnd - requestedDuration)
-    val contentDuration = (contentEnd - contentStart).coerceAtLeast(1L)
-    val viewportDuration = requestedDuration?.coerceAtMost(contentDuration) ?: contentDuration
-    val latestStart = (contentEnd - viewportDuration).coerceAtLeast(contentStart)
-    val initialEnd = window.initialEnd?.coerceIn(contentStart + viewportDuration, contentEnd) ?: contentEnd
-    return ChartTimeline(
-        contentStart = contentStart,
-        contentEnd = contentEnd,
-        viewportDuration = viewportDuration,
-        initialStart = (initialEnd - viewportDuration).coerceIn(contentStart, latestStart),
-    )
-}
-
-internal fun panChartViewport(
-    currentStart: Long,
-    dragPixels: Float,
-    viewportWidthPixels: Float,
-    timeline: ChartTimeline,
-): Long {
-    if (timeline.latestStart == timeline.contentStart) return timeline.contentStart
-    val deltaMillis = (-dragPixels / viewportWidthPixels.coerceAtLeast(1f) * timeline.viewportDuration).toLong()
-    return (currentStart + deltaMillis).coerceIn(timeline.contentStart, timeline.latestStart)
-}
-
-private data class AxisRange(val min: Double, val max: Double) {
-    val middle: Double get() = (min + max) / 2.0
-    val span: Double get() = max - min
-}
-
-@Composable
-private fun ChartAxisLabels(
-    range: AxisRange,
-    color: Color,
-    formatter: (Double) -> String,
-    width: Dp,
-    height: Dp,
-    endAligned: Boolean = true,
-) {
-    Box(Modifier.width(width).height(height)) {
-        val textAlign = if (endAligned) TextAlign.End else TextAlign.Start
-        Text(
-            formatter(range.max),
-            Modifier.align(if (endAligned) Alignment.TopEnd else Alignment.TopStart),
-            color = color,
-            style = MaterialTheme.typography.labelSmall,
-            textAlign = textAlign,
-        )
-        Text(
-            formatter(range.middle),
-            Modifier.align(if (endAligned) Alignment.CenterEnd else Alignment.CenterStart),
-            color = color,
-            style = MaterialTheme.typography.labelSmall,
-            textAlign = textAlign,
-        )
-        Text(
-            formatter(range.min),
-            Modifier.align(if (endAligned) Alignment.BottomEnd else Alignment.BottomStart),
-            color = color,
-            style = MaterialTheme.typography.labelSmall,
-            textAlign = textAlign,
+internal fun calculateVisibleTimeRange(dataStart: Long, dataEnd: Long, window: ChartWindow): VisibleTimeRange {
+    if (window.startMillis != null && window.endMillis != null) {
+        return VisibleTimeRange(
+            minOf(window.startMillis, window.endMillis - 1L),
+            maxOf(window.startMillis + 1L, window.endMillis),
         )
     }
+    if (window.durationMillis == null) return VisibleTimeRange(dataStart, maxOf(dataStart + 1L, dataEnd))
+    val end = window.endMillis ?: dataEnd
+    return VisibleTimeRange(end - window.durationMillis.coerceAtLeast(1L), end)
 }
 
-@Composable
-private fun ChartDateLabels(start: Long, end: Long, width: Dp) {
-    val formatter = DateTimeFormatter.ofPattern("d MMM yy")
-    fun label(timestamp: Long) = Instant.ofEpochMilli(timestamp).atZone(ZoneId.systemDefault()).format(formatter)
+private data class AxisRange(val min: Double, val max: Double, val ticks: List<Double>) {
+    val span: Double get() = (max - min).coerceAtLeast(1e-9)
+}
 
-    Box(Modifier.width(width).height(22.dp)) {
-        Text(label(start), Modifier.align(Alignment.TopStart), style = MaterialTheme.typography.labelSmall)
-        Text(label(start + (end - start) / 2L), Modifier.align(Alignment.TopCenter), style = MaterialTheme.typography.labelSmall)
-        Text(label(end), Modifier.align(Alignment.TopEnd), style = MaterialTheme.typography.labelSmall)
+private fun niceCeiling(value: Double): Double {
+    if (!value.isFinite() || value <= 0.0) return 1.0
+    val magnitude = 10.0.pow(floor(log10(value)))
+    val normalized = value / magnitude
+    val nice = when {
+        normalized <= 1.0 -> 1.0
+        normalized <= 2.0 -> 2.0
+        normalized <= 2.5 -> 2.5
+        normalized <= 5.0 -> 5.0
+        else -> 10.0
     }
+    return nice * magnitude
 }
 
 private fun chartAxisRange(values: List<Double>): AxisRange {
     val finite = values.filter(Double::isFinite)
-    if (finite.isEmpty()) return AxisRange(0.0, 1.0)
-    val rawMin = finite.min()
-    val rawMax = finite.max()
+    if (finite.isEmpty()) return AxisRange(0.0, 1.0, listOf(0.0, 0.25, 0.5, 0.75, 1.0))
+    var rawMin = finite.min()
+    var rawMax = finite.max()
     val rawSpan = rawMax - rawMin
-    val padding = if (rawSpan > 0.0) rawSpan * 0.035 else maxOf(abs(rawMax) * 0.02, 0.5)
-    return AxisRange(rawMin - padding, rawMax + padding)
+    val padding = if (rawSpan == 0.0) maxOf(abs(rawMax) * 0.02, 0.5) else rawSpan * 0.02
+    rawMin -= padding
+    rawMax += padding
+    val step = niceCeiling((rawMax - rawMin) / (Y_TICK_COUNT - 1))
+    var minimum = floor(rawMin / step) * step
+    var maximum = minimum + step * (Y_TICK_COUNT - 1)
+    if (maximum < rawMax) {
+        maximum = ceil(rawMax / step) * step
+        minimum = maximum - step * (Y_TICK_COUNT - 1)
+    }
+    return AxisRange(minimum, maximum, List(Y_TICK_COUNT) { minimum + step * it })
+}
+
+internal fun trendTimeSeries(points: List<TimeValue>, color: Color, axis: PlotAxis): TimeSeries {
+    if (points.size < 2) return TimeSeries(points, color, axis, showPoints = false)
+    val origin = points.first().timestamp
+    val x = points.map { (it.timestamp - origin) / DAY_MILLIS_SHARED.toDouble() }
+    val meanX = x.average()
+    val meanY = points.map(TimeValue::value).average()
+    val denominator = x.sumOf { value -> (value - meanX) * (value - meanX) }
+    if (denominator == 0.0) return TimeSeries(points, color, axis, showPoints = false)
+    val slope = points.indices.sumOf { index ->
+        (x[index] - meanX) * (points[index].value - meanY)
+    } / denominator
+    val intercept = meanY - slope * meanX
+    return TimeSeries(
+        points = points.indices.map { index -> TimeValue(points[index].timestamp, intercept + slope * x[index]) },
+        color = color.copy(alpha = 0.62f),
+        axis = axis,
+        strokeWidth = 2.5f,
+        dashed = true,
+        showPoints = false,
+    )
 }
 
 internal fun chartWindowDuration(window: String): Long? {
@@ -164,8 +141,10 @@ internal fun chartWindowDuration(window: String): Long? {
         "2W" -> 14L
         "3W" -> 21L
         "1M" -> 30L
-        "3M" -> 90L
-        "6M" -> 182L
+        "2M" -> 61L
+        "3M" -> 91L
+        "4M" -> 122L
+        "6M" -> 183L
         "1Y" -> 365L
         "2Y" -> 730L
         "3Y" -> 1_095L
@@ -175,6 +154,94 @@ internal fun chartWindowDuration(window: String): Long? {
     return days * DAY_MILLIS_SHARED
 }
 
+@Composable
+internal fun ChartRangeControls(
+    selectedWindow: String,
+    showTrend: Boolean,
+    onWindowSelected: (String) -> Unit,
+    onCustomSelected: () -> Unit,
+    onTrendSelected: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val rows = listOf(
+        listOf("1W", "2W", "3W", "1M", "2M", "3M", "4M"),
+        listOf("6M", "1Y", "2Y", "3Y", "ALL", "CUSTOM", "TREND"),
+    )
+    Column(modifier, verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        rows.forEach { row ->
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                row.forEach { value ->
+                    val selected = if (value == "TREND") showTrend else selectedWindow == value
+                    val label = when (value) {
+                        "ALL" -> "All"
+                        "CUSTOM" -> "Custom"
+                        "TREND" -> "Trend"
+                        else -> value
+                    }
+                    Text(
+                        text = label,
+                        modifier = Modifier.weight(1f)
+                            .background(
+                                if (selected) MaterialTheme.colorScheme.primaryContainer
+                                else MaterialTheme.colorScheme.surfaceVariant,
+                                RoundedCornerShape(7.dp),
+                            )
+                            .clickable {
+                                when (value) {
+                                    "CUSTOM" -> onCustomSelected()
+                                    "TREND" -> onTrendSelected()
+                                    else -> onWindowSelected(value)
+                                }
+                            }
+                            .padding(vertical = 6.dp),
+                        color = if (selected) MaterialTheme.colorScheme.onPrimaryContainer
+                        else MaterialTheme.colorScheme.onSurfaceVariant,
+                        fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
+                        maxLines = 1,
+                        softWrap = false,
+                        style = MaterialTheme.typography.labelSmall,
+                        textAlign = TextAlign.Center,
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ChartAxisLabels(
+    range: AxisRange,
+    color: Color,
+    formatter: (Double) -> String,
+    width: Dp,
+    height: Dp,
+    endAligned: Boolean,
+) {
+    Column(
+        Modifier.width(width).height(height),
+        verticalArrangement = Arrangement.SpaceBetween,
+        horizontalAlignment = if (endAligned) Alignment.End else Alignment.Start,
+    ) {
+        range.ticks.asReversed().forEach { tick ->
+            Text(formatter(tick), color = color, maxLines = 1, style = MaterialTheme.typography.labelSmall,
+                textAlign = if (endAligned) TextAlign.End else TextAlign.Start)
+        }
+    }
+}
+
+@Composable
+private fun ChartDateLabels(start: Long, end: Long, width: Dp) {
+    val formatter = DateTimeFormatter.ofPattern("d MMM yy")
+    fun label(timestamp: Long) = Instant.ofEpochMilli(timestamp).atZone(ZoneId.systemDefault()).format(formatter)
+    Box(Modifier.width(width).height(20.dp)) {
+        Text(label(start), Modifier.align(Alignment.TopStart), maxLines = 1, style = MaterialTheme.typography.labelSmall)
+        Text(label(start + (end - start) / 2L), Modifier.align(Alignment.TopCenter), maxLines = 1, style = MaterialTheme.typography.labelSmall)
+        Text(label(end), Modifier.align(Alignment.TopEnd), maxLines = 1, style = MaterialTheme.typography.labelSmall)
+    }
+}
+
+private const val Y_TICK_COUNT = 5
+private const val X_GRID_COUNT = 7
 private const val CHART_INSET = 6f
 private const val DAY_MILLIS_SHARED = 24L * 60L * 60L * 1000L
 
@@ -192,131 +259,119 @@ internal fun TimeWindowChart(
 ) {
     val sortedSeries = series.map { item -> item.copy(points = item.points.sortedBy(TimeValue::timestamp)) }
     val allPoints = sortedSeries.flatMap(TimeSeries::points)
-    if (allPoints.isEmpty()) return
-
-    val dataStart = allPoints.minOf(TimeValue::timestamp)
-    val dataEnd = allPoints.maxOf(TimeValue::timestamp)
-    val timeline = calculateChartTimeline(dataStart, dataEnd, window)
-    val contentStart = timeline.contentStart
-    val contentEnd = timeline.contentEnd
-    val viewportDuration = timeline.viewportDuration
+    if (allPoints.isEmpty() && bands.isEmpty()) return
+    val dataStart = allPoints.minOfOrNull(TimeValue::timestamp) ?: window.startMillis ?: window.endMillis ?: 0L
+    val dataEnd = allPoints.maxOfOrNull(TimeValue::timestamp) ?: window.endMillis ?: dataStart + 1L
+    val visibleRange = calculateVisibleTimeRange(dataStart, dataEnd, window)
+    val visibleStart = visibleRange.start
+    val visibleEnd = visibleRange.end
+    fun visibleValues(axis: PlotAxis) = sortedSeries.filter { it.axis == axis }
+        .flatMap(TimeSeries::points)
+        .filter { it.timestamp in visibleStart..visibleEnd }
+        .map(TimeValue::value)
+    val bandValues = bands.flatMap { listOf(it.center - it.tolerance, it.center, it.center + it.tolerance) }
+    val leftRange = chartAxisRange(visibleValues(PlotAxis.LEFT) + bandValues)
+    val rightRange = chartAxisRange(visibleValues(PlotAxis.RIGHT))
+    val independentRange = chartAxisRange(visibleValues(PlotAxis.INDEPENDENT))
+    val hasRightAxis = rightColor != null && sortedSeries.any { it.axis == PlotAxis.RIGHT }
+    val gridColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.72f)
+    val xAxisColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.95f)
+    val leftAxisColor = leftColor.copy(alpha = 0.95f)
+    val rightAxisColor = (rightColor ?: xAxisColor).copy(alpha = 0.95f)
 
     BoxWithConstraints(modifier.fillMaxWidth()) {
-        val hasRightAxis = rightColor != null && sortedSeries.any { it.axis == PlotAxis.RIGHT }
-        val leftAxisWidth = 36.dp
-        val rightAxisWidth = if (hasRightAxis) 36.dp else 0.dp
-        val plotViewportWidth = (maxWidth - leftAxisWidth - rightAxisWidth).coerceAtLeast(1.dp)
-        val plotViewportWidthPx = with(LocalDensity.current) { plotViewportWidth.toPx() }.coerceAtLeast(1f)
-        var visibleStart by remember(window.key, contentStart, contentEnd, viewportDuration) {
-            mutableLongStateOf(timeline.initialStart)
-        }
-        val scrollableState = rememberScrollableState { deltaPixels ->
-            val previous = visibleStart
-            visibleStart = panChartViewport(visibleStart, deltaPixels, plotViewportWidthPx, timeline)
-            if (visibleStart == previous) 0f else deltaPixels
-        }
-        val visibleEnd = (visibleStart + viewportDuration).coerceAtMost(contentEnd)
-
-        fun visibleValues(axis: PlotAxis): List<Double> = sortedSeries
-            .filter { it.axis == axis }
-            .flatMap(TimeSeries::points)
-            .filter { it.timestamp in visibleStart..visibleEnd }
-            .map(TimeValue::value)
-
-        val leftRange = chartAxisRange(visibleValues(PlotAxis.LEFT))
-        val rightRange = chartAxisRange(visibleValues(PlotAxis.RIGHT))
-        val independentRange = chartAxisRange(visibleValues(PlotAxis.INDEPENDENT))
-        val gridColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.62f)
-        val axisColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.95f)
-
+        val labelWidth = 39.dp
+        val tickWidth = 9.dp
+        val rightLabelWidth = if (hasRightAxis) 39.dp else 0.dp
+        val rightTickWidth = if (hasRightAxis) tickWidth else 0.dp
+        val plotWidth = (maxWidth - labelWidth - tickWidth - rightTickWidth - rightLabelWidth).coerceAtLeast(1.dp)
         Column {
             Row {
-                ChartAxisLabels(leftRange, leftColor, formatLeft, leftAxisWidth, height)
-                Box(Modifier.width(plotViewportWidth).height(height)) {
-                    Canvas(Modifier.fillMaxSize()) {
-                        repeat(3) { index ->
-                            val y = CHART_INSET + index * (size.height - CHART_INSET * 2f) / 2f
-                            drawLine(gridColor, Offset(0f, y), Offset(size.width, y), strokeWidth = 2f)
-                            drawLine(axisColor, Offset(0f, y), Offset(11f, y), strokeWidth = 3f)
-                            if (hasRightAxis) drawLine(axisColor, Offset(size.width, y), Offset(size.width - 11f, y), strokeWidth = 3f)
-                        }
-                        repeat(3) { index ->
-                            val x = index * size.width / 2f
-                            drawLine(gridColor, Offset(x, 0f), Offset(x, size.height), strokeWidth = 2f)
-                            drawLine(axisColor, Offset(x, size.height), Offset(x, size.height - 11f), strokeWidth = 3f)
-                        }
-                        drawLine(axisColor, Offset(0f, size.height), Offset(size.width, size.height), strokeWidth = 2.5f)
+                ChartAxisLabels(leftRange, leftColor, formatLeft, labelWidth, height, true)
+                Canvas(Modifier.width(tickWidth).height(height)) {
+                    repeat(Y_TICK_COUNT) { index ->
+                        val y = CHART_INSET + index * (size.height - CHART_INSET * 2f) / (Y_TICK_COUNT - 1)
+                        drawLine(leftAxisColor, Offset(size.width, y), Offset(0f, y), strokeWidth = 3.5f)
                     }
-                    Canvas(
-                        Modifier.fillMaxSize().scrollable(
-                            state = scrollableState,
-                            orientation = Orientation.Horizontal,
-                        ),
-                    ) {
-                            fun x(timestamp: Long): Float =
-                                ((timestamp - visibleStart).toDouble() / viewportDuration * size.width).toFloat()
-
-                            fun y(value: Double, range: AxisRange): Float =
-                                size.height - CHART_INSET -
-                                    ((value - range.min) / range.span).toFloat() * (size.height - CHART_INSET * 2f)
-
-                            bands.forEach { band ->
-                                val top = y(band.center + band.tolerance, leftRange)
-                                val bottom = y(band.center - band.tolerance, leftRange)
-                                drawRect(
-                                    band.color.copy(alpha = 0.14f),
-                                    Offset(0f, top),
-                                    androidx.compose.ui.geometry.Size(size.width, (bottom - top).coerceAtLeast(1f)),
-                                )
+                }
+                Box(Modifier.width(plotWidth).height(height)) {
+                    Canvas(Modifier.fillMaxSize()) {
+                        repeat(Y_TICK_COUNT) { index ->
+                            val y = CHART_INSET + index * (size.height - CHART_INSET * 2f) / (Y_TICK_COUNT - 1)
+                            drawLine(gridColor, Offset(0f, y), Offset(size.width, y), strokeWidth = 2.2f)
+                        }
+                        repeat(X_GRID_COUNT) { index ->
+                            val x = index * size.width / (X_GRID_COUNT - 1)
+                            drawLine(gridColor, Offset(x, 0f), Offset(x, size.height), strokeWidth = 2.2f)
+                        }
+                    }
+                    Canvas(Modifier.fillMaxSize()) {
+                        fun x(timestamp: Long) =
+                            ((timestamp - visibleStart).toDouble() / visibleRange.duration * size.width).toFloat()
+                        fun y(value: Double, range: AxisRange) = size.height - CHART_INSET -
+                            ((value - range.min) / range.span).toFloat() * (size.height - CHART_INSET * 2f)
+                        bands.forEach { band ->
+                            val top = y(band.center + band.tolerance, leftRange)
+                            val bottom = y(band.center - band.tolerance, leftRange)
+                            drawRect(
+                                band.color.copy(alpha = 0.16f),
+                                Offset(0f, top),
+                                Size(size.width, (bottom - top).coerceAtLeast(1f)),
+                            )
+                            drawLine(
+                                band.color,
+                                Offset(0f, y(band.center, leftRange)),
+                                Offset(size.width, y(band.center, leftRange)),
+                                strokeWidth = 3.2f,
+                            )
+                        }
+                        sortedSeries.forEach { item ->
+                            val axisRange = when (item.axis) {
+                                PlotAxis.LEFT -> leftRange
+                                PlotAxis.RIGHT -> rightRange
+                                PlotAxis.INDEPENDENT -> independentRange
+                            }
+                            val points = item.points.filter { it.timestamp in visibleStart..visibleEnd }
+                                .map { Offset(x(it.timestamp), y(it.value, axisRange)) }
+                            points.zipWithNext().forEach { (start, end) ->
                                 drawLine(
-                                    band.color,
-                                    Offset(0f, y(band.center, leftRange)),
-                                    Offset(size.width, y(band.center, leftRange)),
-                                    strokeWidth = 3f,
+                                    item.color,
+                                    start,
+                                    end,
+                                    strokeWidth = item.strokeWidth,
+                                    cap = StrokeCap.Round,
+                                    pathEffect = if (item.dashed) {
+                                        PathEffect.dashPathEffect(floatArrayOf(9f, 7f))
+                                    } else {
+                                        null
+                                    },
                                 )
                             }
-                            sortedSeries.forEach { item ->
-                                val range = when (item.axis) {
-                                    PlotAxis.LEFT -> leftRange
-                                    PlotAxis.RIGHT -> rightRange
-                                    PlotAxis.INDEPENDENT -> independentRange
-                                }
-                                val nearbyPoints = item.points.filter { point ->
-                                    point.timestamp in (visibleStart - viewportDuration)..(visibleEnd + viewportDuration)
-                                }
-                                val points = nearbyPoints.map { point ->
-                                    Offset(
-                                        x(point.timestamp),
-                                        y(point.value, range),
-                                    )
-                                }
-                                points.zipWithNext().forEach { (start, end) ->
-                                    drawLine(
-                                        item.color,
-                                        start,
-                                        end,
-                                        strokeWidth = item.strokeWidth,
-                                        cap = StrokeCap.Round,
-                                        pathEffect = if (item.dashed) PathEffect.dashPathEffect(floatArrayOf(9f, 7f)) else null,
-                                    )
-                                }
-                                if (item.showPoints) {
-                                    nearbyPoints.zip(points).forEach { (value, point) ->
-                                        if (value.timestamp in visibleStart..visibleEnd) {
-                                            drawCircle(item.color, item.pointRadius, point)
-                                        }
-                                    }
-                                }
-                            }
+                            if (item.showPoints) points.forEach { drawCircle(item.color, item.pointRadius, it) }
+                        }
                     }
                 }
                 if (hasRightAxis) {
-                    ChartAxisLabels(rightRange, rightColor!!, formatRight, rightAxisWidth, height, endAligned = false)
+                    Canvas(Modifier.width(rightTickWidth).height(height)) {
+                        repeat(Y_TICK_COUNT) { index ->
+                            val y = CHART_INSET + index * (size.height - CHART_INSET * 2f) / (Y_TICK_COUNT - 1)
+                            drawLine(rightAxisColor, Offset(0f, y), Offset(size.width, y), strokeWidth = 3.5f)
+                        }
+                    }
+                    ChartAxisLabels(rightRange, rightColor!!, formatRight, rightLabelWidth, height, false)
                 }
             }
             Row {
-                Box(Modifier.width(leftAxisWidth))
-                ChartDateLabels(visibleStart, visibleEnd, plotViewportWidth)
+                Box(Modifier.width(labelWidth + tickWidth))
+                Column {
+                    Canvas(Modifier.width(plotWidth).height(9.dp)) {
+                        repeat(X_GRID_COUNT) { index ->
+                            val x = index * size.width / (X_GRID_COUNT - 1)
+                            drawLine(xAxisColor, Offset(x, 0f), Offset(x, size.height), strokeWidth = 3.5f)
+                        }
+                    }
+                    ChartDateLabels(visibleStart, visibleEnd, plotWidth)
+                }
             }
         }
     }

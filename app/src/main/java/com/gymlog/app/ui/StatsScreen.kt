@@ -50,8 +50,15 @@ fun StatsScreen(
     onHistory: () -> Unit,
 ) {
     var window by remember { mutableStateOf("3M") }
-    val cutoff = statsCutoff(window)
-    val visible = history.filter { cutoff == null || it.performedAt >= cutoff }
+    var showTrend by remember { mutableStateOf(true) }
+    var showCustomRange by remember { mutableStateOf(false) }
+    var customStart by remember { mutableStateOf<Long?>(null) }
+    var customEnd by remember { mutableStateOf<Long?>(null) }
+    val cutoff = if (window == "CUSTOM") customStart else statsCutoff(window)
+    val visible = history.filter {
+        (cutoff == null || it.performedAt >= cutoff) &&
+            (window != "CUSTOM" || customEnd == null || it.performedAt <= customEnd!!)
+    }
     val zone = ZoneId.systemDefault()
     val sessions = visible.groupBy { trainingDate(it.performedAt, zone) }.toSortedMap()
     val durations = sessions.mapValues { (_, sets) ->
@@ -135,7 +142,16 @@ fun StatsScreen(
             color = machines.asSequence().flatMap { it.areas.asSequence() }.firstOrNull { it.area == area }?.displayColor ?: area.color,
         )
     }.sortedByDescending { it.weighted }
-    val statsChartWindow = ChartWindow(chartWindowDuration(window), System.currentTimeMillis(), window)
+    val newestEntry = history.maxOfOrNull { it.performedAt } ?: System.currentTimeMillis()
+    val oldestEntry = history.minOfOrNull { it.performedAt } ?: newestEntry - 30L * 86_400_000L
+    val statsChartWindow = ChartWindow(
+        durationMillis = if (window == "CUSTOM") {
+            customStart?.let { start -> customEnd?.let { end -> (end - start).coerceAtLeast(1L) } }
+        } else chartWindowDuration(window),
+        endMillis = if (window == "CUSTOM") customEnd else newestEntry,
+        startMillis = if (window == "CUSTOM") customStart else null,
+        key = window,
+    )
     fun datedPoints(dates: List<LocalDate>, values: List<Double>): List<TimeValue> =
         dates.zip(values).map { (date, value) -> TimeValue(date.atStartOfDay(zone).toInstant().toEpochMilli(), value) }
 
@@ -148,26 +164,13 @@ fun StatsScreen(
             FilledTonalButton(onClick = onHistory, modifier = Modifier.fillMaxWidth()) { Text("Calendar & History") }
         }
         item {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                listOf("1W", "1M", "3M", "6M", "1Y", "2Y", "3Y", "ALL").forEach { preset ->
-                    val selected = window == preset
-                    Text(
-                        preset,
-                        modifier = Modifier
-                            .weight(1f)
-                            .background(
-                                if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
-                                RoundedCornerShape(7.dp),
-                            )
-                            .clickable { window = preset }
-                            .padding(vertical = 4.dp),
-                        color = if (selected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
-                        style = MaterialTheme.typography.labelSmall,
-                        fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
-                        textAlign = TextAlign.Center,
-                    )
-                }
-            }
+            ChartRangeControls(
+                selectedWindow = window,
+                showTrend = showTrend,
+                onWindowSelected = { window = it },
+                onCustomSelected = { showCustomRange = true },
+                onTrendSelected = { showTrend = !showTrend },
+            )
         }
         item {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(5.dp)) {
@@ -197,18 +200,23 @@ fun StatsScreen(
             }
         }
         item { BodyAreaStatsCard(bodyAreaStats) }
-        item { StatsChart("Gym Sessions by Week", datedPoints(weeks.keys.toList(), weeks.values.toList()), "sessions", statsChartWindow) }
+        item { StatsChart("Gym Sessions by Week", datedPoints(weeks.keys.toList(), weeks.values.toList()), "sessions", statsChartWindow, showTrend) }
         item {
             StatsChart(
                 "Training Hours by Day (last 30 days)",
                 datedPoints(last30Days, last30Durations.map { it / 60.0 }),
                 "hours",
-                ChartWindow(30L * 86_400_000L, System.currentTimeMillis(), "LAST_30_DAYS"),
+                ChartWindow(
+                    durationMillis = 30L * 86_400_000L,
+                    endMillis = System.currentTimeMillis(),
+                    key = "LAST_30_DAYS",
+                ),
+                showTrend,
             )
         }
-        item { StatsChart("Gym Duration by Day", datedPoints(allDurations.keys.toList(), allDurations.values.toList()), "minutes", statsChartWindow) }
-        item { StatsChart("Weight Increases by Week", datedPoints(increaseWeekDates, increasesByWeek), "increases", statsChartWindow) }
-        item { StatsChart("Weight Upgrades per Gym Day", datedPoints(allSessions.keys.sorted(), upgradesPerGymDay), "upgrades", statsChartWindow) }
+        item { StatsChart("Gym Duration by Day", datedPoints(allDurations.keys.toList(), allDurations.values.toList()), "minutes", statsChartWindow, showTrend) }
+        item { StatsChart("Weight Increases by Week", datedPoints(increaseWeekDates, increasesByWeek), "increases", statsChartWindow, showTrend) }
+        item { StatsChart("Weight Upgrades per Gym Day", datedPoints(allSessions.keys.sorted(), upgradesPerGymDay), "upgrades", statsChartWindow, showTrend) }
         item {
             StatsChart(
                 "Weight Upgrades by Month",
@@ -218,6 +226,7 @@ fun StatsScreen(
                 ),
                 "upgrades",
                 statsChartWindow,
+                showTrend,
             )
         }
         item { ProgressionByExerciseCard(weightMachines, cutoff, periodWeeks) }
@@ -228,6 +237,20 @@ fun StatsScreen(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
+    }
+    if (showCustomRange) {
+        CustomBodyRangeDialog(
+            maxTimestamp = newestEntry,
+            initialStart = customStart ?: oldestEntry,
+            initialEnd = customEnd ?: newestEntry,
+            onDismiss = { showCustomRange = false },
+            onSave = { start, end ->
+                customStart = start
+                customEnd = end
+                window = "CUSTOM"
+                showCustomRange = false
+            },
+        )
     }
 }
 
@@ -298,7 +321,13 @@ private fun StatCard(label: String, value: String, modifier: Modifier = Modifier
 }
 
 @Composable
-private fun StatsChart(title: String, points: List<TimeValue>, unit: String, window: ChartWindow) {
+private fun StatsChart(
+    title: String,
+    points: List<TimeValue>,
+    unit: String,
+    window: ChartWindow,
+    showTrend: Boolean,
+) {
     Card(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(horizontal = 8.dp, vertical = 6.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
             Text(title, fontWeight = FontWeight.SemiBold)
@@ -313,7 +342,8 @@ private fun StatsChart(title: String, points: List<TimeValue>, unit: String, win
             )
             val primary = MaterialTheme.colorScheme.primary
             TimeWindowChart(
-                series = listOf(TimeSeries(points, primary, strokeWidth = 4f, pointRadius = 5f)),
+                series = listOf(TimeSeries(points, primary, strokeWidth = 4f, pointRadius = 5f)) +
+                    if (showTrend) listOf(trendTimeSeries(points, primary, PlotAxis.LEFT)) else emptyList(),
                 window = window,
                 leftColor = primary,
                 formatLeft = ::formatStatsAxisValue,

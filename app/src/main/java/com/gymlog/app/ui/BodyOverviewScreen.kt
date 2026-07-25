@@ -44,18 +44,17 @@ import java.time.format.DateTimeFormatter
 import java.util.Locale
 
 private data class BodyChartSettings(
-    val showFit: Boolean = true,
     val target: Double? = null,
     val acceptance: Double? = null,
 )
 
-private enum class CustomRangeMode { START_DATE, DURATION }
+private enum class CustomRangeMode { INTERVAL, DURATION }
 
 private val bodyMetricDisplayOrder = listOf(
     BodyMetric.WEIGHT,
     BodyMetric.FAT_PERCENTAGE,
-    BodyMetric.FAT_MASS,
     BodyMetric.MUSCLE_PERCENTAGE,
+    BodyMetric.FAT_MASS,
     BodyMetric.MUSCLE_MASS,
 )
 
@@ -76,6 +75,7 @@ fun BodyOverviewScreen(
     val context = LocalContext.current
     val preferences = remember { context.getSharedPreferences("body_graph_settings", 0) }
     var window by remember { mutableStateOf(preferences.getString("window", "6M") ?: "6M") }
+    var showTrend by remember { mutableStateOf(preferences.getBoolean("show_trend", true)) }
     var showBodyMenu by remember { mutableStateOf(false) }
     var showCustomRange by remember { mutableStateOf(false) }
     var customStart by remember { mutableStateOf(preferences.getLong("custom_start", 0L).takeIf { it > 0L }) }
@@ -86,7 +86,6 @@ fun BodyOverviewScreen(
                 put(
                     metric,
                     BodyChartSettings(
-                        showFit = preferences.getBoolean("${metric.name}_fit", true),
                         target = preferences.getString("${metric.name}_target", null)?.toDoubleOrNull(),
                         acceptance = preferences.getString("${metric.name}_acceptance", null)?.toDoubleOrNull(),
                     ),
@@ -102,7 +101,8 @@ fun BodyOverviewScreen(
         } else {
             chartWindowDuration(window)
         },
-        initialEnd = if (window == "CUSTOM") customEnd else newestMeasurement,
+        endMillis = if (window == "CUSTOM") customEnd else newestMeasurement,
+        startMillis = if (window == "CUSTOM") customStart else null,
         key = "$window:$customStart:$customEnd",
     )
 
@@ -114,44 +114,36 @@ fun BodyOverviewScreen(
         ) {
             item {
                 Card(Modifier.fillMaxWidth()) {
-                    Text(
-                        syncStatus.ifBlank { snapshot.syncedAt?.let { "Last synced ${formatBodySyncTime(it)}" } ?: "Not synced yet" },
-                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
+                    Row(
+                        Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 7.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text("Body", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                        Text(
+                            snapshot.syncedAt?.let { "Last sync ${formatBodySyncTime(it)}" }
+                                ?: syncStatus.ifBlank { "Not synced yet" },
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            textAlign = TextAlign.End,
+                        )
+                    }
                 }
             }
             item {
-                Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    listOf(
-                        listOf("1W", "2W", "3W", "1M", "3M"),
-                        listOf("6M", "1Y", "3Y", "ALL", "CUSTOM"),
-                    ).forEach { row ->
-                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                            row.forEach { preset ->
-                                val selected = window == preset
-                                Text(
-                                    when (preset) { "ALL" -> "All"; "CUSTOM" -> "Custom"; else -> preset },
-                                    modifier = Modifier.weight(1f).background(
-                                        if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
-                                        RoundedCornerShape(7.dp),
-                                    ).clickable {
-                                        if (preset == "CUSTOM") showCustomRange = true
-                                        else {
-                                            window = preset
-                                            preferences.edit().putString("window", preset).apply()
-                                        }
-                                    }.padding(vertical = 6.dp),
-                                    color = if (selected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
-                                    fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
-                                    style = MaterialTheme.typography.labelSmall,
-                                    textAlign = TextAlign.Center,
-                                )
-                            }
-                        }
-                    }
-                }
+                ChartRangeControls(
+                    selectedWindow = window,
+                    showTrend = showTrend,
+                    onWindowSelected = { preset ->
+                        window = preset
+                        preferences.edit().putString("window", preset).apply()
+                    },
+                    onCustomSelected = { showCustomRange = true },
+                    onTrendSelected = {
+                        showTrend = !showTrend
+                        preferences.edit().putBoolean("show_trend", showTrend).apply()
+                    },
+                )
             }
             bodyMetricDisplayOrder.forEach { metric ->
                 item(metric.name) {
@@ -162,12 +154,12 @@ fun BodyOverviewScreen(
                         onSettings = {
                             settings[metric] = it
                             preferences.edit()
-                                .putBoolean("${metric.name}_fit", it.showFit)
                                 .putString("${metric.name}_target", it.target?.toString())
                                 .putString("${metric.name}_acceptance", it.acceptance?.toString())
                                 .apply()
                         },
                         window = bodyChartWindow,
+                        showTrend = showTrend,
                     )
                 }
             }
@@ -215,6 +207,7 @@ private fun BodyMetricCard(
     settings: BodyChartSettings,
     onSettings: (BodyChartSettings) -> Unit,
     window: ChartWindow,
+    showTrend: Boolean,
 ) {
     var editing by remember { mutableStateOf(false) }
     val sorted = values.sortedBy { it.measuredAt }
@@ -227,7 +220,7 @@ private fun BodyMetricCard(
     val fitColor = MaterialTheme.colorScheme.tertiary
     val targetColor = Color(0xFF66BB6A)
     Card(Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(8.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+        Column(Modifier.padding(horizontal = 6.dp, vertical = 3.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
                     Text(
@@ -236,9 +229,14 @@ private fun BodyMetricCard(
                         fontWeight = FontWeight.SemiBold,
                     )
                 }
-                TextButton(onClick = { editing = true }) { Text("Settings") }
+                Text(
+                    "Settings",
+                    Modifier.clickable { editing = true }.padding(horizontal = 4.dp, vertical = 2.dp),
+                    color = MaterialTheme.colorScheme.primary,
+                    style = MaterialTheme.typography.labelMedium,
+                )
             }
-            if (settings.showFit && sorted.size >= 2) {
+            if (showTrend && sorted.size >= 2) {
                 Text(
                     "Linear fit: ${String.format(Locale.US, "%+.2f", fit.slopePerDay * 30.44)} ${metric.unit} / month",
                     color = fitColor,
@@ -254,7 +252,7 @@ private fun BodyMetricCard(
                     style = MaterialTheme.typography.bodySmall,
                 )
             }
-            BodyGraph(sorted, if (settings.showFit) fit.values else emptyList(), settings, primary, fitColor, targetColor, window)
+            BodyGraph(sorted, if (showTrend) fit.values else emptyList(), settings, primary, fitColor, targetColor, window)
         }
     }
     if (editing) BodyChartSettingsDialog(metric, settings, { editing = false }) {
@@ -303,7 +301,7 @@ private fun BodyGraph(
 }
 
 @Composable
-private fun CustomBodyRangeDialog(
+internal fun CustomBodyRangeDialog(
     maxTimestamp: Long,
     initialStart: Long,
     initialEnd: Long,
@@ -311,17 +309,22 @@ private fun CustomBodyRangeDialog(
     onSave: (Long, Long) -> Unit,
 ) {
     val zone = ZoneId.systemDefault()
-    var mode by remember { mutableStateOf(CustomRangeMode.START_DATE) }
-    var dateText by remember { mutableStateOf(Instant.ofEpochMilli(initialStart).atZone(zone).toLocalDate().toString()) }
-    var endDateText by remember { mutableStateOf(Instant.ofEpochMilli(initialEnd).atZone(zone).toLocalDate().toString()) }
+    val dateFormatter = remember { DateTimeFormatter.ofPattern("dd-MM-yyyy") }
+    var mode by remember { mutableStateOf(CustomRangeMode.INTERVAL) }
+    var dateText by remember {
+        mutableStateOf(Instant.ofEpochMilli(initialStart).atZone(zone).toLocalDate().format(dateFormatter))
+    }
+    var endDateText by remember {
+        mutableStateOf(Instant.ofEpochMilli(initialEnd).atZone(zone).toLocalDate().format(dateFormatter))
+    }
     var amountText by remember { mutableStateOf("2.5") }
     var durationUnit by remember { mutableStateOf("Weeks") }
-    val end = runCatching {
-        LocalDate.parse(endDateText, DateTimeFormatter.ISO_LOCAL_DATE)
-            .plusDays(1).atStartOfDay(zone).toInstant().toEpochMilli() - 1L
+    val intervalEnd = runCatching {
+        LocalDate.parse(endDateText, dateFormatter).plusDays(1).atStartOfDay(zone).toInstant().toEpochMilli() - 1L
     }.getOrNull()?.coerceAtMost(maxTimestamp)
+    val end = if (mode == CustomRangeMode.INTERVAL) intervalEnd else maxTimestamp
     val startFromDate = runCatching {
-        LocalDate.parse(dateText, DateTimeFormatter.ISO_LOCAL_DATE).atStartOfDay(zone).toInstant().toEpochMilli()
+        LocalDate.parse(dateText, dateFormatter).atStartOfDay(zone).toInstant().toEpochMilli()
     }.getOrNull()
     val unitMillis = when (durationUnit) {
         "Days" -> DAY_MILLIS
@@ -332,21 +335,20 @@ private fun CustomBodyRangeDialog(
     val startFromDuration = end?.let { endValue ->
         amountText.replace(',', '.').toDoubleOrNull()?.takeIf { it > 0.0 }?.let { endValue - (it * unitMillis).toLong() }
     }
-    val start = if (mode == CustomRangeMode.START_DATE) startFromDate else startFromDuration
+    val start = if (mode == CustomRangeMode.INTERVAL) startFromDate else startFromDuration
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Custom graph range") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedTextField(endDateText, { endDateText = it }, label = { Text("End date (YYYY-MM-DD)") }, singleLine = true)
-                Text("Leave it at the latest measurement, or select an earlier end date.", style = MaterialTheme.typography.bodySmall)
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    listOf(CustomRangeMode.START_DATE to "Start date", CustomRangeMode.DURATION to "Duration").forEach { (choice, label) ->
+                    listOf(CustomRangeMode.INTERVAL to "Interval", CustomRangeMode.DURATION to "Duration").forEach { (choice, label) ->
                         Text(label, Modifier.weight(1f).background(if (mode == choice) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(7.dp)).clickable { mode = choice }.padding(vertical = 7.dp), color = if (mode == choice) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.Center, style = MaterialTheme.typography.labelMedium)
                     }
                 }
-                if (mode == CustomRangeMode.START_DATE) {
-                    OutlinedTextField(dateText, { dateText = it }, label = { Text("Start date (YYYY-MM-DD)") }, singleLine = true)
+                if (mode == CustomRangeMode.INTERVAL) {
+                    OutlinedTextField(dateText, { dateText = it }, label = { Text("Start (DD-MM-YYYY)") }, singleLine = true)
+                    OutlinedTextField(endDateText, { endDateText = it }, label = { Text("End (DD-MM-YYYY)") }, singleLine = true)
                 } else {
                     OutlinedTextField(amountText, { amountText = it.filter { char -> char.isDigit() || char == '.' || char == ',' } }, label = { Text("Duration") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal), singleLine = true)
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -369,23 +371,21 @@ private fun BodyChartSettingsDialog(
     onDismiss: () -> Unit,
     onSave: (BodyChartSettings) -> Unit,
 ) {
-    var fit by remember(current) { mutableStateOf(current.showFit) }
     var target by remember(current) { mutableStateOf(current.target?.let(::formatBodyValue).orEmpty()) }
     var acceptance by remember(current) { mutableStateOf(current.acceptance?.let(::formatBodyValue).orEmpty()) }
     val parsedTarget = target.replace(',', '.').toDoubleOrNull()
     val parsedAcceptance = acceptance.replace(',', '.').toDoubleOrNull()
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("${metric.label} Settings") },
+        title = { Text("Settings") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                TextButton(onClick = { fit = !fit }) { Text(if (fit) "Linear Fit: On" else "Linear Fit: Off") }
                 OutlinedTextField(target, { target = it.filter { char -> char.isDigit() || char == '.' || char == ',' || char == '-' } }, label = { Text("Target (${metric.unit})") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal), singleLine = true)
                 OutlinedTextField(acceptance, { acceptance = it.filter { char -> char.isDigit() || char == '.' || char == ',' } }, label = { Text("Acceptance ± (${metric.unit})") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal), singleLine = true)
                 Text("Leave Target empty to hide the target and acceptance band.", style = MaterialTheme.typography.bodySmall)
             }
         },
-        confirmButton = { Button(onClick = { onSave(BodyChartSettings(fit, parsedTarget, parsedAcceptance?.coerceAtLeast(0.0))) }) { Text("Save") } },
+        confirmButton = { Button(onClick = { onSave(BodyChartSettings(parsedTarget, parsedAcceptance?.coerceAtLeast(0.0))) }) { Text("Save") } },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
     )
 }
