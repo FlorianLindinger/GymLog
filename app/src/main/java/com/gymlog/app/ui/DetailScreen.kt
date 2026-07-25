@@ -135,13 +135,11 @@ fun DetailScreen(
 
         Card(modifier = Modifier.fillMaxWidth()) {
             Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text("${metricTitle(machine.trackingMode)} Statistics", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    Stat("Started", formatMetric(first, machine.trackingMode))
-                    Stat("Current", formatMetric(machine.currentWeight, machine.trackingMode))
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Stat("Started", formatMetric(first, machine.trackingMode), Modifier.weight(1f))
+                    Stat("Current", formatMetric(machine.currentWeight, machine.trackingMode), Modifier.weight(1f))
                 }
-                Text("Chart Window", style = MaterialTheme.typography.labelMedium)
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     listOf("1M", "3M", "6M", "1Y", "ALL").forEach { window ->
                         CompactChoice(
                             selected = machine.chartWindow == window,
@@ -248,13 +246,14 @@ fun DetailScreen(
 }
 
 @Composable
-private fun Stat(label: String, value: String) {
-    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        Text(value, fontWeight = FontWeight.Bold)
-        Text(label, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+private fun Stat(label: String, value: String, modifier: Modifier = Modifier) {
+    Card(modifier) {
+        Column(Modifier.fillMaxWidth().padding(vertical = 7.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+            Text(value, fontWeight = FontWeight.Bold)
+            Text(label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
     }
 }
-
 @Composable
 private fun CompactChoice(selected: Boolean, onClick: () -> Unit, label: String) {
     Text(
@@ -300,9 +299,14 @@ private fun DualAxisSessionPlot(reps: List<Double>, weight: List<Double>, volume
     val volumeColor = Color(0xFF00BCD4)
     val grid = MaterialTheme.colorScheme.outlineVariant.copy(alpha = .72f)
     val axis = MaterialTheme.colorScheme.outline.copy(alpha = .9f)
-    Text(if (strength) "Level volume / training day" else "Volume / training day", color = volumeColor, style = MaterialTheme.typography.labelSmall)
+    Row(horizontalArrangement = Arrangement.spacedBy(3.dp), verticalAlignment = Alignment.CenterVertically) {
+        Text(if (strength) "Level" else "Reps / set", color = repsColor, style = MaterialTheme.typography.labelSmall)
+        Text("/", style = MaterialTheme.typography.labelSmall)
+        Text(if (strength) "Minutes" else "Weight", color = weightColor, style = MaterialTheme.typography.labelSmall)
+        Text("· Volume / training day", color = volumeColor, style = MaterialTheme.typography.labelSmall)
+    }
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
-        AxisLabels(if (strength) "Level" else "Reps / set", repsMax, repsMin, repsColor, Modifier.width(52.dp))
+        AxisLabels(repsMax, repsMin, repsColor, Modifier.width(42.dp))
         BoxWithConstraints(Modifier.weight(1f)) {
             val graphWidth = maxOf(maxWidth, (reps.size * 28).dp)
             Box(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
@@ -316,12 +320,12 @@ private fun DualAxisSessionPlot(reps: List<Double>, weight: List<Double>, volume
                         val lineY = index * size.height / 2f
                         drawLine(grid, Offset(0f, lineY), Offset(size.width, lineY), strokeWidth = 1.2f)
                     }
-                    drawLine(axis, Offset(0f, 0f), Offset(0f, size.height), strokeWidth = 2f)
-                    drawLine(axis, Offset(size.width, 0f), Offset(size.width, size.height), strokeWidth = 2f)
+                    drawLine(repsColor, Offset(0f, 0f), Offset(0f, size.height), strokeWidth = 2f)
+                    drawLine(weightColor, Offset(size.width, 0f), Offset(size.width, size.height), strokeWidth = 2f)
                     repeat(3) { index ->
                         val tickY = index * size.height / 2f
-                        drawLine(axis, Offset(0f, tickY), Offset(7f, tickY), strokeWidth = 2f)
-                        drawLine(axis, Offset(size.width, tickY), Offset(size.width - 7f, tickY), strokeWidth = 2f)
+                        drawLine(repsColor, Offset(0f, tickY), Offset(7f, tickY), strokeWidth = 2f)
+                        drawLine(weightColor, Offset(size.width, tickY), Offset(size.width - 7f, tickY), strokeWidth = 2f)
                     }
                     val volumePoints = volume.mapIndexed { index, value ->
                         Offset(x(index, volume.size), y(value, volumeMin, volumeMax))
@@ -342,21 +346,24 @@ private fun DualAxisSessionPlot(reps: List<Double>, weight: List<Double>, volume
                 }
             }
         }
-        AxisLabels(if (strength) "Minutes" else "Weight", weightMax, weightMin, weightColor, Modifier.width(52.dp))
+        AxisLabels(weightMax, weightMin, weightColor, Modifier.width(42.dp))
     }
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-        Text(formatTimestamp(sessions.first().minOf { it.performedAt }), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        Text(formatTimestamp(sessions.last().maxOf { it.performedAt }), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        val dates = listOf(sessions.first(), sessions[sessions.lastIndex / 2], sessions.last())
+            .map { session -> session.maxOf { it.performedAt } }
+            .distinct()
+        dates.forEach { timestamp ->
+            Text(formatTimestamp(timestamp), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
     }
 }
 
 @Composable
-private fun AxisLabels(label: String, max: Double, min: Double, color: Color, modifier: Modifier) {
+private fun AxisLabels(max: Double, min: Double, color: Color, modifier: Modifier) {
     Column(modifier.height(164.dp), verticalArrangement = Arrangement.SpaceBetween, horizontalAlignment = Alignment.End) {
-        Text(label, modifier = Modifier.graphicsLayer { rotationZ = -90f }, style = MaterialTheme.typography.labelSmall, color = color)
-        Text(formatAxisValue(max), style = MaterialTheme.typography.labelSmall)
-        Text(formatAxisValue((max + min) / 2.0), style = MaterialTheme.typography.labelSmall)
-        Text(formatAxisValue(min), style = MaterialTheme.typography.labelSmall)
+        Text(formatAxisValue(max), style = MaterialTheme.typography.labelSmall, color = color)
+        Text(formatAxisValue((max + min) / 2.0), style = MaterialTheme.typography.labelSmall, color = color)
+        Text(formatAxisValue(min), style = MaterialTheme.typography.labelSmall, color = color)
     }
 }
 @Composable
@@ -383,12 +390,10 @@ private fun AxisMetricPlot(label: String, values: List<Double>, color: Color, sh
                         val lineY = index * size.height / 2f
                         drawLine(grid, Offset(0f, lineY), Offset(size.width, lineY), strokeWidth = 1.2f)
                     }
-                    drawLine(axis, Offset(0f, 0f), Offset(0f, size.height), strokeWidth = 2f)
-                    drawLine(axis, Offset(size.width, 0f), Offset(size.width, size.height), strokeWidth = 2f)
+                    drawLine(color, Offset(0f, 0f), Offset(0f, size.height), strokeWidth = 2f)
                     repeat(3) { index ->
                         val tickY = index * size.height / 2f
-                        drawLine(axis, Offset(0f, tickY), Offset(7f, tickY), strokeWidth = 2f)
-                        drawLine(axis, Offset(size.width, tickY), Offset(size.width - 7f, tickY), strokeWidth = 2f)
+                        drawLine(color, Offset(0f, tickY), Offset(7f, tickY), strokeWidth = 2f)
                     }
                     val points = values.mapIndexed { index, value -> Offset(if (values.size == 1) size.width / 2f else index * size.width / (values.size - 1), y(value)) }
                     points.zipWithNext().forEach { (a, b) -> drawLine(color, a, b, strokeWidth = 4f, cap = StrokeCap.Round) }
@@ -424,8 +429,12 @@ private fun VolumePerTrainingDayPlot(values: List<Double>, sessions: List<List<S
         }
     }
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-        Text(formatTimestamp(sessions.first().minOf { it.performedAt }), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        Text(formatTimestamp(sessions.last().maxOf { it.performedAt }), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        val dates = listOf(sessions.first(), sessions[sessions.lastIndex / 2], sessions.last())
+            .map { session -> session.maxOf { it.performedAt } }
+            .distinct()
+        dates.forEach { timestamp ->
+            Text(formatTimestamp(timestamp), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
     }
 }
 private fun formatAxisValue(value: Double): String = if (value % 1.0 == 0.0) value.toInt().toString()
@@ -580,11 +589,7 @@ private fun AreaDialog(
                         }
                     }
                 }
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End, verticalAlignment = Alignment.CenterVertically) {
-                    TextButton(onClick = onDismiss, contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp)) { Text("Cancel") }
-
-                }
-            }
+}
         },
         confirmButton = {},
     )

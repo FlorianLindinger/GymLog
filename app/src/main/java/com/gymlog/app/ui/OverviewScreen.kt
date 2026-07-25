@@ -163,7 +163,7 @@ fun OverviewScreen(
                 contentPadding = PaddingValues(horizontal = 8.dp, vertical = 6.dp),
                 verticalArrangement = Arrangement.spacedBy(6.dp),
             ) {
-                items(orderedMachines, key = { it.machine.id }) { summary ->
+                items(orderedMachines, key = { it.machine.id }, contentType = { "machine" }) { summary ->
                     val id = summary.machine.id
                     val reorderable = orderingMode == ExerciseOrderingMode.FIXED ||
                         orderingMode == ExerciseOrderingMode.MIXED && summary.machine.pinned
@@ -403,9 +403,10 @@ private fun MachineCard(
     var changeMetric by remember(summary.machine.id) { mutableStateOf(false) }
     var confirmDeleteSets by remember(summary.machine.id) { mutableStateOf(false) }
     val trainedInUnit = summary.recentSets.any { it.performedAt >= trainingUnitCutoff }
-    val currentUnitSets = currentTrainingUnitSets(summary)
+    val currentUnitSets = remember(summary.recentSets) { currentTrainingUnitSets(summary) }
     val isChangingTrainingUnit = currentUnitSets.isNotEmpty()
     val isLastDone = lastExerciseInUnit?.machine?.id == summary.machine.id
+    val sessionPattern = remember(summary.recentSets, summary.machine.trackingMode) { sessionPatternText(summary) }
     val clash = if (!trainedInUnit && lastExerciseInUnit != null) strongestClash(summary, lastExerciseInUnit) else null
     val clashAreas = if (!trainedInUnit && lastExerciseInUnit != null) clashingAreas(summary, lastExerciseInUnit) else emptySet()
     val outlineColor = when {
@@ -475,7 +476,7 @@ private fun MachineCard(
                     color = MaterialTheme.colorScheme.primary,
                 )
                 Text(
-                    sessionPatternText(summary),
+                    sessionPattern,
                     modifier = Modifier.weight(1f),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -866,7 +867,7 @@ fun formatMetric(value: Double, trackingMode: String): String = when (trackingMo
 }
 
 fun formatTrainingEntry(value: Double, trackingMode: String, level: Int? = null): String = when (trackingMode) {
-    "STRENGTH" -> "Level ${level ?: 0} · ${formatNumber(value)} min"
+    "STRENGTH" -> "Level ${(level ?: 0).toString().padStart(2)} · ${formatNumber(value).padStart(3)} min"
     "DURATION" -> "${formatNumber(value)} min"
     else -> formatMetric(value, trackingMode)
 }
