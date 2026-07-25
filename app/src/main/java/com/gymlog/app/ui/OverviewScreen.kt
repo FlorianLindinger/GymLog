@@ -53,6 +53,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.KeyboardCapitalization
@@ -477,6 +478,7 @@ private fun MachineCard(
                     sessionPatternText(summary),
                     modifier = Modifier.weight(1f),
                     style = MaterialTheme.typography.bodySmall,
+                    fontFamily = FontFamily.Monospace,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
@@ -485,6 +487,7 @@ private fun MachineCard(
                     formatMetric(summary.machine.currentWeight, summary.machine.trackingMode),
                     modifier = Modifier.clickable(enabled = !isReordering) { changeMetric = true }.padding(horizontal = 6.dp, vertical = 4.dp),
                     style = MaterialTheme.typography.titleSmall,
+                    fontFamily = FontFamily.Monospace,
                     color = sessionTrendColor(summary),
                 )
             }
@@ -618,8 +621,8 @@ private fun trainingDayStart(timestamp: Long, zone: ZoneId = ZoneId.systemDefaul
 private fun sessionPatternText(summary: MachineSummary): AnnotatedString {
     val batches = groupSetBatches(summary.recentSets)
     val patterns = batches.map { batch ->
-        batch.sortedBy { it.performedAt }.joinToString(",") {
-            if (isDirectMetric(summary.machine.trackingMode)) "${formatNumber(it.weight)} min" else it.reps.toString()
+        batch.sortedBy { it.performedAt }.joinToString(",") { set ->
+            if (isDirectMetric(summary.machine.trackingMode)) formatTrainingEntry(set.weight, summary.machine.trackingMode, set.reps) else set.reps.toString()
         }
     }
     fun trend(index: Int): Int {
@@ -629,24 +632,23 @@ private fun sessionPatternText(summary: MachineSummary): AnnotatedString {
         val olderMetric = if (summary.machine.trackingMode == "STRENGTH") older.reps.toDouble() else older.weight
         return newerMetric.compareTo(olderMetric)
     }
-    fun AnnotatedString.Builder.appendTrendMarker(marker: String, trend: Int) {
+    fun AnnotatedString.Builder.appendTrendMarker(trend: Int) {
         when {
-            trend > 0 -> withStyle(SpanStyle(color = Color(0xFF66BB6A), fontWeight = FontWeight.Bold)) { append(marker) }
-            trend < 0 -> withStyle(SpanStyle(color = Color(0xFFEF5350), fontWeight = FontWeight.Bold)) { append(marker) }
-            else -> append(marker)
+            trend > 0 -> withStyle(SpanStyle(color = Color(0xFF66BB6A), fontWeight = FontWeight.Bold)) { append("|") }
+            trend < 0 -> withStyle(SpanStyle(color = Color(0xFFEF5350), fontWeight = FontWeight.Bold)) { append("|") }
+            else -> append("|")
         }
     }
     return buildAnnotatedString {
-        appendTrendMarker("Last", trend(0))
-        append(": ")
+        append("Last: ")
         if (patterns.isEmpty()) append("-")
         patterns.forEachIndexed { index, pattern ->
-            if (index > 0) {
+            append(pattern)
+            if (index < patterns.lastIndex) {
                 append(" ")
-                appendTrendMarker("|", trend(index))
+                appendTrendMarker(trend(index))
                 append(" ")
             }
-            append(pattern)
         }
     }
 }
@@ -865,5 +867,8 @@ fun formatMetric(value: Double, trackingMode: String): String = when (trackingMo
     else -> "Level ${formatNumber(value)}"
 }
 
-fun formatTrainingEntry(value: Double, trackingMode: String): String =
-    if (isDirectMetric(trackingMode)) "${formatNumber(value)} min" else formatMetric(value, trackingMode)
+fun formatTrainingEntry(value: Double, trackingMode: String, level: Int? = null): String = when (trackingMode) {
+    "STRENGTH" -> "Level ${level ?: 0} · ${formatNumber(value)} min"
+    "DURATION" -> "${formatNumber(value)} min"
+    else -> formatMetric(value, trackingMode)
+}

@@ -37,6 +37,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
@@ -339,9 +340,10 @@ private fun HistorySetRow(set: HistorySet, onEdit: (HistorySet) -> Unit, onDelet
     Row(Modifier.fillMaxWidth().padding(vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
         if (showName) Text(set.machineName, Modifier.weight(1f)) else Spacer(Modifier.weight(1f))
         Text(
-            if (isDirectMetric(set.trackingMode)) formatTrainingEntry(set.weight, set.trackingMode)
+            if (isDirectMetric(set.trackingMode)) formatTrainingEntry(set.weight, set.trackingMode, set.reps)
             else "${set.reps} × ${formatMetric(set.weight, set.trackingMode)}",
             fontWeight = FontWeight.Medium,
+            fontFamily = FontFamily.Monospace,
         )
         Text("Edit", Modifier.clickable { onEdit(set) }.padding(horizontal = 7.dp, vertical = 3.dp), color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelMedium)
         Text("Delete", Modifier.clickable { onDelete(set) }.padding(horizontal = 5.dp, vertical = 3.dp), color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.labelMedium)

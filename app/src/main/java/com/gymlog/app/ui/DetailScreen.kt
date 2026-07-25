@@ -168,10 +168,11 @@ fun DetailScreen(
                     if (index > 0) HorizontalDivider()
                     Row(Modifier.fillMaxWidth().padding(vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
                         Text(
-                            if (isDirectMetric(machine.trackingMode)) "${formatTrainingEntry(ordered.first().weight, machine.trackingMode)} - ${formatTimestamp(batchKey)}"
+                            if (isDirectMetric(machine.trackingMode)) "${formatTrainingEntry(ordered.first().weight, machine.trackingMode, ordered.first().reps)} - ${formatTimestamp(batchKey)}"
                             else "${formatMetric(ordered.first().weight, machine.trackingMode)} - ${ordered.joinToString(",") { it.reps.toString() }} - ${formatTimestamp(batchKey)}",
                             modifier = Modifier.weight(1f),
                             fontWeight = FontWeight.Medium,
+                            fontFamily = FontFamily.Monospace,
                         )
                         Text(if (expandedBatch == batchKey) "Close" else "Edit", Modifier.clickable { expandedBatch = if (expandedBatch == batchKey) null else batchKey }.padding(horizontal = 6.dp, vertical = 3.dp), color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelMedium)
                         Text("Delete", Modifier.clickable { deletingSets = batch }.padding(horizontal = 6.dp, vertical = 3.dp), color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.labelMedium)
@@ -179,10 +180,11 @@ fun DetailScreen(
                     if (expandedBatch == batchKey) ordered.forEachIndexed { setIndex, set ->
                         Row(Modifier.fillMaxWidth().padding(start = 12.dp, top = 1.dp, bottom = 1.dp), verticalAlignment = Alignment.CenterVertically) {
                             Text(
-                                if (isDirectMetric(machine.trackingMode)) "Entry ${setIndex + 1}: ${formatTrainingEntry(set.weight, machine.trackingMode)}"
+                                if (isDirectMetric(machine.trackingMode)) "Entry ${setIndex + 1}: ${formatTrainingEntry(set.weight, machine.trackingMode, set.reps)}"
                                 else "Set ${setIndex + 1}: ${set.reps} reps",
                                 Modifier.weight(1f),
                                 style = MaterialTheme.typography.bodySmall,
+                                fontFamily = FontFamily.Monospace,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                             Text("Edit", Modifier.clickable { editingSet = set }.padding(horizontal = 6.dp, vertical = 2.dp), color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelSmall)
