@@ -149,10 +149,14 @@ fun DetailScreen(
                             label = if (window == "ALL") "All" else window,
                         )
                     }
+                    CompactChoice(
+                        selected = machine.showTrend,
+                        onClick = { repository.setShowTrend(machine.id, !machine.showTrend); onChanged() },
+                        label = "Trend",
+                    )
                 }
                 val cutoff = chartCutoff(machine.chartWindow)
                 val visibleSets = summary.recentSets.filter { cutoff == null || it.performedAt >= cutoff }
-                FilterChip(selected = machine.showTrend, onClick = { repository.setShowTrend(machine.id, !machine.showTrend); onChanged() }, label = { Text("Trend line") })
                 SessionMetricsChart(visibleSets, 0, machine.trackingMode, machine.showTrend)
                 Text("${(summary.weightChanges.size - 1).coerceAtLeast(0)} ${metricName(machine.trackingMode)} changes · ${summary.recentSets.size} recorded sets", color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
@@ -308,9 +312,11 @@ private fun DualAxisSessionPlot(reps: List<Double>, weight: List<Double>, volume
                         drawLine(grid, Offset(0f, lineY), Offset(size.width, lineY), strokeWidth = 1.2f)
                     }
                     drawLine(axis, Offset(0f, 0f), Offset(0f, size.height), strokeWidth = 2f)
+                    drawLine(axis, Offset(size.width, 0f), Offset(size.width, size.height), strokeWidth = 2f)
                     repeat(3) { index ->
                         val tickY = index * size.height / 2f
                         drawLine(axis, Offset(0f, tickY), Offset(7f, tickY), strokeWidth = 2f)
+                        drawLine(axis, Offset(size.width, tickY), Offset(size.width - 7f, tickY), strokeWidth = 2f)
                     }
                     val volumePoints = volume.mapIndexed { index, value ->
                         Offset(x(index, volume.size), y(value, volumeMin, volumeMax))
@@ -373,9 +379,11 @@ private fun AxisMetricPlot(label: String, values: List<Double>, color: Color, sh
                         drawLine(grid, Offset(0f, lineY), Offset(size.width, lineY), strokeWidth = 1.2f)
                     }
                     drawLine(axis, Offset(0f, 0f), Offset(0f, size.height), strokeWidth = 2f)
+                    drawLine(axis, Offset(size.width, 0f), Offset(size.width, size.height), strokeWidth = 2f)
                     repeat(3) { index ->
                         val tickY = index * size.height / 2f
                         drawLine(axis, Offset(0f, tickY), Offset(7f, tickY), strokeWidth = 2f)
+                        drawLine(axis, Offset(size.width, tickY), Offset(size.width - 7f, tickY), strokeWidth = 2f)
                     }
                     val points = values.mapIndexed { index, value -> Offset(if (values.size == 1) size.width / 2f else index * size.width / (values.size - 1), y(value)) }
                     points.zipWithNext().forEach { (a, b) -> drawLine(color, a, b, strokeWidth = 4f, cap = StrokeCap.Round) }

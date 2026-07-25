@@ -109,15 +109,7 @@ fun OverviewScreen(
     onRankingExcluded: (MachineSummary, Boolean) -> Unit,
 ) {
     val zone = ZoneId.systemDefault()
-    var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
-    val lifecycleState by LocalLifecycleOwner.current.lifecycle.currentStateAsState()
-    val isForeground = lifecycleState.isAtLeast(Lifecycle.State.RESUMED)
-    LaunchedEffect(isForeground) {
-        while (isForeground) {
-            now = System.currentTimeMillis()
-            delay(30_000)
-        }
-    }
+    val now = System.currentTimeMillis()
     val latestTrainingEntry = machines.flatMap { it.recentSets }.maxOfOrNull { it.performedAt }
     val todayTrainingDate = trainingDate(now, zone)
     val hasCurrentTraining = latestTrainingEntry?.let { trainingDate(it, zone) == todayTrainingDate } == true
@@ -143,7 +135,7 @@ fun OverviewScreen(
                     color = MaterialTheme.colorScheme.onPrimaryContainer,
                 )
             }
-            TrainingDurationCard(machines, activePlanName, now, zone)
+            TrainingDurationCard(machines, activePlanName, zone)
             if (activePlanNotesPinned && activePlanNotes.isNotBlank()) {
                 Card(
                     Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp).clickable(onClick = onEditPlanNotes),
@@ -250,7 +242,16 @@ private fun OverviewButtonLabel(text: String) {
 }
 
 @Composable
-private fun TrainingDurationCard(machines: List<MachineSummary>, activePlanName: String, now: Long, zone: ZoneId) {
+private fun TrainingDurationCard(machines: List<MachineSummary>, activePlanName: String, zone: ZoneId) {
+    var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
+    val lifecycleState by LocalLifecycleOwner.current.lifecycle.currentStateAsState()
+    val isForeground = lifecycleState.isAtLeast(Lifecycle.State.RESUMED)
+    LaunchedEffect(isForeground) {
+        while (isForeground) {
+            now = System.currentTimeMillis()
+            delay(30_000)
+        }
+    }
     val allSets = machines.flatMap { it.recentSets }
     val last = allSets.maxOfOrNull { it.performedAt }
     val sessionSets = last?.let { latest -> allSets.filter { trainingDate(it.performedAt, zone) == trainingDate(latest, zone) } }.orEmpty()
