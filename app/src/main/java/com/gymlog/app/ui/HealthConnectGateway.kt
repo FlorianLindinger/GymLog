@@ -11,6 +11,7 @@ import androidx.health.connect.client.request.ReadRecordsRequest
 import androidx.health.connect.client.time.TimeRangeFilter
 import java.time.Instant
 import kotlin.math.abs
+import kotlin.reflect.KClass
 
 class HealthConnectGateway(private val context: Context) {
     companion object {
@@ -22,6 +23,27 @@ class HealthConnectGateway(private val context: Context) {
         )
     }
 
+    private suspend fun <T : Record> HealthConnectClient.readAllRecords(
+        recordType: KClass<T>,
+        filter: TimeRangeFilter,
+    ): List<T> {
+        val all = mutableListOf<T>()
+        var pageToken: String? = null
+        do {
+            val response = readRecords(
+                ReadRecordsRequest(
+                    recordType = recordType,
+                    timeRangeFilter = filter,
+                    ascendingOrder = true,
+                    pageSize = 1000,
+                    pageToken = pageToken,
+                ),
+            )
+            all += response.records
+            pageToken = response.pageToken
+        } while (pageToken != null)
+        return all
+    }
     fun sdkStatus(): Int = HealthConnectClient.getSdkStatus(context)
 
     private fun client(): HealthConnectClient = HealthConnectClient.getOrCreate(context)
@@ -31,18 +53,12 @@ class HealthConnectGateway(private val context: Context) {
 
     suspend fun readBodyData(): BodyDataSnapshot {
         val health = client()
-        val start = Instant.now().minusSeconds(10L * 365L * 24L * 60L * 60L)
+        val start = Instant.EPOCH
         val end = Instant.now().plusSeconds(24L * 60L * 60L)
         val filter = TimeRangeFilter.between(start, end)
-        val weights = health.readRecords(
-            ReadRecordsRequest(WeightRecord::class, filter, ascendingOrder = true, pageSize = 1000),
-        ).records
-        val fatPercentages = health.readRecords(
-            ReadRecordsRequest(BodyFatRecord::class, filter, ascendingOrder = true, pageSize = 1000),
-        ).records
-        val leanMasses = health.readRecords(
-            ReadRecordsRequest(LeanBodyMassRecord::class, filter, ascendingOrder = true, pageSize = 1000),
-        ).records
+        val weights = health.readAllRecords(WeightRecord::class, filter)
+        val fatPercentages = health.readAllRecords(BodyFatRecord::class, filter)
+        val leanMasses = health.readAllRecords(LeanBodyMassRecord::class, filter)
 
         fun source(record: Record): String = record.metadata.dataOrigin.packageName
         fun nearestWeight(time: Instant): WeightRecord? = weights.minByOrNull {

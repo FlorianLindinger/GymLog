@@ -3,10 +3,8 @@ package com.gymlog.app.ui
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -15,7 +13,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
@@ -25,7 +22,6 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -55,7 +51,6 @@ private data class BodyChartSettings(
     val showFit: Boolean = true,
     val target: Double? = null,
     val acceptance: Double? = null,
-    val rollingAverage: Int = 0,
 )
 
 private data class BodyFit(
@@ -85,17 +80,15 @@ fun BodyOverviewScreen(
                         showFit = preferences.getBoolean("${metric.name}_fit", true),
                         target = preferences.getString("${metric.name}_target", null)?.toDoubleOrNull(),
                         acceptance = preferences.getString("${metric.name}_acceptance", null)?.toDoubleOrNull(),
-                        rollingAverage = preferences.getInt("${metric.name}_rolling", 0),
                     ),
                 )
             }
         }
     }
-    val cutoff = bodyCutoff(window)
-    val visible = snapshot.measurements.filter { cutoff == null || it.measuredAt >= cutoff }
-    val now = System.currentTimeMillis()
-    val xStart = cutoff ?: snapshot.measurements.minOfOrNull { it.measuredAt } ?: now - 30L * DAY_MILLIS
-    val xEnd = if (cutoff == null) snapshot.measurements.maxOfOrNull { it.measuredAt }?.coerceAtLeast(xStart + DAY_MILLIS) ?: now else now
+    val newestMeasurement = snapshot.measurements.maxOfOrNull { it.measuredAt } ?: System.currentTimeMillis()
+    val xEnd = newestMeasurement
+    val xStart = bodyWindowStart(window, newestMeasurement, snapshot.measurements.minOfOrNull { it.measuredAt })
+    val visible = snapshot.measurements.filter { it.measuredAt in xStart..xEnd }
 
     Box(modifier.fillMaxSize()) {
         LazyColumn(
@@ -104,17 +97,12 @@ fun BodyOverviewScreen(
         ) {
             item {
                 Card(Modifier.fillMaxWidth()) {
-                    Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Text("Body Measurements", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
-                        Text("On-device Health Connect import", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        Text(syncStatus, style = MaterialTheme.typography.bodySmall)
-                        Button(onClick = onSync, modifier = Modifier.fillMaxWidth()) { Text("Sync Health Connect") }
-                        Text(
-                            "Lean mass is body weight excluding fat. It includes muscle, water, organs, and bone, so it is not skeletal-muscle mass.",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
+                    Text(
+                        snapshot.syncedAt?.let { "Last synced ${formatBodySyncTime(it)}" } ?: "Not synced yet",
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                 }
             }
             item {
@@ -154,7 +142,6 @@ fun BodyOverviewScreen(
                                 .putBoolean("${metric.name}_fit", it.showFit)
                                 .putString("${metric.name}_target", it.target?.toString())
                                 .putString("${metric.name}_acceptance", it.acceptance?.toString())
-                                .putInt("${metric.name}_rolling", it.rollingAverage)
                                 .apply()
                         },
                         xStart = xStart,
@@ -183,7 +170,6 @@ fun BodyOverviewScreen(
         title = { Text("Body") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text(syncStatus, style = MaterialTheme.typography.bodySmall)
                 Button(onClick = { onSync(); showBodyMenu = false }, modifier = Modifier.fillMaxWidth()) { Text("Sync Health Connect") }
                 Text("Body data and graph settings are independent of training plans.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
@@ -203,8 +189,7 @@ private fun BodyMetricCard(
 ) {
     var editing by remember { mutableStateOf(false) }
     val sorted = values.sortedBy { it.measuredAt }
-    val rolling = bodyRollingAverage(sorted, settings.rollingAverage)
-    val fit = bodyLinearFit(rolling)
+    val fit = bodyLinearFit(sorted)
     val primary = MaterialTheme.colorScheme.primary
     val fitColor = MaterialTheme.colorScheme.tertiary
     val targetColor = Color(0xFF66BB6A)
@@ -221,10 +206,7 @@ private fun BodyMetricCard(
                 }
                 TextButton(onClick = { editing = true }) { Text("Graph Settings") }
             }
-            if (settings.rollingAverage > 1 && sorted.isNotEmpty()) {
-                Text("${settings.rollingAverage}-measurement rolling average", style = MaterialTheme.typography.bodySmall, color = primary)
-            }
-            if (settings.showFit && rolling.size >= 2) {
+            if (settings.showFit && sorted.size >= 2) {
                 Text(
                     "Linear fit: ${String.format(Locale.US, "%+.2f", fit.slopePerDay * 30.44)} ${metric.unit} / month",
                     color = fitColor,
@@ -241,7 +223,7 @@ private fun BodyMetricCard(
             }
             settings.target?.let { target ->
                 val projectedAtAxisEnd = fit.fittedLast + fit.slopePerDay *
-                    ((xEnd - (rolling.lastOrNull()?.measuredAt ?: xEnd)) / DAY_MILLIS.toDouble())
+                    ((xEnd - (sorted.lastOrNull()?.measuredAt ?: xEnd)) / DAY_MILLIS.toDouble())
                 val days = if (fit.slopePerDay == 0.0) null else (target - projectedAtAxisEnd) / fit.slopePerDay
                 Text(
                     if (days != null && days >= 0.0) "Fit target ETA: ${formatBodyEta(days)}"
@@ -250,7 +232,7 @@ private fun BodyMetricCard(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-            BodyGraph(sorted, rolling, if (settings.showFit) fit.values else emptyList(), settings, primary, fitColor, targetColor, grid, xStart, xEnd)
+            BodyGraph(sorted, if (settings.showFit) fit.values else emptyList(), settings, primary, fitColor, targetColor, grid, xStart, xEnd)
         }
     }
     if (editing) BodyChartSettingsDialog(metric, settings, { editing = false }) {
@@ -261,8 +243,7 @@ private fun BodyMetricCard(
 
 @Composable
 private fun BodyGraph(
-    rawValues: List<BodyMeasurement>,
-    plottedValues: List<BodyMeasurement>,
+    values: List<BodyMeasurement>,
     fit: List<Double>,
     settings: BodyChartSettings,
     dataColor: Color,
@@ -272,81 +253,64 @@ private fun BodyGraph(
     xStart: Long,
     xEnd: Long,
 ) {
-    if (rawValues.isEmpty()) {
+    if (values.isEmpty()) {
         Box(Modifier.fillMaxWidth().height(110.dp), contentAlignment = Alignment.Center) {
-            Text("Sync Health Connect to populate this graph.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text("No measurements in this interval.", color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         return
     }
     val acceptanceValues = settings.target?.let { target ->
         listOf(target - (settings.acceptance ?: 0.0), target + (settings.acceptance ?: 0.0))
     }.orEmpty()
-    val all = rawValues.map { it.value } + fit + acceptanceValues
-    val rawMin = all.minOrNull() ?: 0.0
-    val rawMax = all.maxOrNull() ?: 1.0
-    val ticks = bodyNiceTicks(rawMin, rawMax)
+    val all = values.map { it.value } + fit + acceptanceValues
+    val ticks = bodyNiceTicks(all.minOrNull() ?: 0.0, all.maxOrNull() ?: 1.0)
     val min = ticks.first()
     val max = ticks.last()
     val range = max - min
+    val dates = bodyDateTicks(xStart, xEnd)
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
-    Column(
-        Modifier.width(48.dp).height(150.dp).padding(end = 4.dp),
-        verticalArrangement = Arrangement.SpaceBetween,
-        horizontalAlignment = Alignment.End,
-    ) {
-        ticks.asReversed().forEach { tick -> Text(formatBodyValue(tick), style = MaterialTheme.typography.labelSmall) }
-    }
-    BoxWithConstraints(Modifier.weight(1f)) {
-    val graphWidth = maxOf(maxWidth, (rawValues.size * 28).dp)
-    Box(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
-    Canvas(Modifier.width(graphWidth).height(150.dp)) {
-        fun y(value: Double) = size.height - ((value - min) / range).toFloat() * size.height
-        fun x(timestamp: Long) = ((timestamp - xStart).toDouble() / (xEnd - xStart).coerceAtLeast(1L))
-            .coerceIn(0.0, 1.0).toFloat() * size.width
-        ticks.forEach { tick ->
-            val lineY = y(tick)
-            drawLine(gridColor.copy(alpha = .78f), Offset(0f, lineY), Offset(size.width, lineY), strokeWidth = 1.5f)
+        Column(
+            Modifier.width(48.dp).height(150.dp).padding(end = 4.dp),
+            verticalArrangement = Arrangement.SpaceBetween,
+            horizontalAlignment = Alignment.End,
+        ) {
+            ticks.asReversed().forEach { tick -> Text(formatBodyValue(tick), style = MaterialTheme.typography.labelSmall) }
         }
-        repeat(5) { index ->
-            val lineX = index * size.width / 4f
-            drawLine(gridColor.copy(alpha = .78f), Offset(lineX, 0f), Offset(lineX, size.height), strokeWidth = 1.5f)
-        }
-        val axis = gridColor.copy(alpha = .9f)
-        drawLine(axis, Offset(0f, 0f), Offset(0f, size.height), strokeWidth = 2f)
-        ticks.forEach { tick ->
-            drawLine(axis, Offset(0f, y(tick)), Offset(7f, y(tick)), strokeWidth = 2f)
-        }
-        settings.target?.let { target ->
-            settings.acceptance?.let { tolerance ->
-                val top = y(target + tolerance)
-                val bottom = y(target - tolerance)
-                drawRect(targetColor.copy(alpha = .14f), Offset(0f, top), Size(size.width, (bottom - top).coerceAtLeast(1f)))
+        Canvas(Modifier.weight(1f).height(150.dp)) {
+            fun y(value: Double) = size.height - ((value - min) / range).toFloat() * size.height
+            fun x(timestamp: Long) = ((timestamp - xStart).toDouble() / (xEnd - xStart).coerceAtLeast(1L))
+                .coerceIn(0.0, 1.0).toFloat() * size.width
+            ticks.forEach { tick ->
+                drawLine(gridColor.copy(alpha = .78f), Offset(0f, y(tick)), Offset(size.width, y(tick)), strokeWidth = 1.5f)
             }
-            drawLine(targetColor, Offset(0f, y(target)), Offset(size.width, y(target)), strokeWidth = 3f)
+            dates.forEach { date ->
+                drawLine(gridColor.copy(alpha = .78f), Offset(x(date), 0f), Offset(x(date), size.height), strokeWidth = 1.5f)
+            }
+            val axis = gridColor.copy(alpha = .9f)
+            drawLine(axis, Offset(0f, 0f), Offset(0f, size.height), strokeWidth = 2f)
+            ticks.forEach { tick -> drawLine(axis, Offset(0f, y(tick)), Offset(7f, y(tick)), strokeWidth = 2f) }
+            settings.target?.let { target ->
+                settings.acceptance?.let { tolerance ->
+                    val top = y(target + tolerance)
+                    val bottom = y(target - tolerance)
+                    drawRect(targetColor.copy(alpha = .14f), Offset(0f, top), Size(size.width, (bottom - top).coerceAtLeast(1f)))
+                }
+                drawLine(targetColor, Offset(0f, y(target)), Offset(size.width, y(target)), strokeWidth = 3f)
+            }
+            fun points(series: List<Double>) = series.mapIndexed { index, value -> Offset(x(values[index].measuredAt), y(value)) }
+            val points = points(values.map { it.value })
+            points.zipWithNext().forEach { (a, b) -> drawLine(dataColor, a, b, strokeWidth = 3.5f) }
+            points.forEach { drawCircle(dataColor, 4.5f, it) }
+            points(fit).zipWithNext().forEach { (a, b) -> drawLine(fitColor, a, b, strokeWidth = 3f) }
         }
-        fun points(measurements: List<BodyMeasurement>, series: List<Double>) = series.mapIndexed { index, value ->
-            Offset(x(measurements[index].measuredAt), y(value))
-        }
-        val raw = points(rawValues, rawValues.map { it.value })
-        raw.zipWithNext().forEach { (a, b) -> drawLine(dataColor.copy(alpha = .28f), a, b, strokeWidth = 2f) }
-        raw.forEach { drawCircle(dataColor.copy(alpha = .35f), 3f, it) }
-        val data = points(plottedValues, plottedValues.map { it.value })
-        data.zipWithNext().forEach { (a, b) -> drawLine(dataColor, a, b, strokeWidth = 5f) }
-        data.forEach { drawCircle(dataColor, 5f, it) }
-        points(plottedValues, fit).zipWithNext().forEach { (a, b) -> drawLine(fitColor, a, b, strokeWidth = 3f) }
     }
-    }
-    }
-    }
-    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+    Row(Modifier.fillMaxWidth().padding(start = 52.dp), horizontalArrangement = Arrangement.SpaceBetween) {
         val formatter = DateTimeFormatter.ofPattern("d MMM yy")
-        repeat(5) { index ->
-            val timestamp = xStart + ((xEnd - xStart) * index / 4)
-            Text(Instant.ofEpochMilli(timestamp).atZone(ZoneId.systemDefault()).format(formatter), style = MaterialTheme.typography.labelSmall)
+        dates.forEach { date ->
+            Text(Instant.ofEpochMilli(date).atZone(ZoneId.systemDefault()).format(formatter), style = MaterialTheme.typography.labelSmall)
         }
     }
 }
-
 private fun bodyNiceTicks(rawMin: Double, rawMax: Double): List<Double> {
     val span = (rawMax - rawMin).takeIf { it > 0.0 } ?: kotlin.math.abs(rawMax).coerceAtLeast(1.0)
     val roughStep = span / 4.0
@@ -374,7 +338,6 @@ private fun BodyChartSettingsDialog(
     var fit by remember(current) { mutableStateOf(current.showFit) }
     var target by remember(current) { mutableStateOf(current.target?.let(::formatBodyValue).orEmpty()) }
     var acceptance by remember(current) { mutableStateOf(current.acceptance?.let(::formatBodyValue).orEmpty()) }
-    var rolling by remember(current) { mutableStateOf(current.rollingAverage) }
     val parsedTarget = target.replace(',', '.').toDoubleOrNull()
     val parsedAcceptance = acceptance.replace(',', '.').toDoubleOrNull()
     AlertDialog(
@@ -382,58 +345,16 @@ private fun BodyChartSettingsDialog(
         title = { Text("${metric.label} Graph Settings") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    Text("Show Linear Fit", Modifier.weight(1f))
-                    Switch(fit, { fit = it })
-                }
-                Text("Rolling Average", style = MaterialTheme.typography.labelLarge)
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    listOf(0 to "Off", 3 to "3", 5 to "5", 10 to "10").forEach { (amount, label) ->
-                        Text(
-                            label,
-                            Modifier.weight(1f).background(
-                                if (rolling == amount) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
-                                RoundedCornerShape(7.dp),
-                            ).clickable { rolling = amount }.padding(vertical = 6.dp),
-                            color = if (rolling == amount) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
-                            textAlign = TextAlign.Center,
-                            style = MaterialTheme.typography.labelSmall,
-                        )
-                    }
-                }
-                OutlinedTextField(
-                    target,
-                    { target = it.filter { char -> char.isDigit() || char == '.' || char == ',' || char == '-' } },
-                    label = { Text("Target (${metric.unit})") },
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                    singleLine = true,
-                )
-                OutlinedTextField(
-                    acceptance,
-                    { acceptance = it.filter { char -> char.isDigit() || char == '.' || char == ',' } },
-                    label = { Text("Acceptance ± (${metric.unit})") },
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                    singleLine = true,
-                )
+                TextButton(onClick = { fit = !fit }) { Text(if (fit) "Linear Fit: On" else "Linear Fit: Off") }
+                OutlinedTextField(target, { target = it.filter { char -> char.isDigit() || char == '.' || char == ',' || char == '-' } }, label = { Text("Target (${metric.unit})") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal), singleLine = true)
+                OutlinedTextField(acceptance, { acceptance = it.filter { char -> char.isDigit() || char == '.' || char == ',' } }, label = { Text("Acceptance ± (${metric.unit})") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal), singleLine = true)
                 Text("Leave Target empty to hide the target and acceptance band.", style = MaterialTheme.typography.bodySmall)
             }
         },
-        confirmButton = {
-            Button(onClick = {
-                onSave(BodyChartSettings(fit, parsedTarget, parsedAcceptance?.coerceAtLeast(0.0), rolling))
-            }) { Text("Save") }
-        },
+        confirmButton = { Button(onClick = { onSave(BodyChartSettings(fit, parsedTarget, parsedAcceptance?.coerceAtLeast(0.0))) }) { Text("Save") } },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
     )
 }
-
-private fun bodyRollingAverage(values: List<BodyMeasurement>, amount: Int): List<BodyMeasurement> {
-    if (amount <= 1) return values
-    return values.mapIndexed { index, measurement ->
-        measurement.copy(value = values.subList((index - amount + 1).coerceAtLeast(0), index + 1).map { it.value }.average())
-    }
-}
-
 private fun bodyLinearFit(values: List<BodyMeasurement>): BodyFit {
     if (values.size < 2) return BodyFit(values.map { it.value }, 0.0, values.lastOrNull()?.value ?: 0.0)
     val origin = values.first().measuredAt
@@ -461,7 +382,7 @@ private fun formatBodyEta(days: Double): String {
         if (remainingDays > 0 && isEmpty()) add("$remainingDays day${if (remainingDays == 1L) "" else "s"}")
     }.take(2).joinToString(" ")
 }
-private fun bodyCutoff(window: String): Long? {
+private fun bodyWindowStart(window: String, newest: Long, oldest: Long?): Long {
     val days = when (window) {
         "1W" -> 7L
         "2W" -> 14L
@@ -471,11 +392,16 @@ private fun bodyCutoff(window: String): Long? {
         "6M" -> 182L
         "1Y" -> 365L
         "3Y" -> 1_095L
-        else -> return null
+        else -> null
     }
-    return Instant.now().minus(Duration.ofDays(days)).toEpochMilli()
+    return days?.let { newest - it * DAY_MILLIS } ?: (oldest ?: newest - DAY_MILLIS)
 }
 
+private fun bodyDateTicks(start: Long, end: Long): List<Long> =
+    listOf(start, start + (end - start) / 2, end).distinct()
+
+private fun formatBodySyncTime(timestamp: Long): String =
+    Instant.ofEpochMilli(timestamp).atZone(ZoneId.systemDefault()).format(DateTimeFormatter.ofPattern("d MMM yyyy, HH:mm"))
 private fun formatBodyValue(value: Double): String =
     if (value % 1.0 == 0.0) value.toInt().toString() else String.format(Locale.US, "%.1f", value)
 
