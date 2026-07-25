@@ -42,6 +42,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import java.time.Duration
 import java.time.Instant
+import java.time.LocalDate
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Locale
@@ -51,6 +52,16 @@ private data class BodyChartSettings(
     val showFit: Boolean = true,
     val target: Double? = null,
     val acceptance: Double? = null,
+)
+
+private enum class CustomRangeMode { START_DATE, DURATION }
+
+private val bodyMetricDisplayOrder = listOf(
+    BodyMetric.WEIGHT,
+    BodyMetric.FAT_PERCENTAGE,
+    BodyMetric.FAT_MASS,
+    BodyMetric.MUSCLE_PERCENTAGE,
+    BodyMetric.MUSCLE_MASS,
 )
 
 private data class BodyFit(
@@ -71,9 +82,11 @@ fun BodyOverviewScreen(
     val preferences = remember { context.getSharedPreferences("body_graph_settings", 0) }
     var window by remember { mutableStateOf(preferences.getString("window", "6M") ?: "6M") }
     var showBodyMenu by remember { mutableStateOf(false) }
+    var showCustomRange by remember { mutableStateOf(false) }
+    var customStart by remember { mutableStateOf(preferences.getLong("custom_start", 0L).takeIf { it > 0L }) }
     val settings = remember {
         mutableStateMapOf<BodyMetric, BodyChartSettings>().apply {
-            BodyMetric.entries.forEach { metric ->
+            bodyMetricDisplayOrder.forEach { metric ->
                 put(
                     metric,
                     BodyChartSettings(
@@ -87,11 +100,14 @@ fun BodyOverviewScreen(
     }
     val newestMeasurement = snapshot.measurements.maxOfOrNull { it.measuredAt } ?: System.currentTimeMillis()
     val xEnd = newestMeasurement
-    val xStart = bodyWindowStart(window, newestMeasurement, snapshot.measurements.minOfOrNull { it.measuredAt })
+    val oldestMeasurement = snapshot.measurements.minOfOrNull { it.measuredAt }
+    val xStart = if (window == "CUSTOM") customStart ?: bodyWindowStart("1M", newestMeasurement, oldestMeasurement)
+    else bodyWindowStart(window, newestMeasurement, oldestMeasurement)
     val visible = snapshot.measurements.filter { it.measuredAt in xStart..xEnd }
 
     Box(modifier.fillMaxSize()) {
         LazyColumn(
+            modifier = Modifier.fillMaxSize(),
             contentPadding = PaddingValues(start = 8.dp, end = 8.dp, top = 8.dp, bottom = 72.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
@@ -106,31 +122,37 @@ fun BodyOverviewScreen(
                 }
             }
             item {
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                    listOf("1W", "2W", "3W", "1M", "3M", "6M", "1Y", "3Y", "ALL").forEach { preset ->
-                        val selected = window == preset
-                        Text(
-                            if (preset == "ALL") "All" else preset,
-                            modifier = Modifier
-                                .weight(1f)
-                                .background(
-                                    if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
-                                    RoundedCornerShape(7.dp),
+                Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    listOf(
+                        listOf("1W", "2W", "3W", "1M", "3M"),
+                        listOf("6M", "1Y", "3Y", "ALL", "CUSTOM"),
+                    ).forEach { row ->
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                            row.forEach { preset ->
+                                val selected = window == preset
+                                Text(
+                                    when (preset) { "ALL" -> "All"; "CUSTOM" -> "Custom"; else -> preset },
+                                    modifier = Modifier.weight(1f).background(
+                                        if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
+                                        RoundedCornerShape(7.dp),
+                                    ).clickable {
+                                        if (preset == "CUSTOM") showCustomRange = true
+                                        else {
+                                            window = preset
+                                            preferences.edit().putString("window", preset).apply()
+                                        }
+                                    }.padding(vertical = 6.dp),
+                                    color = if (selected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                    fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    textAlign = TextAlign.Center,
                                 )
-                                .clickable {
-                                    window = preset
-                                    preferences.edit().putString("window", preset).apply()
-                                }
-                                .padding(vertical = 6.dp),
-                            color = if (selected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
-                            fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
-                            style = MaterialTheme.typography.labelSmall,
-                            textAlign = TextAlign.Center,
-                        )
+                            }
+                        }
                     }
                 }
             }
-            BodyMetric.entries.forEach { metric ->
+            bodyMetricDisplayOrder.forEach { metric ->
                 item(metric.name) {
                     BodyMetricCard(
                         metric = metric,
@@ -148,13 +170,6 @@ fun BodyOverviewScreen(
                         xEnd = xEnd,
                     )
                 }
-            }
-            item {
-                Text(
-                    "Muscle reference: OpenStax, redrawn by Tomáš Kebert / umimeto.org · CC BY-SA 4.0.",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
             }
         }
         Row(
@@ -176,6 +191,19 @@ fun BodyOverviewScreen(
         },
         confirmButton = { TextButton(onClick = { showBodyMenu = false }) { Text("Close") } },
     )
+    if (showCustomRange) {
+        CustomBodyRangeDialog(
+            endTimestamp = newestMeasurement,
+            initialStart = customStart ?: bodyWindowStart("1M", newestMeasurement, oldestMeasurement),
+            onDismiss = { showCustomRange = false },
+            onSave = { start ->
+                customStart = start
+                window = "CUSTOM"
+                preferences.edit().putLong("custom_start", start).putString("window", "CUSTOM").apply()
+                showCustomRange = false
+            },
+        )
+    }
 }
 
 @Composable
@@ -195,7 +223,7 @@ private fun BodyMetricCard(
     val targetColor = Color(0xFF66BB6A)
     val grid = MaterialTheme.colorScheme.outlineVariant
     Card(Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+        Column(Modifier.padding(8.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
                     Text("${metric.label} (${metric.unit})", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
@@ -219,17 +247,6 @@ private fun BodyMetricCard(
                         (settings.acceptance?.let { " ± ${formatBodyValue(it)}" } ?: ""),
                     color = targetColor,
                     style = MaterialTheme.typography.bodySmall,
-                )
-            }
-            settings.target?.let { target ->
-                val projectedAtAxisEnd = fit.fittedLast + fit.slopePerDay *
-                    ((xEnd - (sorted.lastOrNull()?.measuredAt ?: xEnd)) / DAY_MILLIS.toDouble())
-                val days = if (fit.slopePerDay == 0.0) null else (target - projectedAtAxisEnd) / fit.slopePerDay
-                Text(
-                    if (days != null && days >= 0.0) "Fit target ETA: ${formatBodyEta(days)}"
-                    else "Fit target ETA: no future crossing at the current trend",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
             BodyGraph(sorted, if (settings.showFit) fit.values else emptyList(), settings, primary, fitColor, targetColor, grid, xStart, xEnd)
@@ -270,13 +287,13 @@ private fun BodyGraph(
     val dates = bodyDateTicks(xStart, xEnd)
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
         Column(
-            Modifier.width(48.dp).height(150.dp).padding(end = 4.dp),
+            Modifier.width(42.dp).height(180.dp).padding(end = 4.dp),
             verticalArrangement = Arrangement.SpaceBetween,
             horizontalAlignment = Alignment.End,
         ) {
             ticks.asReversed().forEach { tick -> Text(formatBodyValue(tick), style = MaterialTheme.typography.labelSmall) }
         }
-        Canvas(Modifier.weight(1f).height(150.dp)) {
+        Canvas(Modifier.weight(1f).height(180.dp)) {
             fun y(value: Double) = size.height - ((value - min) / range).toFloat() * size.height
             fun x(timestamp: Long) = ((timestamp - xStart).toDouble() / (xEnd - xStart).coerceAtLeast(1L))
                 .coerceIn(0.0, 1.0).toFloat() * size.width
@@ -304,7 +321,7 @@ private fun BodyGraph(
             points(fit).zipWithNext().forEach { (a, b) -> drawLine(fitColor, a, b, strokeWidth = 3f) }
         }
     }
-    Row(Modifier.fillMaxWidth().padding(start = 52.dp), horizontalArrangement = Arrangement.SpaceBetween) {
+    Row(Modifier.fillMaxWidth().padding(start = 46.dp), horizontalArrangement = Arrangement.SpaceBetween) {
         val formatter = DateTimeFormatter.ofPattern("d MMM yy")
         dates.forEach { date ->
             Text(Instant.ofEpochMilli(date).atZone(ZoneId.systemDefault()).format(formatter), style = MaterialTheme.typography.labelSmall)
@@ -328,6 +345,57 @@ private fun bodyNiceTicks(rawMin: Double, rawMax: Double): List<Double> {
     return (0..count).map { low + it * step }
 }
 
+@Composable
+private fun CustomBodyRangeDialog(
+    endTimestamp: Long,
+    initialStart: Long,
+    onDismiss: () -> Unit,
+    onSave: (Long) -> Unit,
+) {
+    val zone = ZoneId.systemDefault()
+    val endDate = Instant.ofEpochMilli(endTimestamp).atZone(zone).toLocalDate()
+    var mode by remember { mutableStateOf(CustomRangeMode.START_DATE) }
+    var dateText by remember { mutableStateOf(Instant.ofEpochMilli(initialStart).atZone(zone).toLocalDate().toString()) }
+    var amountText by remember { mutableStateOf("2.5") }
+    var durationUnit by remember { mutableStateOf("Weeks") }
+    val startFromDate = runCatching { LocalDate.parse(dateText, DateTimeFormatter.ISO_LOCAL_DATE).atStartOfDay(zone).toInstant().toEpochMilli() }.getOrNull()
+    val unitMillis = when (durationUnit) {
+        "Days" -> DAY_MILLIS
+        "Months" -> (30.44 * DAY_MILLIS).toLong()
+        "Years" -> 365L * DAY_MILLIS
+        else -> 7L * DAY_MILLIS
+    }
+    val startFromDuration = amountText.replace(',', '.').toDoubleOrNull()?.takeIf { it > 0.0 }?.let { endTimestamp - (it * unitMillis).toLong() }
+    val start = if (mode == CustomRangeMode.START_DATE) startFromDate else startFromDuration
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Custom graph range") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("End: latest measurement (${endDate.format(DateTimeFormatter.ISO_LOCAL_DATE)})", style = MaterialTheme.typography.bodySmall)
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    listOf(CustomRangeMode.START_DATE to "Start date", CustomRangeMode.DURATION to "Duration").forEach { (choice, label) ->
+                        Text(label, Modifier.weight(1f).background(if (mode == choice) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(7.dp)).clickable { mode = choice }.padding(vertical = 7.dp), color = if (mode == choice) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.Center, style = MaterialTheme.typography.labelMedium)
+                    }
+                }
+                if (mode == CustomRangeMode.START_DATE) {
+                    OutlinedTextField(dateText, { dateText = it }, label = { Text("Start date (YYYY-MM-DD)") }, singleLine = true)
+                    Text("Range: ${dateText.ifBlank { "…" }} – latest measurement", style = MaterialTheme.typography.bodySmall)
+                } else {
+                    OutlinedTextField(amountText, { amountText = it.filter { char -> char.isDigit() || char == '.' || char == ',' } }, label = { Text("Duration") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal), singleLine = true)
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        listOf("Days", "Weeks", "Months", "Years").forEach { unit ->
+                            Text(unit, Modifier.weight(1f).background(if (durationUnit == unit) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(7.dp)).clickable { durationUnit = unit }.padding(vertical = 6.dp), color = if (durationUnit == unit) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.Center, style = MaterialTheme.typography.labelSmall)
+                        }
+                    }
+                    Text("Range: ${amountText.ifBlank { "…" }} ${durationUnit.lowercase()} – latest measurement", style = MaterialTheme.typography.bodySmall)
+                }
+            }
+        },
+        confirmButton = { Button(onClick = { start?.let { onSave(it.coerceAtMost(endTimestamp)) } }, enabled = start != null && start < endTimestamp) { Text("Apply") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
+}
 @Composable
 private fun BodyChartSettingsDialog(
     metric: BodyMetric,
