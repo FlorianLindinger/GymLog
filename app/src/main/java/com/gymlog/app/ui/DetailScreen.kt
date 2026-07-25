@@ -46,6 +46,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.PathEffect
@@ -91,6 +92,11 @@ fun DetailScreen(
     var editingSet by remember { mutableStateOf<SetRecord?>(null) }
     var expandedBatch by remember { mutableStateOf<Long?>(null) }
     val machine = summary.machine
+    val context = LocalContext.current
+    val chartPreferences = remember { context.getSharedPreferences("gym_chart_ranges", 0) }
+    var showCustomChartRange by remember { mutableStateOf(false) }
+    var customChartStart by remember(machine.id) { mutableStateOf(chartPreferences.getLong("${machine.id}_start", 0L).takeIf { it > 0L }) }
+    var customChartEnd by remember(machine.id) { mutableStateOf(chartPreferences.getLong("${machine.id}_end", 0L).takeIf { it > 0L }) }
     val currentUnitSets = currentTrainingUnitSets(summary)
     val first = summary.weightChanges.lastOrNull()?.weight ?: machine.currentWeight
 
@@ -140,21 +146,19 @@ fun DetailScreen(
                     Stat("Current", formatMetric(machine.currentWeight, machine.trackingMode), Modifier.weight(1f))
                 }
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    listOf("1M", "3M", "6M", "1Y", "ALL").forEach { window ->
-                        CompactChoice(
-                            selected = machine.chartWindow == window,
-                            onClick = { repository.setChartWindow(machine.id, window); onChanged() },
-                            label = if (window == "ALL") "All" else window,
-                        )
+                    listOf("1M", "3M", "6M", "1Y").forEach { window ->
+                        CompactChoice(machine.chartWindow == window, { repository.setChartWindow(machine.id, window); onChanged() }, window, Modifier.weight(1f))
                     }
-                    CompactChoice(
-                        selected = machine.showTrend,
-                        onClick = { repository.setShowTrend(machine.id, !machine.showTrend); onChanged() },
-                        label = "Trend",
-                    )
                 }
-                val cutoff = chartCutoff(machine.chartWindow)
-                val visibleSets = summary.recentSets.filter { cutoff == null || it.performedAt >= cutoff }
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    CompactChoice(machine.chartWindow == "ALL", { repository.setChartWindow(machine.id, "ALL"); onChanged() }, "All", Modifier.weight(1f))
+                    CompactChoice(machine.chartWindow == "CUSTOM", { showCustomChartRange = true }, "Custom", Modifier.weight(1f))
+                    CompactChoice(machine.showTrend, { repository.setShowTrend(machine.id, !machine.showTrend); onChanged() }, "Trend", Modifier.weight(1f))
+                }
+                val cutoff = if (machine.chartWindow == "CUSTOM") customChartStart else chartCutoff(machine.chartWindow)
+                val visibleSets = summary.recentSets.filter { set ->
+                    (cutoff == null || set.performedAt >= cutoff) && (machine.chartWindow != "CUSTOM" || customChartEnd == null || set.performedAt <= customChartEnd!!)
+                }
                 SessionMetricsChart(visibleSets, 0, machine.trackingMode, machine.showTrend)
                 Text("${(summary.weightChanges.size - 1).coerceAtLeast(0)} ${metricName(machine.trackingMode)} changes · ${summary.recentSets.size} recorded sets", color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
@@ -221,6 +225,17 @@ fun DetailScreen(
             showWeight = false
         } else null,
     )
+    if (showCustomChartRange) CustomGymRangeDialog(
+        maxTimestamp = summary.recentSets.maxOfOrNull { it.performedAt } ?: System.currentTimeMillis(),
+        initialStart = customChartStart ?: chartCutoff("1M") ?: System.currentTimeMillis(),
+        initialEnd = customChartEnd ?: (summary.recentSets.maxOfOrNull { it.performedAt } ?: System.currentTimeMillis()),
+        onDismiss = { showCustomChartRange = false },
+        onSave = { start, end ->
+            customChartStart = start; customChartEnd = end
+            chartPreferences.edit().putLong("${machine.id}_start", start).putLong("${machine.id}_end", end).apply()
+            repository.setChartWindow(machine.id, "CUSTOM"); onChanged(); showCustomChartRange = false
+        },
+    )
     if (showAreas) AreaDialog(summary.areas, areaUsage, areaColors, onAreaColor, onDismiss = { showAreas = false }) {
         repository.saveAreas(machine.id, it)
         onChanged()
@@ -255,10 +270,10 @@ private fun Stat(label: String, value: String, modifier: Modifier = Modifier) {
     }
 }
 @Composable
-private fun CompactChoice(selected: Boolean, onClick: () -> Unit, label: String) {
+private fun CompactChoice(selected: Boolean, onClick: () -> Unit, label: String, modifier: Modifier = Modifier) {
     Text(
         label,
-        modifier = Modifier
+        modifier = modifier
             .background(if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(8.dp))
             .clickable(onClick = onClick)
             .padding(horizontal = 9.dp, vertical = 5.dp),
@@ -484,6 +499,57 @@ private fun chartCutoff(window: String): Long? {
     }
 }
 
+private enum class GymCustomRangeMode { START_DATE, DURATION }
+
+@Composable
+private fun CustomGymRangeDialog(
+    maxTimestamp: Long,
+    initialStart: Long,
+    initialEnd: Long,
+    onDismiss: () -> Unit,
+    onSave: (Long, Long) -> Unit,
+) {
+    val zone = ZoneId.systemDefault()
+    var mode by remember { mutableStateOf(GymCustomRangeMode.START_DATE) }
+    var startText by remember { mutableStateOf(Instant.ofEpochMilli(initialStart).atZone(zone).toLocalDate().toString()) }
+    var endText by remember { mutableStateOf(Instant.ofEpochMilli(initialEnd).atZone(zone).toLocalDate().toString()) }
+    var amountText by remember { mutableStateOf("2.5") }
+    var durationUnit by remember { mutableStateOf("Weeks") }
+    val end = runCatching { java.time.LocalDate.parse(endText).plusDays(1).atStartOfDay(zone).toInstant().toEpochMilli() - 1L }.getOrNull()?.coerceAtMost(maxTimestamp)
+    val startFromDate = runCatching { java.time.LocalDate.parse(startText).atStartOfDay(zone).toInstant().toEpochMilli() }.getOrNull()
+    val durationMillis = when (durationUnit) {
+        "Days" -> 86_400_000L
+        "Months" -> (30.44 * 86_400_000L).toLong()
+        "Years" -> 365L * 86_400_000L
+        else -> 7L * 86_400_000L
+    }
+    val startFromDuration = end?.let { value -> amountText.replace(',', '.').toDoubleOrNull()?.takeIf { it > 0.0 }?.let { value - (it * durationMillis).toLong() } }
+    val start = if (mode == GymCustomRangeMode.START_DATE) startFromDate else startFromDuration
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Custom chart range") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedTextField(endText, { endText = it }, label = { Text("End date (YYYY-MM-DD)") }, singleLine = true)
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    listOf(GymCustomRangeMode.START_DATE to "Start date", GymCustomRangeMode.DURATION to "Duration").forEach { (choice, label) ->
+                        CompactChoice(mode == choice, { mode = choice }, label, Modifier.weight(1f))
+                    }
+                }
+                if (mode == GymCustomRangeMode.START_DATE) {
+                    OutlinedTextField(startText, { startText = it }, label = { Text("Start date (YYYY-MM-DD)") }, singleLine = true)
+                } else {
+                    OutlinedTextField(amountText, { amountText = it.filter { char -> char.isDigit() || char == '.' || char == ',' } }, label = { Text("Duration") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal), singleLine = true)
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        listOf("Days", "Weeks", "Months", "Years").forEach { unit -> CompactChoice(durationUnit == unit, { durationUnit = unit }, unit, Modifier.weight(1f)) }
+                    }
+                }
+            }
+        },
+        confirmButton = { Button(onClick = { if (start != null && end != null) onSave(start, end) }, enabled = start != null && end != null && start < end) { Text("Apply") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
+}
 @Composable
 fun MetricValueDialog(
     current: Double,

@@ -3,6 +3,10 @@ package com.gymlog.app.ui
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -25,6 +29,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
@@ -84,6 +89,9 @@ fun BodyOverviewScreen(
     var showBodyMenu by remember { mutableStateOf(false) }
     var showCustomRange by remember { mutableStateOf(false) }
     var customStart by remember { mutableStateOf(preferences.getLong("custom_start", 0L).takeIf { it > 0L }) }
+    var customEnd by remember { mutableStateOf(preferences.getLong("custom_end", 0L).takeIf { it > 0L }) }
+    var isRefreshing by remember { mutableStateOf(false) }
+    val listState = rememberLazyListState()
     val settings = remember {
         mutableStateMapOf<BodyMetric, BodyChartSettings>().apply {
             bodyMetricDisplayOrder.forEach { metric ->
@@ -114,7 +122,7 @@ fun BodyOverviewScreen(
             item {
                 Card(Modifier.fillMaxWidth()) {
                     Text(
-                        snapshot.syncedAt?.let { "Last synced ${formatBodySyncTime(it)}" } ?: "Not synced yet",
+                        if (isRefreshing) "Syncing Health Connect…" else snapshot.syncedAt?.let { "Last synced ${formatBodySyncTime(it)}" } ?: "Not synced yet",
                         modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp),
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -193,13 +201,14 @@ fun BodyOverviewScreen(
     )
     if (showCustomRange) {
         CustomBodyRangeDialog(
-            endTimestamp = newestMeasurement,
+            maxTimestamp = newestMeasurement,
             initialStart = customStart ?: bodyWindowStart("1M", newestMeasurement, oldestMeasurement),
+            initialEnd = customEnd ?: newestMeasurement,
             onDismiss = { showCustomRange = false },
-            onSave = { start ->
+            onSave = { start, end ->
                 customStart = start
                 window = "CUSTOM"
-                preferences.edit().putLong("custom_start", start).putString("window", "CUSTOM").apply()
+                preferences.edit().putLong("custom_start", start).putLong("custom_end", end).putString("window", "CUSTOM").apply()
                 showCustomRange = false
             },
         )
@@ -218,6 +227,10 @@ private fun BodyMetricCard(
     var editing by remember { mutableStateOf(false) }
     val sorted = values.sortedBy { it.measuredAt }
     val fit = bodyLinearFit(sorted)
+    val latest = sorted.lastOrNull()
+    val targetEta = settings.target?.let { target ->
+        ((target - fit.fittedLast) / fit.slopePerDay).takeIf { sorted.size >= 2 && fit.slopePerDay != 0.0 && it >= 0.0 }
+    }
     val primary = MaterialTheme.colorScheme.primary
     val fitColor = MaterialTheme.colorScheme.tertiary
     val targetColor = Color(0xFF66BB6A)
@@ -226,10 +239,10 @@ private fun BodyMetricCard(
         Column(Modifier.padding(8.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
-                    Text("${metric.label} (${metric.unit})", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
                     Text(
-                        sorted.lastOrNull()?.let { "Latest: ${formatBodyValue(it.value)} ${metric.unit}" } ?: "No measurements in this interval",
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        latest?.let { "${metric.label} (${formatBodyValue(it.value)} ${metric.unit})" } ?: "${metric.label} (${metric.unit})",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold,
                     )
                 }
                 TextButton(onClick = { editing = true }) { Text("Graph Settings") }
@@ -244,7 +257,8 @@ private fun BodyMetricCard(
             if (settings.target != null) {
                 Text(
                     "Target: ${formatBodyValue(settings.target)} ${metric.unit}" +
-                        (settings.acceptance?.let { " ± ${formatBodyValue(it)}" } ?: ""),
+                        (settings.acceptance?.let { " ± ${formatBodyValue(it)}" } ?: "") +
+                        (targetEta?.let { " · Est. ${formatBodyEta(it)}" } ?: ""),
                     color = targetColor,
                     style = MaterialTheme.typography.bodySmall,
                 )
@@ -347,32 +361,42 @@ private fun bodyNiceTicks(rawMin: Double, rawMax: Double): List<Double> {
 
 @Composable
 private fun CustomBodyRangeDialog(
-    endTimestamp: Long,
+    maxTimestamp: Long,
     initialStart: Long,
+    initialEnd: Long,
     onDismiss: () -> Unit,
-    onSave: (Long) -> Unit,
+    onSave: (Long, Long) -> Unit,
 ) {
     val zone = ZoneId.systemDefault()
-    val endDate = Instant.ofEpochMilli(endTimestamp).atZone(zone).toLocalDate()
     var mode by remember { mutableStateOf(CustomRangeMode.START_DATE) }
     var dateText by remember { mutableStateOf(Instant.ofEpochMilli(initialStart).atZone(zone).toLocalDate().toString()) }
+    var endDateText by remember { mutableStateOf(Instant.ofEpochMilli(initialEnd).atZone(zone).toLocalDate().toString()) }
     var amountText by remember { mutableStateOf("2.5") }
     var durationUnit by remember { mutableStateOf("Weeks") }
-    val startFromDate = runCatching { LocalDate.parse(dateText, DateTimeFormatter.ISO_LOCAL_DATE).atStartOfDay(zone).toInstant().toEpochMilli() }.getOrNull()
+    val end = runCatching {
+        LocalDate.parse(endDateText, DateTimeFormatter.ISO_LOCAL_DATE)
+            .plusDays(1).atStartOfDay(zone).toInstant().toEpochMilli() - 1L
+    }.getOrNull()?.coerceAtMost(maxTimestamp)
+    val startFromDate = runCatching {
+        LocalDate.parse(dateText, DateTimeFormatter.ISO_LOCAL_DATE).atStartOfDay(zone).toInstant().toEpochMilli()
+    }.getOrNull()
     val unitMillis = when (durationUnit) {
         "Days" -> DAY_MILLIS
         "Months" -> (30.44 * DAY_MILLIS).toLong()
         "Years" -> 365L * DAY_MILLIS
         else -> 7L * DAY_MILLIS
     }
-    val startFromDuration = amountText.replace(',', '.').toDoubleOrNull()?.takeIf { it > 0.0 }?.let { endTimestamp - (it * unitMillis).toLong() }
+    val startFromDuration = end?.let { endValue ->
+        amountText.replace(',', '.').toDoubleOrNull()?.takeIf { it > 0.0 }?.let { endValue - (it * unitMillis).toLong() }
+    }
     val start = if (mode == CustomRangeMode.START_DATE) startFromDate else startFromDuration
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Custom graph range") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("End: latest measurement (${endDate.format(DateTimeFormatter.ISO_LOCAL_DATE)})", style = MaterialTheme.typography.bodySmall)
+                OutlinedTextField(endDateText, { endDateText = it }, label = { Text("End date (YYYY-MM-DD)") }, singleLine = true)
+                Text("Leave it at the latest measurement, or select an earlier end date.", style = MaterialTheme.typography.bodySmall)
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     listOf(CustomRangeMode.START_DATE to "Start date", CustomRangeMode.DURATION to "Duration").forEach { (choice, label) ->
                         Text(label, Modifier.weight(1f).background(if (mode == choice) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(7.dp)).clickable { mode = choice }.padding(vertical = 7.dp), color = if (mode == choice) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.Center, style = MaterialTheme.typography.labelMedium)
@@ -380,7 +404,6 @@ private fun CustomBodyRangeDialog(
                 }
                 if (mode == CustomRangeMode.START_DATE) {
                     OutlinedTextField(dateText, { dateText = it }, label = { Text("Start date (YYYY-MM-DD)") }, singleLine = true)
-                    Text("Range: ${dateText.ifBlank { "…" }} – latest measurement", style = MaterialTheme.typography.bodySmall)
                 } else {
                     OutlinedTextField(amountText, { amountText = it.filter { char -> char.isDigit() || char == '.' || char == ',' } }, label = { Text("Duration") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal), singleLine = true)
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -388,14 +411,14 @@ private fun CustomBodyRangeDialog(
                             Text(unit, Modifier.weight(1f).background(if (durationUnit == unit) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(7.dp)).clickable { durationUnit = unit }.padding(vertical = 6.dp), color = if (durationUnit == unit) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.Center, style = MaterialTheme.typography.labelSmall)
                         }
                     }
-                    Text("Range: ${amountText.ifBlank { "…" }} ${durationUnit.lowercase()} – latest measurement", style = MaterialTheme.typography.bodySmall)
                 }
             }
         },
-        confirmButton = { Button(onClick = { start?.let { onSave(it.coerceAtMost(endTimestamp)) } }, enabled = start != null && start < endTimestamp) { Text("Apply") } },
+        confirmButton = { Button(onClick = { if (start != null && end != null) onSave(start, end) }, enabled = start != null && end != null && start < end) { Text("Apply") } },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
     )
 }
+
 @Composable
 private fun BodyChartSettingsDialog(
     metric: BodyMetric,

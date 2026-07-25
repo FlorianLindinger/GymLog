@@ -621,7 +621,7 @@ private fun sessionPatternText(summary: MachineSummary): AnnotatedString {
     val batches = groupSetBatches(summary.recentSets)
     val patterns = batches.map { batch ->
         batch.sortedBy { it.performedAt }.joinToString(",") { set ->
-            if (isDirectMetric(summary.machine.trackingMode)) formatTrainingEntry(set.weight, summary.machine.trackingMode, set.reps) else set.reps.toString()
+            if (isDirectMetric(summary.machine.trackingMode)) "${formatNumber(set.weight)} min" else set.reps.toString()
         }
     }
     fun trend(index: Int): Int {
