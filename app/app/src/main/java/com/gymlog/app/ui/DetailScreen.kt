@@ -129,7 +129,7 @@ fun DetailScreen(
                     durationMillis = if (machine.chartWindow == "CUSTOM") {
                         customChartStart?.let { start -> customChartEnd?.let { end -> (end - start).coerceAtLeast(1L) } }
                     } else chartWindowDuration(machine.chartWindow),
-                    endMillis = if (machine.chartWindow == "CUSTOM") customChartEnd else summary.recentSets.maxOfOrNull { it.performedAt },
+                    endMillis = if (machine.chartWindow == "CUSTOM") customChartEnd else System.currentTimeMillis(),
                     startMillis = if (machine.chartWindow == "CUSTOM") customChartStart else null,
                     key = "${machine.chartWindow}:$customChartStart:$customChartEnd",
                 )
@@ -228,9 +228,9 @@ fun DetailScreen(
         } else null,
     )
     if (showCustomChartRange) CustomGymRangeDialog(
-        maxTimestamp = summary.recentSets.maxOfOrNull { it.performedAt } ?: System.currentTimeMillis(),
+        maxTimestamp = System.currentTimeMillis(),
         initialStart = customChartStart ?: chartCutoff("1M") ?: System.currentTimeMillis(),
-        initialEnd = customChartEnd ?: (summary.recentSets.maxOfOrNull { it.performedAt } ?: System.currentTimeMillis()),
+        initialEnd = customChartEnd ?: System.currentTimeMillis(),
         onDismiss = { showCustomChartRange = false },
         onSave = { start, end ->
             customChartStart = start; customChartEnd = end
@@ -324,11 +324,16 @@ private fun DualAxisSessionPlot(
     val repsColor = Color(0xFFFFA726)
     val weightColor = MaterialTheme.colorScheme.primary
     val volumeColor = Color(0xFF00BCD4)
-    Row(horizontalArrangement = Arrangement.spacedBy(3.dp), verticalAlignment = Alignment.CenterVertically) {
-        Text(if (strength) "Level" else "Reps / set", color = repsColor, style = MaterialTheme.typography.labelSmall)
-        Text("/", style = MaterialTheme.typography.labelSmall)
+    Row(
+        Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.Center,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(if (strength) "Level" else "Reps/set", color = repsColor, style = MaterialTheme.typography.labelSmall)
+        Text(" · ", style = MaterialTheme.typography.labelSmall)
         Text(if (strength) "Minutes" else "Weight", color = weightColor, style = MaterialTheme.typography.labelSmall)
-        Text("· Volume / training day", color = volumeColor, style = MaterialTheme.typography.labelSmall)
+        Text(" · ", style = MaterialTheme.typography.labelSmall)
+        Text("Volume/training", color = volumeColor, style = MaterialTheme.typography.labelSmall)
     }
     val reps = sessions.map { session ->
         TimeValue(session.maxOf { it.performedAt }, session.map { it.reps }.average())

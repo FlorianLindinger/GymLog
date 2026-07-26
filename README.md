@@ -5,7 +5,7 @@
 </p>
 
 <p align="center">
-  A privacy-first Android workout tracker for fast logging, useful progression insights, and body-measurement trends.
+  An Android workout & weight tracker for logging, stats, plotting, and trends.
 </p>
 
 <p align="center">
@@ -18,7 +18,7 @@ GymLog is built with Kotlin, Jetpack Compose, SQLite, and Health Connect. Workou
 
 ## Features
 
-- Fast weight-, level-, and duration-based workout logging
+- Convenient weight-, level-, and duration-based workout logging
 - Multiple independent training plans
 - Automatic, mixed pinned, and fully fixed exercise ordering
 - Editable history, progression warnings, and live-training status

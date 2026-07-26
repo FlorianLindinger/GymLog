@@ -31,4 +31,5 @@ jobs:
         uses: gradle/actions/setup-gradle@v6
 
       - name: Verify Compilation, Tests, Lint, and Debug APK
+        working-directory: app
         run: ./gradlew :app:compileDebugKotlin :app:testDebugUnitTest :app:lintDebug :app:assembleDebug --no-daemon

@@ -24,6 +24,7 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
@@ -94,23 +95,32 @@ private fun niceCeiling(value: Double): Double {
     return nice * magnitude
 }
 
-private fun chartAxisRange(values: List<Double>): AxisRange {
+private fun chartAxisRange(values: List<Double>, tickCounts: IntRange): AxisRange {
+    val allowedCounts = tickCounts.filter { it >= 3 }.ifEmpty { listOf(3) }
     val finite = values.filter(Double::isFinite)
-    if (finite.isEmpty()) return AxisRange(0.0, 1.0, listOf(0.0, 0.25, 0.5, 0.75, 1.0))
+    if (finite.isEmpty()) {
+        val count = allowedCounts.first()
+        return AxisRange(0.0, 1.0, List(count) { it.toDouble() / (count - 1) })
+    }
     var rawMin = finite.min()
     var rawMax = finite.max()
     val rawSpan = rawMax - rawMin
-    val padding = if (rawSpan == 0.0) maxOf(abs(rawMax) * 0.02, 0.5) else rawSpan * 0.02
+    val padding = if (rawSpan == 0.0) maxOf(abs(rawMax) * 0.015, 0.25) else rawSpan * 0.015
     rawMin -= padding
     rawMax += padding
-    val step = niceCeiling((rawMax - rawMin) / (Y_TICK_COUNT - 1))
-    var minimum = floor(rawMin / step) * step
-    var maximum = minimum + step * (Y_TICK_COUNT - 1)
-    if (maximum < rawMax) {
-        maximum = ceil(rawMax / step) * step
-        minimum = maximum - step * (Y_TICK_COUNT - 1)
+    val paddedSpan = (rawMax - rawMin).coerceAtLeast(1e-9)
+    return allowedCounts.map { count ->
+        val step = niceCeiling(paddedSpan / (count - 1))
+        var minimum = floor(rawMin / step) * step
+        var maximum = minimum + step * (count - 1)
+        if (maximum < rawMax) {
+            maximum = ceil(rawMax / step) * step
+            minimum = maximum - step * (count - 1)
+        }
+        AxisRange(minimum, maximum, List(count) { minimum + step * it })
+    }.minBy { range ->
+        range.span / paddedSpan + (range.ticks.size - allowedCounts.first()) * 0.01
     }
-    return AxisRange(minimum, maximum, List(Y_TICK_COUNT) { minimum + step * it })
 }
 
 internal fun trendTimeSeries(points: List<TimeValue>, color: Color, axis: PlotAxis): TimeSeries {
@@ -240,7 +250,6 @@ private fun ChartDateLabels(start: Long, end: Long, width: Dp) {
     }
 }
 
-private const val Y_TICK_COUNT = 5
 private const val X_GRID_COUNT = 7
 private const val CHART_INSET = 6f
 private const val DAY_MILLIS_SHARED = 24L * 60L * 60L * 1000L
@@ -256,6 +265,7 @@ internal fun TimeWindowChart(
     formatLeft: (Double) -> String,
     formatRight: (Double) -> String = formatLeft,
     height: Dp = 132.dp,
+    yTickCounts: IntRange = 5..5,
 ) {
     val sortedSeries = series.map { item -> item.copy(points = item.points.sortedBy(TimeValue::timestamp)) }
     val allPoints = sortedSeries.flatMap(TimeSeries::points)
@@ -270,9 +280,9 @@ internal fun TimeWindowChart(
         .filter { it.timestamp in visibleStart..visibleEnd }
         .map(TimeValue::value)
     val bandValues = bands.flatMap { listOf(it.center - it.tolerance, it.center, it.center + it.tolerance) }
-    val leftRange = chartAxisRange(visibleValues(PlotAxis.LEFT) + bandValues)
-    val rightRange = chartAxisRange(visibleValues(PlotAxis.RIGHT))
-    val independentRange = chartAxisRange(visibleValues(PlotAxis.INDEPENDENT))
+    val leftRange = chartAxisRange(visibleValues(PlotAxis.LEFT) + bandValues, yTickCounts)
+    val rightRange = chartAxisRange(visibleValues(PlotAxis.RIGHT), yTickCounts)
+    val independentRange = chartAxisRange(visibleValues(PlotAxis.INDEPENDENT), yTickCounts)
     val hasRightAxis = rightColor != null && sortedSeries.any { it.axis == PlotAxis.RIGHT }
     val gridColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.72f)
     val xAxisColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.95f)
@@ -280,30 +290,36 @@ internal fun TimeWindowChart(
     val rightAxisColor = (rightColor ?: xAxisColor).copy(alpha = 0.95f)
 
     BoxWithConstraints(modifier.fillMaxWidth()) {
-        val labelWidth = 39.dp
-        val tickWidth = 9.dp
-        val rightLabelWidth = if (hasRightAxis) 39.dp else 0.dp
+        val labelWidth = 34.dp
+        val labelGap = 3.dp
+        val tickWidth = 6.dp
+        val rightLabelWidth = if (hasRightAxis) 34.dp else 0.dp
+        val rightLabelGap = if (hasRightAxis) labelGap else 0.dp
         val rightTickWidth = if (hasRightAxis) tickWidth else 0.dp
-        val plotWidth = (maxWidth - labelWidth - tickWidth - rightTickWidth - rightLabelWidth).coerceAtLeast(1.dp)
+        val plotWidth = (
+            maxWidth - labelWidth - labelGap - tickWidth - rightTickWidth - rightLabelGap - rightLabelWidth
+        ).coerceAtLeast(1.dp)
         Column {
             Row {
                 ChartAxisLabels(leftRange, leftColor, formatLeft, labelWidth, height, true)
+                Box(Modifier.width(labelGap))
                 Canvas(Modifier.width(tickWidth).height(height)) {
-                    repeat(Y_TICK_COUNT) { index ->
-                        val y = CHART_INSET + index * (size.height - CHART_INSET * 2f) / (Y_TICK_COUNT - 1)
+                    repeat(leftRange.ticks.size) { index ->
+                        val y = CHART_INSET + index * (size.height - CHART_INSET * 2f) / (leftRange.ticks.size - 1)
                         drawLine(leftAxisColor, Offset(size.width, y), Offset(0f, y), strokeWidth = 3.5f)
                     }
                 }
                 Box(Modifier.width(plotWidth).height(height)) {
                     Canvas(Modifier.fillMaxSize()) {
-                        repeat(Y_TICK_COUNT) { index ->
-                            val y = CHART_INSET + index * (size.height - CHART_INSET * 2f) / (Y_TICK_COUNT - 1)
+                        repeat(leftRange.ticks.size) { index ->
+                            val y = CHART_INSET + index * (size.height - CHART_INSET * 2f) / (leftRange.ticks.size - 1)
                             drawLine(gridColor, Offset(0f, y), Offset(size.width, y), strokeWidth = 2.2f)
                         }
                         repeat(X_GRID_COUNT) { index ->
                             val x = index * size.width / (X_GRID_COUNT - 1)
                             drawLine(gridColor, Offset(x, 0f), Offset(x, size.height), strokeWidth = 2.2f)
                         }
+                        drawRect(xAxisColor, style = Stroke(width = 2.6f))
                     }
                     Canvas(Modifier.fillMaxSize()) {
                         fun x(timestamp: Long) =
@@ -353,21 +369,28 @@ internal fun TimeWindowChart(
                 }
                 if (hasRightAxis) {
                     Canvas(Modifier.width(rightTickWidth).height(height)) {
-                        repeat(Y_TICK_COUNT) { index ->
-                            val y = CHART_INSET + index * (size.height - CHART_INSET * 2f) / (Y_TICK_COUNT - 1)
+                        repeat(rightRange.ticks.size) { index ->
+                            val y = CHART_INSET + index * (size.height - CHART_INSET * 2f) / (rightRange.ticks.size - 1)
                             drawLine(rightAxisColor, Offset(0f, y), Offset(size.width, y), strokeWidth = 3.5f)
                         }
                     }
+                    Box(Modifier.width(rightLabelGap))
                     ChartAxisLabels(rightRange, rightColor!!, formatRight, rightLabelWidth, height, false)
                 }
             }
             Row {
-                Box(Modifier.width(labelWidth + tickWidth))
+                Box(Modifier.width(labelWidth + labelGap + tickWidth))
                 Column {
-                    Canvas(Modifier.width(plotWidth).height(9.dp)) {
+                    Canvas(Modifier.width(plotWidth).height(8.dp)) {
                         repeat(X_GRID_COUNT) { index ->
                             val x = index * size.width / (X_GRID_COUNT - 1)
-                            drawLine(xAxisColor, Offset(x, 0f), Offset(x, size.height), strokeWidth = 3.5f)
+                            val major = index == 0 || index == (X_GRID_COUNT - 1) / 2 || index == X_GRID_COUNT - 1
+                            drawLine(
+                                xAxisColor,
+                                Offset(x, 0f),
+                                Offset(x, if (major) size.height else size.height * 0.5f),
+                                strokeWidth = if (major) 3.2f else 1.8f,
+                            )
                         }
                     }
                     ChartDateLabels(visibleStart, visibleEnd, plotWidth)

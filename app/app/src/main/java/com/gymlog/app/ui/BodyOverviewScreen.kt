@@ -101,7 +101,7 @@ fun BodyOverviewScreen(
         } else {
             chartWindowDuration(window)
         },
-        endMillis = if (window == "CUSTOM") customEnd else newestMeasurement,
+        endMillis = if (window == "CUSTOM") customEnd else System.currentTimeMillis(),
         startMillis = if (window == "CUSTOM") customStart else null,
         key = "$window:$customStart:$customEnd",
     )
@@ -184,10 +184,11 @@ fun BodyOverviewScreen(
         confirmButton = { TextButton(onClick = { showBodyMenu = false }) { Text("Close") } },
     )
     if (showCustomRange) {
+        val now = System.currentTimeMillis()
         CustomBodyRangeDialog(
-            maxTimestamp = newestMeasurement,
-            initialStart = customStart ?: bodyWindowStart("1M", newestMeasurement, oldestMeasurement),
-            initialEnd = customEnd ?: newestMeasurement,
+            maxTimestamp = now,
+            initialStart = customStart ?: bodyWindowStart("1M", now, oldestMeasurement),
+            initialEnd = customEnd ?: now,
             onDismiss = { showCustomRange = false },
             onSave = { start, end ->
                 customStart = start
@@ -211,10 +212,21 @@ private fun BodyMetricCard(
 ) {
     var editing by remember { mutableStateOf(false) }
     val sorted = values.sortedBy { it.measuredAt }
-    val fit = bodyLinearFit(sorted)
+    val intervalValues = if (sorted.isEmpty()) {
+        emptyList()
+    } else {
+        val range = calculateVisibleTimeRange(sorted.first().measuredAt, sorted.last().measuredAt, window)
+        sorted.filter { it.measuredAt in range.start..range.end }
+    }
+    val fit = bodyLinearFit(intervalValues)
+    val fitPoints = fit.values.mapIndexed { index, value ->
+        TimeValue(intervalValues[index].measuredAt, value)
+    }
     val latest = sorted.lastOrNull()
     val targetEta = settings.target?.let { target ->
-        ((target - fit.fittedLast) / fit.slopePerDay).takeIf { sorted.size >= 2 && fit.slopePerDay != 0.0 && it >= 0.0 }
+        ((target - fit.fittedLast) / fit.slopePerDay).takeIf {
+            intervalValues.size >= 2 && fit.slopePerDay != 0.0 && it >= 0.0
+        }
     }
     val primary = MaterialTheme.colorScheme.primary
     val fitColor = MaterialTheme.colorScheme.tertiary
@@ -236,7 +248,7 @@ private fun BodyMetricCard(
                     style = MaterialTheme.typography.labelMedium,
                 )
             }
-            if (showTrend && sorted.size >= 2) {
+            if (showTrend && intervalValues.size >= 2) {
                 Text(
                     "Linear fit: ${String.format(Locale.US, "%+.2f", fit.slopePerDay * 30.44)} ${metric.unit} / month",
                     color = fitColor,
@@ -252,7 +264,15 @@ private fun BodyMetricCard(
                     style = MaterialTheme.typography.bodySmall,
                 )
             }
-            BodyGraph(sorted, if (showTrend) fit.values else emptyList(), settings, primary, fitColor, targetColor, window)
+            BodyGraph(
+                sorted,
+                if (showTrend) fitPoints else emptyList(),
+                settings,
+                primary,
+                fitColor,
+                targetColor,
+                window,
+            )
         }
     }
     if (editing) BodyChartSettingsDialog(metric, settings, { editing = false }) {
@@ -264,7 +284,7 @@ private fun BodyMetricCard(
 @Composable
 private fun BodyGraph(
     values: List<BodyMeasurement>,
-    fit: List<Double>,
+    fit: List<TimeValue>,
     settings: BodyChartSettings,
     dataColor: Color,
     fitColor: Color,
@@ -282,13 +302,7 @@ private fun BodyGraph(
             add(TimeSeries(values.map { TimeValue(it.measuredAt, it.value) }, dataColor))
             if (fit.isNotEmpty()) {
                 add(
-                    TimeSeries(
-                        fit.mapIndexed { index, value -> TimeValue(values[index].measuredAt, value) },
-                        fitColor,
-                        strokeWidth = 2.5f,
-                        dashed = true,
-                        showPoints = false,
-                    ),
+                    TimeSeries(fit, fitColor, strokeWidth = 2.5f, dashed = true, showPoints = false),
                 )
             }
         },
@@ -297,6 +311,7 @@ private fun BodyGraph(
             listOf(TimeBand(target, settings.acceptance ?: 0.0, targetColor))
         }.orEmpty(),
         formatLeft = ::formatBodyValue,
+        yTickCounts = 3..5,
     )
 }
 

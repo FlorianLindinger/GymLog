@@ -148,7 +148,7 @@ fun StatsScreen(
         durationMillis = if (window == "CUSTOM") {
             customStart?.let { start -> customEnd?.let { end -> (end - start).coerceAtLeast(1L) } }
         } else chartWindowDuration(window),
-        endMillis = if (window == "CUSTOM") customEnd else newestEntry,
+        endMillis = if (window == "CUSTOM") customEnd else System.currentTimeMillis(),
         startMillis = if (window == "CUSTOM") customStart else null,
         key = window,
     )
@@ -240,9 +240,9 @@ fun StatsScreen(
     }
     if (showCustomRange) {
         CustomBodyRangeDialog(
-            maxTimestamp = newestEntry,
+            maxTimestamp = System.currentTimeMillis(),
             initialStart = customStart ?: oldestEntry,
-            initialEnd = customEnd ?: newestEntry,
+            initialEnd = customEnd ?: System.currentTimeMillis(),
             onDismiss = { showCustomRange = false },
             onSave = { start, end ->
                 customStart = start
