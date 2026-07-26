@@ -9,16 +9,11 @@ $ErrorActionPreference = 'Stop'
 $scriptDirectory = Split-Path -Parent $PSCommandPath
 $repoRoot = (Resolve-Path (Join-Path $scriptDirectory '..\..\..')).Path
 $gradleFile = Join-Path $repoRoot 'app\app\build.gradle.kts'
-$releaseScript = Join-Path $repoRoot 'scripts\windows\helpers\release.bat'
 
 Set-Location $repoRoot
 if (git status --porcelain) { throw 'The Git working tree must be clean before starting a release.' }
 if ((git branch --show-current) -ne 'main') { throw 'Releases must be created from the main branch.' }
 
-$requiredSigningVariables = 'GYMLOG_KEYSTORE_FILE', 'GYMLOG_KEYSTORE_PASSWORD', 'GYMLOG_KEY_ALIAS', 'GYMLOG_KEY_PASSWORD'
-$missing = $requiredSigningVariables | Where-Object { [string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($_)) }
-if ($missing) { throw "Set signing environment variables before releasing: $($missing -join ', ')" }
-if (-not (Test-Path -LiteralPath $env:GYMLOG_KEYSTORE_FILE -PathType Leaf)) { throw 'GYMLOG_KEYSTORE_FILE does not point to an existing file.' }
 $content = Get-Content -Raw -LiteralPath $gradleFile
 $nameMatch = [regex]::Match($content, 'versionName\s*=\s*"(?<version>\d+\.\d+)"')
 $codeMatch = [regex]::Match($content, 'versionCode\s*=\s*(?<code>\d+)')
@@ -40,17 +35,14 @@ if ($Bump -ne 'none') {
     if ($LASTEXITCODE -ne 0) { throw 'Could not commit the version bump.' }
 }
 
-& $releaseScript $version '--create-tag'
-if ($LASTEXITCODE -ne 0) { throw 'Release build failed. No push was performed.' }
-
-$source = Join-Path $repoRoot "app\artifacts\release\$version"
-$destination = Join-Path $scriptDirectory "releases\$version"
-New-Item -ItemType Directory -Force -Path $destination | Out-Null
-Copy-Item -Path (Join-Path $source '*') -Destination $destination -Force
+git rev-parse "v$version" *> $null
+if ($LASTEXITCODE -eq 0) { throw "Tag v$version already exists." }
 
 git push origin main
-if ($LASTEXITCODE -ne 0) { throw 'Release assets were copied, but pushing main failed. The tag was not pushed.' }
+if ($LASTEXITCODE -ne 0) { throw 'Pushing main failed. No tag was created.' }
+git tag -a "v$version" -m "GymLog v$version"
+if ($LASTEXITCODE -ne 0) { throw "Could not create tag v$version." }
 git push origin "v$version"
-if ($LASTEXITCODE -ne 0) { throw "Release assets and main were pushed, but v$version was not. Push it with: git push origin v$version" }
+if ($LASTEXITCODE -ne 0) { throw "Main was pushed, but v$version was not. Push it with: git push origin v$version" }
 
-Write-Host "Release v$version completed. Copied assets: $destination"
+Write-Host "Release v$version queued. GitHub Actions will verify, sign, and publish it."

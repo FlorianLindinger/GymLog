@@ -8,13 +8,13 @@ automatically, so it can also be launched from another working directory.
 - `build.bat` builds a debug APK and copies it to
   `app\artifacts\debug\app-debug.apk`.
 - `verify.bat` compiles, tests, lints, assembles, and checks Git whitespace.
-- `release\release_minor.bat` changes `x.y` to `x.(y+1)`, builds, signs, tags,
-  pushes, and copies the release assets.
+- `release\release_minor.bat` changes `x.y` to `x.(y+1)`, commits, tags, and
+  pushes a release request to GitHub Actions.
 - `release\release_major.bat` changes `x.y` to `(x+1).0` and performs the same
   flow.
 - `release\release_no_bump.bat` releases the version already in Gradle. All
-  three require a clean `main` branch and copy assets to
-  `scripts\windows\release\releases\VERSION`.
+  three require a clean `main` branch. GitHub Actions verifies, signs, and
+  publishes the release.
 
 ## Phone and debugging tools
 
