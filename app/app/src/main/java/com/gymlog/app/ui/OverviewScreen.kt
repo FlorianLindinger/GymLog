@@ -2,10 +2,6 @@ package com.gymlog.app.ui
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.combinedClickable
-import androidx.compose.foundation.gestures.detectDragGestures
-import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
-import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -39,16 +35,13 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateListOf
-import androidx.compose.runtime.toMutableStateList
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
@@ -62,7 +55,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import android.widget.NumberPicker
 import com.gymlog.app.data.MachineSummary
-import com.gymlog.app.data.ExerciseOrderingMode
+import com.gymlog.app.data.ExerciseOrderGroup
 import com.gymlog.app.data.BodyArea
 import com.gymlog.app.data.ProgressionSettings
 import com.gymlog.app.data.SetRecord
@@ -97,6 +90,7 @@ fun OverviewScreen(
     listState: LazyListState,
     showHidden: Boolean,
     onShowHiddenChanged: (Boolean) -> Unit,
+    onTrainingHeader: () -> Unit,
     onEditPlanNotes: () -> Unit,
     areaFrequency: Map<BodyArea, Double>,
     onQuickSet: (MachineSummary, List<Int>) -> Unit,
@@ -104,13 +98,6 @@ fun OverviewScreen(
     onMetricChange: (MachineSummary, Double) -> Unit,
     onMetricChangeForSession: (MachineSummary, Double) -> Unit,
     progressionSettings: ProgressionSettings,
-    orderingMode: ExerciseOrderingMode,
-    onReorder: (List<Long>) -> Unit,
-    onSetPinned: (MachineSummary, Boolean) -> Unit,
-    onMovePinned: (MachineSummary, Int) -> Unit,
-    onHide: (MachineSummary) -> Unit,
-    onRankingChange: (MachineSummary, Int) -> Unit,
-    onRankingExcluded: (MachineSummary, Boolean) -> Unit,
 ) {
     val zone = ZoneId.systemDefault()
     val now = System.currentTimeMillis()
@@ -120,24 +107,12 @@ fun OverviewScreen(
     val trainingUnitCutoff = if (hasCurrentTraining) trainingDayStart(now, zone) else Long.MAX_VALUE
     val lastExerciseInUnit = mostRecentlyTrainedInUnit(machines, trainingUnitCutoff)
     val scope = rememberCoroutineScope()
-    val rankedMachines = remember(machines, orderingMode, hasCurrentTraining) {
-        rankOverviewMachines(machines, orderingMode, trainingUnitCutoff, lastExerciseInUnit)
+    val rankedMachines = remember(machines, hasCurrentTraining) {
+        rankOverviewMachines(machines, trainingUnitCutoff, lastExerciseInUnit)
     }
-    val orderedMachines = remember(rankedMachines) { rankedMachines.toMutableStateList() }
-    var draggedId by remember { mutableStateOf<Long?>(null) }
-    var dragOffset by remember { mutableFloatStateOf(0f) }
-    var reorderMode by remember { mutableStateOf(false) }
     Box(modifier.fillMaxSize()) {
         Column(Modifier.fillMaxSize().padding(bottom = 50.dp)) {
-            if (reorderMode) {
-                Text(
-                    if (orderingMode == ExerciseOrderingMode.FIXED) "Reordering Fixed Exercises" else "Reordering Pinned Exercises",
-                    modifier = Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.primaryContainer).padding(horizontal = 16.dp, vertical = 8.dp),
-                    style = MaterialTheme.typography.titleSmall,
-                    color = MaterialTheme.colorScheme.onPrimaryContainer,
-                )
-            }
-            TrainingDurationCard(machines, activePlanName, zone)
+            TrainingDurationCard(machines, activePlanName, zone, onTrainingHeader)
             if (activePlanNotesPinned && activePlanNotes.isNotBlank()) {
                 Card(
                     Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp).clickable(onClick = onEditPlanNotes),
@@ -166,10 +141,7 @@ fun OverviewScreen(
                 contentPadding = PaddingValues(horizontal = 8.dp, vertical = 6.dp),
                 verticalArrangement = Arrangement.spacedBy(6.dp),
             ) {
-                items(orderedMachines, key = { it.machine.id }, contentType = { "machine" }) { summary ->
-                    val id = summary.machine.id
-                    val reorderable = orderingMode == ExerciseOrderingMode.FIXED ||
-                        orderingMode == ExerciseOrderingMode.MIXED && summary.machine.pinned
+                items(rankedMachines, key = { it.machine.id }, contentType = { "machine" }) { summary ->
                     MachineCard(
                         summary, lastExerciseInUnit, trainingUnitCutoff, areaFrequency, onMachine, { machine, reps ->
                             val firstEntry = !hasCurrentTraining
@@ -191,14 +163,14 @@ fun OverviewScreen(
                                 onShowHiddenChanged(reveal)
                                 if (reveal) scope.launch {
                                     delay(80)
-                                    listState.animateScrollToItem(orderedMachines.size + 1)
+                                    listState.animateScrollToItem(rankedMachines.size + 1)
                                 }
                             },
                             modifier = Modifier.fillMaxWidth(),
                         ) { Text(if (showHidden) "Hide hidden exercises" else "Show hidden exercises") }
                     }
                     if (showHidden) {
-                        val rankedHidden = rankOverviewMachines(hiddenMachines, orderingMode, trainingUnitCutoff, lastExerciseInUnit)
+                        val rankedHidden = rankOverviewMachines(hiddenMachines, trainingUnitCutoff, lastExerciseInUnit)
                         items(rankedHidden, key = { "hidden_${it.machine.id}" }) { summary ->
                             MachineCard(summary, lastExerciseInUnit, trainingUnitCutoff, areaFrequency, onMachine, { machine, reps -> onQuickSet(machine, reps) }, onDeleteCurrentExerciseSets, onMetricChange, onMetricChangeForSession, progressionSettings, Modifier, {}, false, false)
                         }
@@ -211,22 +183,12 @@ fun OverviewScreen(
                 .fillMaxWidth().background(MaterialTheme.colorScheme.surface).padding(horizontal = 4.dp, vertical = 3.dp),
             horizontalArrangement = Arrangement.spacedBy(3.dp),
         ) {
-                if (reorderMode) {
-                    Button(
-                        onClick = {
-                            onReorder(orderedMachines.map { it.machine.id })
-                            reorderMode = false
-                        },
-                        modifier = Modifier.fillMaxWidth(),
-                    ) { Text("Done") }
-                } else {
-                    val compactPadding = PaddingValues(horizontal = 2.dp, vertical = 2.dp)
-                    FilledTonalButton(onClick = onBody, modifier = Modifier.weight(1f), contentPadding = compactPadding) { OverviewButtonLabel("Body") }
-                    FilledTonalButton(onClick = onMenu, modifier = Modifier.weight(1f), contentPadding = compactPadding) { OverviewButtonLabel("Menu") }
-                    FilledTonalButton(onClick = onStats, modifier = Modifier.weight(1f), contentPadding = compactPadding) { OverviewButtonLabel("Stats") }
-                    FilledTonalButton(onClick = onOrder, modifier = Modifier.weight(1f), contentPadding = compactPadding) { OverviewButtonLabel("Order") }
-                    FilledTonalButton(onClick = onAdd, modifier = Modifier.weight(1f), contentPadding = compactPadding) { OverviewButtonLabel("+ Add") }
-                }
+                val compactPadding = PaddingValues(horizontal = 2.dp, vertical = 2.dp)
+                FilledTonalButton(onClick = onBody, modifier = Modifier.weight(1f), contentPadding = compactPadding) { OverviewButtonLabel("Body") }
+                FilledTonalButton(onClick = onMenu, modifier = Modifier.weight(1f), contentPadding = compactPadding) { OverviewButtonLabel("Menu") }
+                FilledTonalButton(onClick = onStats, modifier = Modifier.weight(1f), contentPadding = compactPadding) { OverviewButtonLabel("Stats") }
+                FilledTonalButton(onClick = onOrder, modifier = Modifier.weight(1f), contentPadding = compactPadding) { OverviewButtonLabel("Order") }
+                FilledTonalButton(onClick = onAdd, modifier = Modifier.weight(1f), contentPadding = compactPadding) { OverviewButtonLabel("+ Add") }
         }
     }
 
@@ -239,7 +201,7 @@ private fun OverviewButtonLabel(text: String) {
 }
 
 @Composable
-private fun TrainingDurationCard(machines: List<MachineSummary>, activePlanName: String, zone: ZoneId) {
+private fun TrainingDurationCard(machines: List<MachineSummary>, activePlanName: String, zone: ZoneId, onClick: () -> Unit) {
     var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
     val lifecycleState by LocalLifecycleOwner.current.lifecycle.currentStateAsState()
     val isForeground = lifecycleState.isAtLeast(Lifecycle.State.RESUMED)
@@ -267,7 +229,7 @@ private fun TrainingDurationCard(machines: List<MachineSummary>, activePlanName:
     val completedExercises = machines.count { summary -> summary.recentSets.any { first != null && it.performedAt >= first } }
 
     Card(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick),
         shape = RoundedCornerShape(16.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
         elevation = CardDefaults.cardElevation(defaultElevation = 5.dp),
@@ -289,12 +251,13 @@ private fun TrainingDurationCard(machines: List<MachineSummary>, activePlanName:
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                Text(
-                    "$completedExercises/${machines.size} exercises",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = if (completedExercises == machines.size) Color(0xFF2E7D32) else MaterialTheme.colorScheme.tertiary,
-                )
             }
+            Text(
+                "$completedExercises/${machines.size} exercises",
+                modifier = Modifier.padding(horizontal = 8.dp),
+                style = MaterialTheme.typography.labelSmall,
+                color = if (completedExercises == machines.size) Color(0xFF2E7D32) else MaterialTheme.colorScheme.tertiary,
+            )
             Column(horizontalAlignment = Alignment.End) {
                 Text(
                     formatElapsed(durationMillis),
@@ -560,7 +523,6 @@ private fun mostRecentlyTrainedInUnit(
 
 private fun rankOverviewMachines(
     machines: List<MachineSummary>,
-    mode: ExerciseOrderingMode,
     currentTrainingCutoff: Long,
     current: MachineSummary?,
 ): List<MachineSummary> {
@@ -575,8 +537,11 @@ private fun rankOverviewMachines(
         summary.machine.id to summary.recentSets.map { it.performedDate(zone) }.distinct().size
     }
     val currentFirst = listOfNotNull(current)
-    val automatic = currentFirst + machines.filter {
-        it.machine.id != currentId && !it.machine.excludedFromAutoRanking
+    val manualTop = machines.filter {
+        it.machine.id != currentId && it.machine.orderGroup == ExerciseOrderGroup.MANUAL_TOP
+    }.sortedBy { it.machine.sortOrder }
+    val automatic = machines.filter {
+        it.machine.id != currentId && it.machine.orderGroup == ExerciseOrderGroup.AUTOMATIC
     }.sortedWith(
         compareBy<MachineSummary>(
             { it.recentSets.any { set -> set.performedAt >= currentTrainingCutoff } },
@@ -586,18 +551,11 @@ private fun rankOverviewMachines(
             { trainingCounts[it.machine.id] ?: 0 },
             { it.machine.name.lowercase(Locale.getDefault()) },
         ),
-    ) + machines.filter {
-        it.machine.id != currentId && it.machine.excludedFromAutoRanking
+    )
+    val manualBottom = machines.filter {
+        it.machine.id != currentId && it.machine.orderGroup == ExerciseOrderGroup.MANUAL_BOTTOM
     }.sortedBy { it.machine.sortOrder }
-    return when (mode) {
-        ExerciseOrderingMode.AUTOMATIC -> automatic
-        ExerciseOrderingMode.FIXED -> currentFirst + machines
-            .filter { it.machine.id != currentId }
-            .sortedBy { it.machine.sortOrder }
-        ExerciseOrderingMode.MIXED -> currentFirst +
-            machines.filter { it.machine.pinned && it.machine.id != currentId }.sortedBy { it.machine.sortOrder } +
-            automatic.filter { !it.machine.pinned && it.machine.id != currentId }
-    }
+    return currentFirst + manualTop + automatic + manualBottom
 }
 
 private fun strongestClash(current: MachineSummary, previous: MachineSummary): Double? {
@@ -646,8 +604,8 @@ private fun sessionPatternText(summary: MachineSummary): AnnotatedString {
     }
     fun AnnotatedString.Builder.appendTrendMarker(trend: Int) {
         when {
-            trend > 0 -> withStyle(SpanStyle(color = Color(0xFF66BB6A), fontWeight = FontWeight.Bold)) { append("|") }
-            trend < 0 -> withStyle(SpanStyle(color = Color(0xFFEF5350), fontWeight = FontWeight.Bold)) { append("|") }
+            trend > 0 -> withStyle(SpanStyle(color = Color(0xFF66BB6A), fontWeight = FontWeight.Black)) { append("|") }
+            trend < 0 -> withStyle(SpanStyle(color = Color(0xFFEF5350), fontWeight = FontWeight.Black)) { append("|") }
             else -> append("|")
         }
     }

@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -28,7 +29,9 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHost
@@ -48,6 +51,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
@@ -60,7 +64,7 @@ import com.gymlog.app.data.BodyArea
 import com.gymlog.app.data.BackupSyncStatus
 import com.gymlog.app.data.GymRepository
 import com.gymlog.app.data.HistorySet
-import com.gymlog.app.data.ExerciseOrderingMode
+import com.gymlog.app.data.ExerciseOrderGroup
 import com.gymlog.app.data.MachineSummary
 import com.gymlog.app.data.ProgressionSettings
 import com.gymlog.app.data.TrainingPlan
@@ -76,22 +80,25 @@ private data class AppUiState(
     val trainingPlans: List<TrainingPlan>,
     val activeTrainingPlanId: Long,
     val progressionSettings: ProgressionSettings,
-    val exerciseOrderingMode: ExerciseOrderingMode,
+    val hiddenMachineIds: Set<Long>,
     val automaticBackupEnabled: Boolean,
     val backupSyncStatus: BackupSyncStatus,
 )
 
-private fun GymRepository.loadUiState() = AppUiState(
-    machines = loadMachines(),
-    history = loadHistory(),
-    areaColors = loadAreaColors(),
-    trainingPlans = loadTrainingPlans(),
-    activeTrainingPlanId = activeTrainingPlanId(),
-    progressionSettings = loadProgressionSettings(),
-    exerciseOrderingMode = exerciseOrderingMode(),
-    automaticBackupEnabled = automaticBackupEnabled(),
-    backupSyncStatus = backupSyncStatus(),
-)
+private fun GymRepository.loadUiState(): AppUiState {
+    val machines = loadMachines()
+    return AppUiState(
+        machines = machines,
+        history = loadHistory(),
+        areaColors = loadAreaColors(),
+        trainingPlans = loadTrainingPlans(),
+        activeTrainingPlanId = activeTrainingPlanId(),
+        progressionSettings = loadProgressionSettings(),
+        hiddenMachineIds = machines.mapNotNullTo(mutableSetOf()) { it.machine.id.takeIf(::isMachineHidden) },
+        automaticBackupEnabled = automaticBackupEnabled(),
+        backupSyncStatus = backupSyncStatus(),
+    )
+}
 
 private fun GymRepository.loadUiStateResult(): Result<AppUiState> = try {
     Result.success(loadUiState())
@@ -120,6 +127,7 @@ fun GymLogApp(
     var showProgressionSettings by remember { mutableStateOf(false) }
     var showAccentColor by remember { mutableStateOf(false) }
     var showPlanNotes by remember { mutableStateOf(false) }
+    var showTrainingHeader by remember { mutableStateOf(false) }
     var showHelp by remember { mutableStateOf(false) }
     var confirmDeleteCurrentTraining by remember { mutableStateOf(false) }
     var editingExerciseField by remember { mutableStateOf<ExerciseEditField?>(null) }
@@ -252,8 +260,8 @@ fun GymLogApp(
     ) { padding ->
         when (screen) {
             Screen.OVERVIEW -> OverviewScreen(
-                machines = uiState.machines.filterNot { repository.isMachineHidden(it.machine.id) },
-                hiddenMachines = uiState.machines.filter { repository.isMachineHidden(it.machine.id) },
+                machines = uiState.machines.filterNot { it.machine.id in uiState.hiddenMachineIds },
+                hiddenMachines = uiState.machines.filter { it.machine.id in uiState.hiddenMachineIds },
                 activePlanName = activePlan?.name ?: "Training plan",
                 activePlanNotes = activePlan?.notes.orEmpty(),
                 activePlanNotesPinned = activePlan?.notesPinned == true,
@@ -273,6 +281,7 @@ fun GymLogApp(
                     showHiddenExercises = it
                     repository.setShowHiddenExercises(it)
                 },
+                onTrainingHeader = { showTrainingHeader = true },
                 onEditPlanNotes = { showPlanNotes = true },
                 areaFrequency = areaFrequency,
                 onQuickSet = { machine, reps ->
@@ -293,16 +302,6 @@ fun GymLogApp(
                     refresh()
                 },
                 progressionSettings = uiState.progressionSettings,
-                orderingMode = uiState.exerciseOrderingMode,
-                onReorder = { orderedIds ->
-                    repository.reorderMachines(orderedIds, uiState.exerciseOrderingMode == ExerciseOrderingMode.MIXED)
-                    refresh()
-                },
-                onSetPinned = { machine, pinned -> repository.setMachinePinned(machine.machine.id, pinned); refresh() },
-                onMovePinned = { machine, direction -> repository.movePinnedMachine(machine.machine.id, direction); refresh() },
-                onHide = { machine -> repository.setMachineHidden(machine.machine.id, true); refresh() },
-                onRankingChange = { machine, delta -> repository.changeRankingPriority(machine.machine.id, delta); refresh() },
-                onRankingExcluded = { machine, excluded -> repository.setExcludedFromAutoRanking(machine.machine.id, excluded); refresh() },
             )
             Screen.BODY -> BodyOverviewScreen(
                 snapshot = bodyData,
@@ -331,14 +330,10 @@ fun GymLogApp(
             )
             Screen.ORDER -> OrderScreen(
                 machines = uiState.machines,
-                mode = uiState.exerciseOrderingMode,
                 modifier = Modifier.padding(padding),
-                onMode = { repository.setExerciseOrderingMode(it); refresh() },
-                onMove = { id, direction -> repository.moveMachine(id, direction); refresh() },
-                onPinned = { id, pinned -> repository.setMachinePinned(id, pinned); refresh() },
+                onMove = { id, direction -> repository.moveMachineWithinOrderGroup(id, direction); refresh() },
+                onGroup = { id, group -> repository.setExerciseOrderGroup(id, group); refresh() },
                 onPriority = { id, delta -> repository.changeRankingPriority(id, delta); refresh() },
-                onAutomatic = { id, enabled -> repository.setExcludedFromAutoRanking(id, !enabled); refresh() },
-                onReset = { id -> repository.resetMachineOrdering(id); refresh() },
             )
             Screen.PLANS -> TrainingPlansScreen(
                 plans = uiState.trainingPlans,
@@ -384,7 +379,7 @@ fun GymLogApp(
                     onAreaColor = { area, color -> repository.setAreaColor(area, color); refresh() },
                     onChanged = ::refresh,
                     onEditDetails = { editingExerciseField = it },
-                    isHidden = repository.isMachineHidden(summary.machine.id),
+                    isHidden = summary.machine.id in uiState.hiddenMachineIds,
                     onDeleteSets = { sets -> deleteWithUndo("${sets.size} set${if (sets.size == 1) "" else "s"} deleted") { sets.forEach { repository.deleteSet(it.id) } } },
                     onDeleteExercise = { deleteWithUndo("${summary.machine.name} deleted") { repository.deleteMachine(summary.machine.id) } },
                     onDeleted = {
@@ -463,7 +458,7 @@ fun GymLogApp(
                 Text("Progress Warnings", style = MaterialTheme.typography.titleSmall)
                 Text("Warnings appear when an exercise has not increased after your configured number of weeks or training sessions.")
                 Text("Exercise Ordering", style = MaterialTheme.typography.titleSmall)
-                Text("Automatic prioritizes the active exercise, exercises not yet done, low-conflict areas, exercises missed last training, and least-used exercises. Mixed keeps exercises marked Keep at Top in their exercise editor above the automatically ranked remainder. Fixed keeps your full manual order. The active exercise stays first in every mode.")
+                Text("Each exercise belongs to Manual top, Auto sorted, or Manual bottom. The active exercise stays first. Auto prioritizes exercises not yet done, low-conflict areas, exercises missed last training, and then your tie-break priority and usage.")
             }
         },
         confirmButton = { TextButton(onClick = { showHelp = false; showMenu = true }) { Text("Close") } },
@@ -491,6 +486,23 @@ fun GymLogApp(
             refresh()
             showPlanNotes = false
             showMenu = true
+        },
+    )
+
+    if (showTrainingHeader && activePlan != null) TrainingHeaderDialog(
+        activePlan = activePlan,
+        plans = uiState.trainingPlans,
+        onDismiss = { showTrainingHeader = false },
+        onSave = { name, notes, pinned ->
+            repository.renameTrainingPlan(activePlan.id, name)
+            repository.saveTrainingPlanNotes(activePlan.id, notes, pinned)
+            refresh()
+            showTrainingHeader = false
+        },
+        onSwitch = { planId ->
+            repository.setActiveTrainingPlan(planId)
+            refresh()
+            showTrainingHeader = false
         },
     )
 
@@ -639,79 +651,58 @@ private fun DataRecoveryDialog(
 @Composable
 private fun OrderScreen(
     machines: List<MachineSummary>,
-    mode: ExerciseOrderingMode,
     modifier: Modifier = Modifier,
-    onMode: (ExerciseOrderingMode) -> Unit,
     onMove: (Long, Int) -> Unit,
-    onPinned: (Long, Boolean) -> Unit,
+    onGroup: (Long, ExerciseOrderGroup) -> Unit,
     onPriority: (Long, Int) -> Unit,
-    onAutomatic: (Long, Boolean) -> Unit,
-    onReset: (Long) -> Unit,
 ) {
-    val ordered = machines.sortedBy { it.machine.sortOrder }
+    val groups = listOf(
+        ExerciseOrderGroup.MANUAL_TOP to "Manual top",
+        ExerciseOrderGroup.AUTOMATIC to "Auto sorted",
+        ExerciseOrderGroup.MANUAL_BOTTOM to "Manual bottom",
+    )
     LazyColumn(
         modifier = modifier.fillMaxSize(),
-        contentPadding = PaddingValues(16.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp),
+        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 6.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
         item {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("Ordering mode", style = MaterialTheme.typography.titleMedium)
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    ExerciseOrderingMode.entries.forEach { choice ->
-                        FilterChip(
-                            selected = mode == choice,
-                            onClick = { onMode(choice) },
-                            label = { Text(when (choice) {
-                                ExerciseOrderingMode.AUTOMATIC -> "Automatic"
-                                ExerciseOrderingMode.MIXED -> "Mixed"
-                                ExerciseOrderingMode.FIXED -> "Manual"
-                            }) },
-                            modifier = Modifier.weight(1f),
-                        )
-                    }
-                }
-                Text(
-                    when (mode) {
-                        ExerciseOrderingMode.AUTOMATIC -> "GymLog orders the full list from training state, muscle clashes, usage, and your tie-break priority."
-                        ExerciseOrderingMode.MIXED -> "Pinned exercises stay first in manual order. GymLog orders the rest automatically."
-                        ExerciseOrderingMode.FIXED -> "Automatic ordering is off. The arrow order is used, except that the active exercise remains first."
-                    },
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
+            Text(
+                "The active exercise is always first. Manual top follows in your arrow order. Auto then ranks not-yet-trained exercises first, avoids muscle clashes, prefers exercises missed last session, and uses priority and usage as tie-breakers. Manual bottom is last in your arrow order.",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
-        itemsIndexed(ordered, key = { _, item -> item.machine.id }) { index, item ->
-            val machine = item.machine
-            Card(Modifier.fillMaxWidth()) {
-                Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(7.dp)) {
-                    Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
-                        Text("${index + 1}. ${machine.name}", Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
-                        val manuallyOrdered = mode == ExerciseOrderingMode.FIXED ||
-                            (mode == ExerciseOrderingMode.MIXED && machine.pinned) ||
-                            machine.excludedFromAutoRanking
-                        TextButton(onClick = { onMove(machine.id, -1) }, enabled = manuallyOrdered && index > 0) { Text("▲") }
-                        TextButton(onClick = { onMove(machine.id, 1) }, enabled = manuallyOrdered && index < ordered.lastIndex) { Text("▼") }
-                    }
-                    Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
-                        Column(Modifier.weight(1f)) {
-                            Text("Automatic ranking", style = MaterialTheme.typography.labelLarge)
-                            Text(if (machine.excludedFromAutoRanking) "Uses its manual position after auto-ranked exercises" else "Included in smart ordering", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        groups.forEach { (group, title) ->
+            val entries = machines.filter { it.machine.orderGroup == group }
+                .sortedWith(compareBy<MachineSummary> { it.machine.sortOrder }.thenBy { it.machine.name })
+            item(key = "header-$group") {
+                Text("$title (${entries.size})", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(top = 4.dp, start = 2.dp))
+            }
+            itemsIndexed(entries, key = { _, item -> item.machine.id }) { index, item ->
+                val machine = item.machine
+                Card(Modifier.fillMaxWidth()) {
+                    Column(Modifier.padding(horizontal = 6.dp, vertical = 3.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(machine.name, Modifier.weight(1f), style = MaterialTheme.typography.labelLarge, maxLines = 1)
+                            if (group != ExerciseOrderGroup.AUTOMATIC) {
+                                TextButton(onClick = { onMove(machine.id, -1) }, enabled = index > 0, contentPadding = PaddingValues(horizontal = 7.dp, vertical = 0.dp)) { Text("▲") }
+                                TextButton(onClick = { onMove(machine.id, 1) }, enabled = index < entries.lastIndex, contentPadding = PaddingValues(horizontal = 7.dp, vertical = 0.dp)) { Text("▼") }
+                            } else {
+                                Text("Priority ${-machine.rankingPriority}", style = MaterialTheme.typography.labelSmall)
+                                TextButton(onClick = { onPriority(machine.id, 1) }, contentPadding = PaddingValues(horizontal = 7.dp, vertical = 0.dp)) { Text("−") }
+                                TextButton(onClick = { onPriority(machine.id, -1) }, contentPadding = PaddingValues(horizontal = 7.dp, vertical = 0.dp)) { Text("+") }
+                            }
                         }
-                        Switch(checked = !machine.excludedFromAutoRanking, onCheckedChange = { onAutomatic(machine.id, it) })
-                    }
-                    if (mode == ExerciseOrderingMode.MIXED) {
-                        Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
-                            Text("Keep in manual section", Modifier.weight(1f))
-                            Switch(checked = machine.pinned, onCheckedChange = { onPinned(machine.id, it) })
+                        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                            groups.forEach { (choice, choiceTitle) ->
+                                Row(Modifier.weight(1f).clickable { onGroup(machine.id, choice) }, verticalAlignment = Alignment.CenterVertically) {
+                                    RadioButton(selected = group == choice, onClick = { onGroup(machine.id, choice) }, modifier = Modifier.size(30.dp))
+                                    Text(choiceTitle.removePrefix("Manual ").replaceFirstChar { it.uppercase() }, style = MaterialTheme.typography.labelSmall)
+                                }
+                            }
                         }
                     }
-                    Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
-                        Text("Tie-break priority ${-machine.rankingPriority}", Modifier.weight(1f))
-                        TextButton(onClick = { onPriority(machine.id, 1) }) { Text("Lower") }
-                        TextButton(onClick = { onPriority(machine.id, -1) }) { Text("Higher") }
-                    }
-                    TextButton(onClick = { onReset(machine.id) }, modifier = Modifier.fillMaxWidth()) { Text("Clear fixed position and priority") }
                 }
             }
         }
@@ -828,6 +819,42 @@ private fun AccentColorDialog(
             }
         },
         confirmButton = { Button(onClick = { onSave(selected) }) { Text("Apply") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
+}
+
+@Composable
+private fun TrainingHeaderDialog(
+    activePlan: TrainingPlan,
+    plans: List<TrainingPlan>,
+    onDismiss: () -> Unit,
+    onSave: (String, String, Boolean) -> Unit,
+    onSwitch: (Long) -> Unit,
+) {
+    var name by remember(activePlan.id) { mutableStateOf(activePlan.name) }
+    var notes by remember(activePlan.id) { mutableStateOf(activePlan.notes) }
+    var pinned by remember(activePlan.id) { mutableStateOf(activePlan.notesPinned) }
+    var choosingPlan by remember { mutableStateOf(false) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Training plan") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                OutlinedTextField(name, { name = it }, Modifier.fillMaxWidth(), label = { Text("Name") }, singleLine = true)
+                OutlinedTextField(notes, { notes = it }, Modifier.fillMaxWidth(), label = { Text("Training Plan Notes") }, minLines = 2, maxLines = 4)
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Text("Pin note on overview", Modifier.weight(1f), style = MaterialTheme.typography.bodySmall)
+                    Switch(checked = pinned, onCheckedChange = { pinned = it })
+                }
+                OutlinedButton(onClick = { choosingPlan = !choosingPlan }, modifier = Modifier.fillMaxWidth()) {
+                    Text(if (choosingPlan) "Hide plans" else "Switch training plan")
+                }
+                if (choosingPlan) plans.filter { it.id != activePlan.id }.forEach { plan ->
+                    TextButton(onClick = { onSwitch(plan.id) }, modifier = Modifier.fillMaxWidth()) { Text(plan.name) }
+                }
+            }
+        },
+        confirmButton = { Button(onClick = { onSave(name.trim(), notes.trim(), pinned) }, enabled = name.isNotBlank()) { Text("Save") } },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
     )
 }

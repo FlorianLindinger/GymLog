@@ -1,6 +1,7 @@
 package com.gymlog.app.ui
 
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -176,9 +177,6 @@ fun DetailScreen(
                 }
             }
         }
-        OutlinedButton(onClick = { repository.setMachineHidden(machine.id, !isHidden); onChanged() }, modifier = Modifier.fillMaxWidth()) {
-            Text(if (isHidden) "Unhide exercise" else "Hide exercise")
-        }
         Card(modifier = Modifier.fillMaxWidth()) {
             Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 Text("Recent Entries", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
@@ -199,10 +197,10 @@ fun DetailScreen(
                             style = MaterialTheme.typography.labelSmall,
                             fontWeight = FontWeight.Medium,
                             fontFamily = FontFamily.Monospace,
-                            maxLines = 3,
+                            maxLines = 1,
+                            softWrap = false,
                         )
                         Text(if (expandedBatch == batchKey) "Close" else "Edit", Modifier.clickable { expandedBatch = if (expandedBatch == batchKey) null else batchKey }.padding(horizontal = 6.dp, vertical = 3.dp), color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelMedium)
-                        Text("Delete", Modifier.clickable { deletingSets = batch }.padding(horizontal = 6.dp, vertical = 3.dp), color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.labelMedium)
                     }
                     if (expandedBatch == batchKey) ordered.forEachIndexed { setIndex, set ->
                         Row(Modifier.fillMaxWidth().padding(start = 12.dp, top = 1.dp, bottom = 1.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -216,14 +214,25 @@ fun DetailScreen(
                                 maxLines = 2,
                             )
                             Text("Edit", Modifier.clickable { editingSet = set }.padding(horizontal = 6.dp, vertical = 2.dp), color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelSmall)
-                            Text("Delete", Modifier.clickable { deletingSets = listOf(set) }.padding(horizontal = 6.dp, vertical = 2.dp), color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.labelSmall)
+                        }
+                        TextButton(onClick = { deletingSets = batch }, modifier = Modifier.align(Alignment.End), contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp)) {
+                            Text("Delete entry", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.labelSmall)
                         }
                     }
                 }
             }
         }
 
-        TextButton(onClick = { confirmDelete = true }, modifier = Modifier.fillMaxWidth()) { Text("Delete Exercise", color = MaterialTheme.colorScheme.error) }
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedButton(onClick = { repository.setMachineHidden(machine.id, !isHidden); onChanged() }, modifier = Modifier.weight(1f)) {
+                Text(if (isHidden) "Unhide exercise" else "Hide exercise")
+            }
+            OutlinedButton(
+                onClick = { confirmDelete = true },
+                modifier = Modifier.weight(1f),
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.error),
+            ) { Text("Delete exercise", color = MaterialTheme.colorScheme.error) }
+        }
         Spacer(Modifier.height(8.dp))
     }
 
@@ -734,11 +743,16 @@ private fun formatRecentEntry(sets: List<SetRecord>, trackingMode: String, times
     } else {
         formatMetric(first.weight, trackingMode)
     }
-    val repetitions = if (isDirectMetric(trackingMode)) "" else sets.joinToString(",") { it.reps.toString() }
-    val firstLine = "${metric.padEnd(12)} - ${repetitions.padEnd(12)} - ${formatTimestamp(timestamp)}"
-    if (isDirectMetric(trackingMode)) return firstLine
+    val date = formatTimestamp(timestamp)
     val volume = sets.sumOf { it.weight * it.reps }
-    return "$firstLine\nVolume: ${formatAxisValue(volume)} kg"
+    return when (trackingMode) {
+        "STRENGTH" -> "${metric.padEnd(18)} - ${formatAxisValue(volume).padStart(6)} level·min - $date"
+        "DURATION" -> "${metric.padEnd(12)} - ${formatAxisValue(sets.sumOf { it.weight }).padStart(6)} min - $date"
+        else -> {
+            val repetitions = sets.joinToString(",") { it.reps.toString() }
+            "${metric.padEnd(10)} - ${repetitions.padEnd(10)} - ${formatAxisValue(volume).padStart(7)} kg - $date"
+        }
+    }
 }
 
 private fun formatTimestamp(timestamp: Long): String = DateTimeFormatter.ofPattern("dd.MM.yy")

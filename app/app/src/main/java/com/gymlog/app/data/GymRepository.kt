@@ -65,14 +65,6 @@ class GymRepository(context: Context) {
         volumeMinimumIncreasePercent = preferences.getInt("progress_volume_minimum_percent", 5),
     )
 
-    fun exerciseOrderingMode(): ExerciseOrderingMode = runCatching {
-        ExerciseOrderingMode.valueOf(preferences.getString("exercise_ordering_mode", null) ?: "")
-    }.getOrDefault(ExerciseOrderingMode.MIXED)
-
-    fun setExerciseOrderingMode(mode: ExerciseOrderingMode) {
-        preferences.edit().putString("exercise_ordering_mode", mode.name).apply()
-    }
-
     fun saveProgressionSettings(settings: ProgressionSettings) {
         preferences.edit()
             .putInt("progress_stale_weeks", settings.staleWeeks.coerceAtLeast(0))
@@ -358,22 +350,16 @@ class GymRepository(context: Context) {
         preferences.edit().putBoolean("show_hidden_exercises", show).apply()
     }
 
-    fun setMachinePinned(id: Long, pinned: Boolean) {
-        val database = db.writableDatabase
-        val planId = activeTrainingPlanId()
-        val nextPinnedOrder = database.rawQuery(
-            "SELECT COALESCE(MAX(sort_order),-1)+1 FROM machines WHERE pinned=1 AND plan_id=?",
-            arrayOf(planId.toString()),
-        ).use { cursor -> cursor.moveToFirst(); cursor.getInt(0) }
-        database.update(
+    fun setExerciseOrderGroup(id: Long, group: ExerciseOrderGroup) {
+        db.writableDatabase.update(
             "machines",
-            ContentValues().apply {
-                put("pinned", if (pinned) 1 else 0)
-                if (pinned) put("sort_order", nextPinnedOrder)
-            },
+            ContentValues().apply { put("pinned", if (group == ExerciseOrderGroup.MANUAL_TOP) 1 else 0) },
             "id=?",
             arrayOf(id.toString()),
         )
+        preferences.edit()
+            .putBoolean("ranking_excluded_$id", group == ExerciseOrderGroup.MANUAL_BOTTOM)
+            .apply()
     }
 
     fun setChartWindow(id: Long, window: String) {
@@ -386,18 +372,6 @@ class GymRepository(context: Context) {
 
     fun changeRankingPriority(id: Long, delta: Int) {
         preferences.edit().putInt("ranking_priority_$id", (preferences.getInt("ranking_priority_$id", 0) + delta).coerceIn(-20, 20)).apply()
-    }
-
-    fun resetMachineOrdering(id: Long) {
-        setMachinePinned(id, false)
-        preferences.edit()
-            .putInt("ranking_priority_$id", 0)
-            .putBoolean("ranking_excluded_$id", false)
-            .apply()
-    }
-
-    fun setExcludedFromAutoRanking(id: Long, excluded: Boolean) {
-        preferences.edit().putBoolean("ranking_excluded_$id", excluded).apply()
     }
 
     fun setShowTrend(id: Long, show: Boolean) {
@@ -594,45 +568,20 @@ class GymRepository(context: Context) {
         }
     }
 
-    fun moveMachine(machineId: Long, direction: Int) {
-        val ordered = loadMachines().map { it.machine }.toMutableList()
+    fun moveMachineWithinOrderGroup(machineId: Long, direction: Int) {
+        val machines = loadMachines().map { it.machine }
+        val group = machines.firstOrNull { it.id == machineId }?.orderGroup ?: return
+        if (group == ExerciseOrderGroup.AUTOMATIC) return
+        val ordered = machines.filter { it.orderGroup == group }.sortedBy { it.sortOrder }.toMutableList()
         val from = ordered.indexOfFirst { it.id == machineId }
         val to = from + direction
         if (from < 0 || to !in ordered.indices) return
-        val moved = ordered.removeAt(from)
-        ordered.add(to, moved)
+        val first = ordered[from]
+        val second = ordered[to]
         val database = db.writableDatabase
         database.transaction {
-            ordered.forEachIndexed { index, machine ->
-                database.update("machines", ContentValues().apply { put("sort_order", index) }, "id=?", arrayOf(machine.id.toString()))
-            }
-        }
-    }
-
-    fun movePinnedMachine(machineId: Long, direction: Int) {
-        val planId = activeTrainingPlanId()
-        val database = db.writableDatabase
-        val ordered = loadMachinesForPlan(planId).filter { it.machine.pinned }.map { it.machine.id }.toMutableList()
-        val from = ordered.indexOf(machineId)
-        val to = from + direction
-        if (from < 0 || to !in ordered.indices) return
-        val moved = ordered.removeAt(from)
-        ordered.add(to, moved)
-        database.transaction {
-            ordered.forEachIndexed { index, id ->
-                database.update("machines", ContentValues().apply { put("sort_order", index) }, "id=?", arrayOf(id.toString()))
-            }
-        }
-    }
-    fun reorderMachines(machineIds: List<Long>, pinnedOnly: Boolean) {
-        val currentIds = loadMachines().map { it.machine.id }
-        if (machineIds.size != currentIds.size || machineIds.toSet() != currentIds.toSet()) return
-        val pinnedIds = loadMachines().filter { it.machine.pinned }.map { it.machine.id }.toSet()
-        val database = db.writableDatabase
-        database.transaction {
-            machineIds.forEachIndexed { index, id ->
-                database.update("machines", ContentValues().apply { put("sort_order", index) }, "id=?", arrayOf(id.toString()))
-            }
+            database.update("machines", ContentValues().apply { put("sort_order", second.sortOrder) }, "id=?", arrayOf(first.id.toString()))
+            database.update("machines", ContentValues().apply { put("sort_order", first.sortOrder) }, "id=?", arrayOf(second.id.toString()))
         }
     }
 
