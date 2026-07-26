@@ -1,5 +1,5 @@
 @echo off
-setlocal
+setlocal EnableExtensions EnableDelayedExpansion
 
 rem GymLog USB installation manual:
 rem 1. On the phone, tap Build number seven times to enable Developer options.
@@ -17,8 +17,9 @@ if errorlevel 1 exit /b 1
 
 set "APK=%APP_ROOT%\artifacts\debug\app-debug.apk"
 set "ADB=%GYMLOG_ADB%"
+set "ADB_SERIAL=%~1"
 set "ADB_TARGET="
-if not "%~1"=="" set "ADB_TARGET=-s %~1"
+if not "%ADB_SERIAL%"=="" set "ADB_TARGET=-s %ADB_SERIAL%"
 
 echo ============================================================
 echo                  GymLog USB installation
@@ -48,6 +49,20 @@ if not exist "%APK%" (
 
 echo Looking for an authorized Android phone...
 "%ADB%" start-server >nul 2>&1
+if "%ADB_SERIAL%"=="" (
+    set "USB_SERIAL="
+    set "FALLBACK_SERIAL="
+    for /f "skip=1 tokens=1,2" %%A in ('"%ADB%" devices') do (
+        if "%%B"=="device" (
+            if not defined FALLBACK_SERIAL set "FALLBACK_SERIAL=%%A"
+            echo %%A | findstr /B /C:"adb-" >nul
+            if errorlevel 1 if not defined USB_SERIAL set "USB_SERIAL=%%A"
+        )
+    )
+    if defined USB_SERIAL set "ADB_SERIAL=!USB_SERIAL!"
+    if not defined ADB_SERIAL set "ADB_SERIAL=!FALLBACK_SERIAL!"
+    if defined ADB_SERIAL set "ADB_TARGET=-s !ADB_SERIAL!"
+)
 "%ADB%" %ADB_TARGET% get-state >nul 2>&1
 if errorlevel 1 (
     echo.
@@ -61,6 +76,7 @@ if errorlevel 1 (
     exit /b 1
 )
 
+echo Using Android device: %ADB_SERIAL%
 echo Installing GymLog without deleting existing app data...
 "%ADB%" %ADB_TARGET% install -r "%APK%"
 if errorlevel 1 (
