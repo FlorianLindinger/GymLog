@@ -35,8 +35,8 @@ android {
         applicationId = "com.gymlog.app"
         minSdk = 26
         targetSdk = 36
-        versionCode = 2
-        versionName = "2.0"
+        versionCode = 3
+        versionName = "3.0"
         buildConfigField("String", "BUILD_TIME", 34.toChar() + buildTimestamp + 34.toChar())
     }
 
