@@ -1,6 +1,7 @@
 # Android Studio
 *.iml
 /.idea/
+/app/.idea/
 /app/local.properties
 *.hprof
 
