@@ -216,6 +216,9 @@ class GymRepository(context: Context, private val gymClock: GymClock = GymClock(
                     put("current_weight", machine.currentWeight)
                     put("sort_order", machine.sortOrder)
                     put("pinned", if (machine.pinned) 1 else 0)
+                    put("order_group", machine.orderGroup.name)
+                    put("ranking_priority", machine.rankingPriority)
+                    put("show_trend", if (machine.showTrend) 1 else 0)
                 })
                 summary.areas.forEach { assignment ->
                     database.insertOrThrow("machine_areas", null, ContentValues().apply {
@@ -264,43 +267,75 @@ class GymRepository(context: Context, private val gymClock: GymClock = GymClock(
     fun loadMachines(): List<MachineSummary> = loadMachinesForPlan(ensureTrainingPlan(db.readableDatabase))
 
     private fun loadMachinesForPlan(planId: Long): List<MachineSummary> {
+        migrateLegacyMachineState()
         val database = db.readableDatabase
         val machines = mutableListOf<Machine>()
         database.rawQuery(
-            "SELECT id,name,title_note,notes,pause_time,chart_window,trailing_average,tracking_mode,current_weight,sort_order,pinned FROM machines WHERE plan_id=? ORDER BY sort_order,id",
+            "SELECT id,name,title_note,notes,pause_time,chart_window,trailing_average,tracking_mode,current_weight,sort_order,order_group,ranking_priority,show_trend FROM machines WHERE plan_id=? ORDER BY sort_order,id",
             arrayOf(planId.toString()),
         ).use { cursor ->
             while (cursor.moveToNext()) {
+                val group = runCatching { ExerciseOrderGroup.valueOf(cursor.getString(10)) }.getOrDefault(ExerciseOrderGroup.AUTOMATIC)
                 machines += Machine(
-                    id = cursor.getLong(0),
-                    name = cursor.getString(1),
-                    titleNote = cursor.getString(2),
-                    notes = cursor.getString(3),
-                    pauseTime = cursor.getString(4),
-                    chartWindow = cursor.getString(5),
-                    trailingAverage = cursor.getInt(6),
-                    trackingMode = cursor.getString(7),
-                    currentWeight = cursor.getDouble(8),
-                    sortOrder = cursor.getInt(9),
-                    pinned = cursor.getInt(10) != 0,
-                    rankingPriority = preferences.getInt("ranking_priority_${cursor.getLong(0)}", 0),
-                    excludedFromAutoRanking = preferences.getBoolean("ranking_excluded_${cursor.getLong(0)}", false),
-                    showTrend = preferences.getBoolean("show_trend_${cursor.getLong(0)}", true),
+                    id = cursor.getLong(0), name = cursor.getString(1), titleNote = cursor.getString(2), notes = cursor.getString(3),
+                    pauseTime = cursor.getString(4), chartWindow = ChartRange.fromStorage(cursor.getString(5)).storageValue,
+                    trailingAverage = cursor.getInt(6), trackingMode = TrackingMode.fromStorage(cursor.getString(7)).name,
+                    currentWeight = cursor.getDouble(8), sortOrder = cursor.getInt(9),
+                    pinned = group == ExerciseOrderGroup.MANUAL_TOP, rankingPriority = cursor.getInt(11),
+                    excludedFromAutoRanking = group == ExerciseOrderGroup.MANUAL_BOTTOM, showTrend = cursor.getInt(12) != 0,
                 )
             }
         }
+        if (machines.isEmpty()) return emptyList()
+        val placeholders = machines.joinToString(",") { "?" }
+        val args = machines.map { it.id.toString() }.toTypedArray()
+        val areas = mutableMapOf<Long, MutableList<AreaAssignment>>()
+        database.rawQuery("SELECT ma.machine_id,ma.area,ma.strength,ac.color FROM machine_areas ma LEFT JOIN area_colors ac ON ac.area=ma.area WHERE ma.machine_id IN ($placeholders) ORDER BY ma.area", args).use { cursor ->
+            while (cursor.moveToNext()) {
+                val area = runCatching { BodyArea.valueOf(cursor.getString(1)) }.getOrNull() ?: continue
+                areas.getOrPut(cursor.getLong(0)) { mutableListOf() } += AreaAssignment(area, if (cursor.getDouble(2) >= 0.75) Strength.FULL else Strength.HALF, if (cursor.isNull(3)) area.color else cursor.getLong(3))
+            }
+        }
+        val sets = mutableMapOf<Long, MutableList<SetRecord>>()
+        database.rawQuery("SELECT id,machine_id,reps,weight,performed_at FROM sets WHERE machine_id IN ($placeholders) ORDER BY performed_at DESC,id DESC", args).use { cursor ->
+            while (cursor.moveToNext()) sets.getOrPut(cursor.getLong(1)) { mutableListOf() } += SetRecord(cursor.getLong(0), cursor.getLong(1), cursor.getInt(2), cursor.getDouble(3), cursor.getLong(4))
+        }
+        val weights = mutableMapOf<Long, MutableList<WeightChange>>()
+        database.rawQuery("SELECT machine_id,weight,changed_at FROM weight_history WHERE machine_id IN ($placeholders) ORDER BY changed_at DESC,id DESC", args).use { cursor ->
+            while (cursor.moveToNext()) weights.getOrPut(cursor.getLong(0)) { mutableListOf() } += WeightChange(cursor.getDouble(1), cursor.getLong(2))
+        }
+        val counts = mutableMapOf<Long, Int>()
+        database.rawQuery("SELECT machine_id,COUNT(*) FROM sets WHERE machine_id IN ($placeholders) AND performed_at>=? GROUP BY machine_id", args + (gymClock.now() - 30L * 24 * 60 * 60 * 1000).toString()).use { cursor ->
+            while (cursor.moveToNext()) counts[cursor.getLong(0)] = cursor.getInt(1)
+        }
         return machines.map { machine ->
-            MachineSummary(
-                machine = machine,
-                areas = loadAreas(database, machine.id),
-                recentSets = loadSets(database, machine.id, null),
-                weightChanges = loadWeights(database, machine.id),
-                setsLast30Days = countRecentSets(database, machine.id),
-                setWheelValues = loadSetWheelValues(machine.id),
-            )
+            MachineSummary(machine, areas[machine.id].orEmpty(), sets[machine.id].orEmpty(), weights[machine.id].orEmpty(), counts[machine.id] ?: 0, loadSetWheelValues(machine.id))
         }
     }
 
+    private fun migrateLegacyMachineState() {
+        if (preferences.getBoolean("machine_state_in_sqlite", false)) return
+        val database = db.writableDatabase
+        database.transaction {
+            database.rawQuery("SELECT id,pinned FROM machines", null).use { cursor ->
+                while (cursor.moveToNext()) {
+                    val id = cursor.getLong(0)
+                    val values = ContentValues()
+                    val excluded = preferences.getBoolean("ranking_excluded_$id", false)
+                    values.put("order_group", when {
+                        cursor.getInt(1) != 0 -> ExerciseOrderGroup.MANUAL_TOP.name
+                        excluded -> ExerciseOrderGroup.MANUAL_BOTTOM.name
+                        else -> ExerciseOrderGroup.AUTOMATIC.name
+                    })
+                    values.put("ranking_priority", preferences.getInt("ranking_priority_$id", 0))
+                    values.put("show_trend", if (preferences.getBoolean("show_trend_$id", true)) 1 else 0)
+                    values.put("hidden", if (preferences.getBoolean("hidden_machine_$id", false)) 1 else 0)
+                    database.update("machines", values, "id=?", arrayOf(id.toString()))
+                }
+            }
+        }
+        check(preferences.edit().putBoolean("machine_state_in_sqlite", true).commit()) { "Could not migrate exercise settings" }
+    }
     fun addMachine(name: String, weight: Double, trackingMode: String, titleNote: String = ""): Long {
         val database = db.writableDatabase
         val planId = ensureTrainingPlan(database)
@@ -340,9 +375,13 @@ class GymRepository(context: Context, private val gymClock: GymClock = GymClock(
         db.writableDatabase.update("machines", ContentValues().apply { put("notes", notes.trim()) }, "id=?", arrayOf(id.toString()))
     }
 
-    fun isMachineHidden(id: Long): Boolean = preferences.getBoolean("hidden_machine_$id", false)
+    fun isMachineHidden(id: Long): Boolean = db.readableDatabase.rawQuery(
+        "SELECT hidden FROM machines WHERE id=?", arrayOf(id.toString()),
+    ).use { it.moveToFirst() && it.getInt(0) != 0 }
 
-    fun setMachineHidden(id: Long, hidden: Boolean) { preferences.edit().putBoolean("hidden_machine_$id", hidden).apply() }
+    fun setMachineHidden(id: Long, hidden: Boolean) {
+        db.writableDatabase.update("machines", ContentValues().apply { put("hidden", if (hidden) 1 else 0) }, "id=?", arrayOf(id.toString()))
+    }
 
     fun showHiddenExercises(): Boolean = preferences.getBoolean("show_hidden_exercises", false)
 
@@ -351,19 +390,16 @@ class GymRepository(context: Context, private val gymClock: GymClock = GymClock(
     }
 
     fun setExerciseOrderGroup(id: Long, group: ExerciseOrderGroup) {
-        db.writableDatabase.update(
-            "machines",
-            ContentValues().apply { put("pinned", if (group == ExerciseOrderGroup.MANUAL_TOP) 1 else 0) },
-            "id=?",
-            arrayOf(id.toString()),
-        )
-        preferences.edit()
-            .putBoolean("ranking_excluded_$id", group == ExerciseOrderGroup.MANUAL_BOTTOM)
-            .apply()
+        db.writableDatabase.update("machines", ContentValues().apply {
+            put("order_group", group.name)
+            put("pinned", if (group == ExerciseOrderGroup.MANUAL_TOP) 1 else 0)
+        }, "id=?", arrayOf(id.toString()))
     }
 
     fun setChartWindow(id: Long, window: String) {
-        db.writableDatabase.update("machines", ContentValues().apply { put("chart_window", window) }, "id=?", arrayOf(id.toString()))
+        db.writableDatabase.update("machines", ContentValues().apply {
+            put("chart_window", ChartRange.fromStorage(window).storageValue)
+        }, "id=?", arrayOf(id.toString()))
     }
 
     fun setTrailingAverage(id: Long, amount: Int) {
@@ -371,13 +407,12 @@ class GymRepository(context: Context, private val gymClock: GymClock = GymClock(
     }
 
     fun changeRankingPriority(id: Long, delta: Int) {
-        preferences.edit().putInt("ranking_priority_$id", (preferences.getInt("ranking_priority_$id", 0) + delta).coerceIn(-20, 20)).apply()
+        db.writableDatabase.execSQL("UPDATE machines SET ranking_priority=MIN(20,MAX(-20,ranking_priority + ?)) WHERE id=?", arrayOf(delta, id))
     }
 
     fun setShowTrend(id: Long, show: Boolean) {
-        preferences.edit().putBoolean("show_trend_$id", show).apply()
-    }
-    fun setAreaColor(area: BodyArea, color: Long) {
+        db.writableDatabase.update("machines", ContentValues().apply { put("show_trend", if (show) 1 else 0) }, "id=?", arrayOf(id.toString()))
+    }    fun setAreaColor(area: BodyArea, color: Long) {
         db.writableDatabase.insertWithOnConflict("area_colors", null, ContentValues().apply {
             put("area", area.name)
             put("color", color)
@@ -713,6 +748,11 @@ class GymRepository(context: Context, private val gymClock: GymClock = GymClock(
             for (index in 0 until machines.length()) {
                 val item = machines.getJSONObject(index)
                 val trackingMode = TrackingMode.fromStorage(item.getString("trackingMode")).name
+                val orderGroup = when {
+                    item.optBoolean("pinned") -> ExerciseOrderGroup.MANUAL_TOP
+                    item.optBoolean("excludedFromAutoRanking") -> ExerciseOrderGroup.MANUAL_BOTTOM
+                    else -> ExerciseOrderGroup.AUTOMATIC
+                }
                 val id = database.insertOrThrow("machines", null, ContentValues().apply {
                     if (preserveIds) put("id", item.getLong("id"))
                     put("plan_id", importedPlanIds[item.getLong("planId")] ?: targetPlanId)
@@ -725,7 +765,11 @@ class GymRepository(context: Context, private val gymClock: GymClock = GymClock(
                     put("tracking_mode", trackingMode)
                     put("current_weight", item.getDouble("currentWeight"))
                     put("sort_order", item.optInt("sortOrder", index))
-                    put("pinned", if (item.optBoolean("pinned")) 1 else 0)
+                    put("pinned", if (orderGroup == ExerciseOrderGroup.MANUAL_TOP) 1 else 0)
+                    put("order_group", orderGroup.name)
+                    put("ranking_priority", item.optInt("rankingPriority", 0))
+                    put("show_trend", if (item.optBoolean("showTrend", true)) 1 else 0)
+                    put("hidden", if (item.optBoolean("hidden")) 1 else 0)
                 })
                 val areas = item.optJSONArray("areas") ?: JSONArray()
                 for (areaIndex in 0 until areas.length()) {
@@ -854,11 +898,11 @@ private const val GYMLOG_DATABASE = "gymlog.db"
 private const val DEFAULT_ACCENT_COLOR = 0xFF64B5F6
 private const val TRAINING_UNIT_MILLIS = 6L * 60L * 60L * 1000L
 
-private class GymDatabase(context: Context) : SQLiteOpenHelper(context, GYMLOG_DATABASE, null, 9) {
+private class GymDatabase(context: Context) : SQLiteOpenHelper(context, GYMLOG_DATABASE, null, 10) {
     override fun onCreate(db: SQLiteDatabase) {
         db.execSQL("CREATE TABLE training_plans(id INTEGER PRIMARY KEY AUTOINCREMENT,name TEXT NOT NULL UNIQUE,sort_order INTEGER NOT NULL,notes TEXT NOT NULL DEFAULT '',notes_pinned INTEGER NOT NULL DEFAULT 0)")
         db.execSQL("INSERT INTO training_plans(name,sort_order) VALUES('Default',0)")
-        db.execSQL("CREATE TABLE machines(id INTEGER PRIMARY KEY AUTOINCREMENT,plan_id INTEGER NOT NULL DEFAULT 1,name TEXT NOT NULL,title_note TEXT NOT NULL DEFAULT '',notes TEXT NOT NULL DEFAULT '',pause_time TEXT NOT NULL DEFAULT '',chart_window TEXT NOT NULL DEFAULT '3M',trailing_average INTEGER NOT NULL DEFAULT 0,tracking_mode TEXT NOT NULL DEFAULT 'WEIGHT',current_weight REAL NOT NULL DEFAULT 0,sort_order INTEGER NOT NULL,pinned INTEGER NOT NULL DEFAULT 0,FOREIGN KEY(plan_id) REFERENCES training_plans(id) ON DELETE CASCADE)")
+        db.execSQL("CREATE TABLE machines(id INTEGER PRIMARY KEY AUTOINCREMENT,plan_id INTEGER NOT NULL DEFAULT 1,name TEXT NOT NULL,title_note TEXT NOT NULL DEFAULT '',notes TEXT NOT NULL DEFAULT '',pause_time TEXT NOT NULL DEFAULT '',chart_window TEXT NOT NULL DEFAULT '3M',trailing_average INTEGER NOT NULL DEFAULT 0,tracking_mode TEXT NOT NULL DEFAULT 'WEIGHT',current_weight REAL NOT NULL DEFAULT 0,sort_order INTEGER NOT NULL,pinned INTEGER NOT NULL DEFAULT 0,order_group TEXT NOT NULL DEFAULT 'AUTOMATIC',ranking_priority INTEGER NOT NULL DEFAULT 0,show_trend INTEGER NOT NULL DEFAULT 1,hidden INTEGER NOT NULL DEFAULT 0,FOREIGN KEY(plan_id) REFERENCES training_plans(id) ON DELETE CASCADE)")
         db.execSQL("CREATE TABLE machine_areas(machine_id INTEGER NOT NULL,area TEXT NOT NULL,strength REAL NOT NULL,PRIMARY KEY(machine_id,area),FOREIGN KEY(machine_id) REFERENCES machines(id) ON DELETE CASCADE)")
         db.execSQL("CREATE TABLE sets(id INTEGER PRIMARY KEY AUTOINCREMENT,machine_id INTEGER NOT NULL,reps INTEGER NOT NULL,weight REAL NOT NULL,performed_at INTEGER NOT NULL,FOREIGN KEY(machine_id) REFERENCES machines(id) ON DELETE CASCADE)")
         db.execSQL("CREATE TABLE weight_history(id INTEGER PRIMARY KEY AUTOINCREMENT,machine_id INTEGER NOT NULL,weight REAL NOT NULL,changed_at INTEGER NOT NULL,FOREIGN KEY(machine_id) REFERENCES machines(id) ON DELETE CASCADE)")
@@ -873,11 +917,21 @@ private class GymDatabase(context: Context) : SQLiteOpenHelper(context, GYMLOG_D
     }
 
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
-        resetSchema(db)
+        if (oldVersion < 9) {
+            resetSchema(db)
+            return
+        }
+        if (oldVersion < 10) {
+            db.execSQL("ALTER TABLE machines ADD COLUMN order_group TEXT NOT NULL DEFAULT 'AUTOMATIC'")
+            db.execSQL("ALTER TABLE machines ADD COLUMN ranking_priority INTEGER NOT NULL DEFAULT 0")
+            db.execSQL("ALTER TABLE machines ADD COLUMN show_trend INTEGER NOT NULL DEFAULT 1")
+            db.execSQL("ALTER TABLE machines ADD COLUMN hidden INTEGER NOT NULL DEFAULT 0")
+            db.execSQL("UPDATE machines SET order_group=CASE WHEN pinned=1 THEN 'MANUAL_TOP' ELSE 'AUTOMATIC' END")
+        }
     }
 
     override fun onDowngrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
-        resetSchema(db)
+        throw IllegalStateException("GymLog data cannot be opened by an older app version")
     }
 
     private fun resetSchema(db: SQLiteDatabase) {

@@ -120,7 +120,11 @@ fun GymLogApp(
     onHealthSync: () -> Unit,
 ) {
     val viewModel: GymLogViewModel = androidx.lifecycle.viewmodel.compose.viewModel(factory = GymLogViewModel.factory(repository))
-    val uiStateResult by viewModel.uiState.collectAsState()
+    val loadState by viewModel.uiState.collectAsState()
+    val uiStateResult = loadState.result ?: run {
+        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text("Loading GymLog…") }
+        return
+    }
     var screen by remember { mutableStateOf(Screen.OVERVIEW) }
     var selectedId by remember { mutableStateOf<Long?>(null) }
     var showAdd by remember { mutableStateOf(false) }
@@ -142,6 +146,7 @@ fun GymLogApp(
     fun refresh() {
         viewModel.refresh()
     }
+    fun mutate(action: () -> Unit) = viewModel.mutate(action)
     fun deleteWithUndo(message: String, action: () -> Unit) {
         val snapshot = repository.exportJson()
         action()
@@ -308,7 +313,7 @@ fun GymLogApp(
             Screen.HISTORY -> HistoryScreen(
                 history = uiState.history,
                 modifier = Modifier.padding(padding),
-                onUpdateSet = { id, reps, weight -> repository.updateSet(id, reps, weight); refresh() },
+                onUpdateSet = { id, reps, weight -> mutate { repository.updateSet(id, reps, weight) } },
                 onAddSet = { machineId, reps, weight, performedAt ->
                     repository.addHistoricalSet(machineId, reps, weight, performedAt)
                     refresh()
@@ -326,9 +331,9 @@ fun GymLogApp(
             Screen.ORDER -> OrderScreen(
                 machines = uiState.machines,
                 modifier = Modifier.padding(padding),
-                onMove = { id, direction -> repository.moveMachineWithinOrderGroup(id, direction); refresh() },
-                onGroup = { id, group -> repository.setExerciseOrderGroup(id, group); refresh() },
-                onPriority = { id, delta -> repository.changeRankingPriority(id, delta); refresh() },
+                onMove = { id, direction -> mutate { repository.moveMachineWithinOrderGroup(id, direction) } },
+                onGroup = { id, group -> mutate { repository.setExerciseOrderGroup(id, group) } },
+                onPriority = { id, delta -> mutate { repository.changeRankingPriority(id, delta) } },
             )
             Screen.PLANS -> TrainingPlansScreen(
                 plans = uiState.trainingPlans,
@@ -344,9 +349,9 @@ fun GymLogApp(
                     refresh()
                     screen = Screen.OVERVIEW
                 },
-                onRename = { id, name -> repository.renameTrainingPlan(id, name); refresh() },
+                onRename = { id, name -> mutate { repository.renameTrainingPlan(id, name) } },
                 onDelete = { id -> deleteWithUndo("Training plan deleted") { repository.deleteTrainingPlan(id) } },
-                onDuplicate = { repository.duplicateTrainingPlan(it); refresh() },
+                onDuplicate = { mutate { repository.duplicateTrainingPlan(it) } },
                 onCreateDemo = {
                     repository.createDemoTrainingPlan()
                     refresh()
@@ -371,7 +376,7 @@ fun GymLogApp(
                     areaColors = uiState.areaColors,
                     modifier = Modifier.padding(padding),
                     repository = repository,
-                    onAreaColor = { area, color -> repository.setAreaColor(area, color); refresh() },
+                    onAreaColor = { area, color -> mutate { repository.setAreaColor(area, color) } },
                     onChanged = ::refresh,
                     onEditDetails = { editingExerciseField = it },
                     isHidden = summary.machine.id in uiState.hiddenMachineIds,
