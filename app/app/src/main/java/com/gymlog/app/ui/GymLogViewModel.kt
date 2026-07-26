@@ -14,6 +14,7 @@ import kotlinx.coroutines.withContext
 
 internal data class GymLogLoadState(
     val result: Result<AppUiState>? = null,
+    val refreshing: Boolean = result == null,
 )
 
 /** Owns reloadable application data independently from Compose composition. */
@@ -45,7 +46,7 @@ internal class GymLogViewModel(private val repository: GymRepository) : ViewMode
 
     private fun load(block: () -> Result<AppUiState>) {
         viewModelScope.launch {
-            _uiState.value = GymLogLoadState()
+            _uiState.value = _uiState.value.copy(refreshing = true)
             _uiState.value = GymLogLoadState(withContext(Dispatchers.IO) { block() })
         }
     }

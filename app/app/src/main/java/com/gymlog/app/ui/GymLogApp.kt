@@ -69,7 +69,9 @@ import com.gymlog.app.data.ExerciseOrderGroup
 import com.gymlog.app.data.MachineSummary
 import com.gymlog.app.data.ProgressionSettings
 import com.gymlog.app.data.TrainingPlan
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 private enum class Screen { OVERVIEW, BODY, STATS, ORDER, HISTORY, BACKUP, PLANS, DETAIL }
 enum class ExerciseEditField { NAME, TITLE_NOTE, OVERVIEW_NOTE }
@@ -138,6 +140,7 @@ fun GymLogApp(
     var confirmDeleteCurrentTraining by remember { mutableStateOf(false) }
     var editingExerciseField by remember { mutableStateOf<ExerciseEditField?>(null) }
     var importUndoSnapshot by remember { mutableStateOf<String?>(null) }
+    var initialExternalVersionHandled by remember { mutableStateOf(false) }
     var showHiddenExercises by rememberSaveable { mutableStateOf(repository.showHiddenExercises()) }
     val overviewListState = rememberLazyListState()
     val snackbarHostState = remember { SnackbarHostState() }
@@ -147,19 +150,22 @@ fun GymLogApp(
         viewModel.refresh()
     }
     fun mutate(action: () -> Unit) = viewModel.mutate(action)
-    fun deleteWithUndo(message: String, action: () -> Unit) {
-        val snapshot = repository.exportJson()
-        action()
-        refresh()
+    fun deleteWithUndo(message: String, action: () -> com.gymlog.app.data.DeletionJournal?) {
         scope.launch {
+            val journal = withContext(Dispatchers.IO) { action() } ?: return@launch
+            refresh()
             snackbarHostState.currentSnackbarData?.dismiss()
             if (snackbarHostState.showSnackbar(message, "Undo", duration = SnackbarDuration.Long) == SnackbarResult.ActionPerformed) {
-                repository.importJson(snapshot, preserveIds = true)
+                withContext(Dispatchers.IO) { repository.restoreDeletion(journal) }
                 refresh()
             }
         }
     }
     LaunchedEffect(externalDataVersion) {
+        if (!initialExternalVersionHandled) {
+            initialExternalVersionHandled = true
+            return@LaunchedEffect
+        }
         refresh()
         importUndoSnapshot?.let { snapshot ->
             importUndoSnapshot = null
@@ -292,7 +298,7 @@ fun GymLogApp(
                     }
                     refresh()
                 },
-                onDeleteCurrentExerciseSets = { machine -> deleteWithUndo("Current ${machine.machine.name} entries deleted") { repository.deleteCurrentExerciseSets(machine.machine.id) } },
+                onDeleteCurrentExerciseSets = { machine -> deleteWithUndo("Current ${machine.machine.name} entries deleted") { repository.deleteCurrentExerciseSetsWithJournal(machine.machine.id) } },
                 onMetricChange = { machine, value ->
                     repository.changeWeight(machine.machine.id, value)
                     refresh()
@@ -318,9 +324,9 @@ fun GymLogApp(
                     repository.addHistoricalSet(machineId, reps, weight, performedAt)
                     refresh()
                 },
-                onDeleteSet = { id -> deleteWithUndo("Set deleted") { repository.deleteSet(id) } },
-                onDeleteExerciseDay = { machineId, start, end -> deleteWithUndo("Exercise entries deleted") { repository.deleteExerciseDay(machineId, start, end) } },
-                onDeleteTrainingDay = { start, end -> deleteWithUndo("Training day deleted") { repository.deleteTrainingDay(start, end) } },
+                onDeleteSet = { id -> deleteWithUndo("Set deleted") { repository.deleteSetWithJournal(id) } },
+                onDeleteExerciseDay = { machineId, start, end -> deleteWithUndo("Exercise entries deleted") { repository.deleteExerciseDayWithJournal(machineId, start, end) } },
+                onDeleteTrainingDay = { start, end -> deleteWithUndo("Training day deleted") { repository.deleteTrainingDayWithJournal(start, end) } },
             )
             Screen.STATS -> StatsScreen(
                 history = uiState.history,
@@ -350,7 +356,7 @@ fun GymLogApp(
                     screen = Screen.OVERVIEW
                 },
                 onRename = { id, name -> mutate { repository.renameTrainingPlan(id, name) } },
-                onDelete = { id -> deleteWithUndo("Training plan deleted") { repository.deleteTrainingPlan(id) } },
+                onDelete = { id -> deleteWithUndo("Training plan deleted") { repository.deleteTrainingPlanWithJournal(id) } },
                 onDuplicate = { mutate { repository.duplicateTrainingPlan(it) } },
                 onCreateDemo = {
                     repository.createDemoTrainingPlan()
@@ -380,8 +386,8 @@ fun GymLogApp(
                     onChanged = ::refresh,
                     onEditDetails = { editingExerciseField = it },
                     isHidden = summary.machine.id in uiState.hiddenMachineIds,
-                    onDeleteSets = { sets -> deleteWithUndo("${sets.size} set${if (sets.size == 1) "" else "s"} deleted") { sets.forEach { repository.deleteSet(it.id) } } },
-                    onDeleteExercise = { deleteWithUndo("${summary.machine.name} deleted") { repository.deleteMachine(summary.machine.id) } },
+                    onDeleteSets = { sets -> deleteWithUndo("${sets.size} set${if (sets.size == 1) "" else "s"} deleted") { repository.deleteSetsWithJournal(sets.map { it.id }) } },
+                    onDeleteExercise = { deleteWithUndo("${summary.machine.name} deleted") { repository.deleteMachineWithJournal(summary.machine.id) } },
                     onDeleted = {
                         refresh()
                         screen = Screen.OVERVIEW
@@ -470,7 +476,7 @@ fun GymLogApp(
         text = { Text("This removes all entries in the current six-hour training unit from the active plan.") },
         confirmButton = {
             Button(onClick = {
-                deleteWithUndo("Current training deleted") { repository.deleteCurrentTraining() }
+                deleteWithUndo("Current training deleted") { repository.deleteCurrentTrainingWithJournal() }
                 confirmDeleteCurrentTraining = false
             }) { Text("Delete Training") }
         },
