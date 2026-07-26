@@ -9,7 +9,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 import kotlin.math.roundToInt
 
-class GymRepository(context: Context) {
+class GymRepository(context: Context, private val gymClock: GymClock = GymClock()) {
     private val appContext = context.applicationContext
     private var db = GymDatabase(appContext)
     private val preferences = appContext.getSharedPreferences(GYMLOG_PREFERENCES, Context.MODE_PRIVATE)
@@ -125,7 +125,7 @@ class GymRepository(context: Context) {
             DemoExercise("Cable Crunch", "Core", 45.0, listOf(BodyArea.CORE to Strength.FULL)),
         )
         val database = db.writableDatabase
-        val now = System.currentTimeMillis()
+        val now = gymClock.now()
         val nextOrder = database.rawQuery("SELECT COALESCE(MAX(sort_order),-1)+1 FROM training_plans", null)
             .use { it.moveToFirst(); it.getInt(0) }
         val planId = database.transaction {
@@ -224,7 +224,7 @@ class GymRepository(context: Context) {
                         put("strength", assignment.strength.value)
                     })
                 }
-                addWeightHistory(database, newMachineId, machine.currentWeight, System.currentTimeMillis())
+                addWeightHistory(database, newMachineId, machine.currentWeight, gymClock.now())
             }
             newPlanId
         }
@@ -315,7 +315,7 @@ class GymRepository(context: Context) {
             put("current_weight", weight)
             put("sort_order", nextOrder)
         })
-        addWeightHistory(database, id, weight, System.currentTimeMillis())
+        addWeightHistory(database, id, weight, gymClock.now())
         return id
     }
 
@@ -410,13 +410,13 @@ class GymRepository(context: Context) {
         if (current == weight) return
         database.transaction {
             database.update("machines", ContentValues().apply { put("current_weight", weight) }, "id=?", arrayOf(id.toString()))
-            addWeightHistory(database, id, weight, System.currentTimeMillis())
+            addWeightHistory(database, id, weight, gymClock.now())
         }
     }
 
     fun changeMetricForCurrentTrainingUnit(id: Long, value: Double) {
         val database = db.writableDatabase
-        val now = System.currentTimeMillis()
+        val now = gymClock.now()
         database.transaction {
             val machine = database.rawQuery(
                 "SELECT tracking_mode,current_weight FROM machines WHERE id=?",
@@ -444,7 +444,7 @@ class GymRepository(context: Context) {
             put("machine_id", machineId)
             put("reps", reps)
             put("weight", weight)
-            put("performed_at", System.currentTimeMillis())
+            put("performed_at", gymClock.now())
         })
     }
 
@@ -467,7 +467,7 @@ class GymRepository(context: Context) {
             require(cursor.moveToFirst()) { "Exercise does not exist" }
             if (cursor.getString(0) == "STRENGTH") cursor.getDouble(1).roundToInt().coerceAtLeast(1) else 1
         }
-        val now = System.currentTimeMillis()
+        val now = gymClock.now()
         database.transaction {
             database.delete(
                 "sets",
@@ -485,7 +485,7 @@ class GymRepository(context: Context) {
 
     fun addSets(machineId: Long, reps: List<Int>, weight: Double) {
         val database = db.writableDatabase
-        val now = System.currentTimeMillis()
+        val now = gymClock.now()
         database.transaction {
             database.delete(
                 "sets",
@@ -541,12 +541,12 @@ class GymRepository(context: Context) {
     }
 
     fun deleteCurrentExerciseSets(machineId: Long) {
-        db.writableDatabase.delete("sets", "machine_id=? AND performed_at>=?", arrayOf(machineId.toString(), trainingDayStart(System.currentTimeMillis()).toString()))
+        db.writableDatabase.delete("sets", "machine_id=? AND performed_at>=?", arrayOf(machineId.toString(), trainingDayStart(gymClock.now()).toString()))
     }
 
     fun deleteCurrentTraining() {
         val planId = activeTrainingPlanId()
-        val cutoff = trainingDayStart(System.currentTimeMillis())
+        val cutoff = trainingDayStart(gymClock.now())
         db.writableDatabase.delete(
             "sets",
             "performed_at>=? AND machine_id IN (SELECT id FROM machines WHERE plan_id=?)",
@@ -593,7 +593,7 @@ class GymRepository(context: Context) {
         val root = JSONObject()
         root.put("format", "GymLog backup")
         root.put("version", 5)
-        root.put("exportedAt", System.currentTimeMillis())
+        root.put("exportedAt", gymClock.now())
         root.put("settings", JSONObject().apply {
             put("weightUnit", "kg")
             loadProgressionSettings().let {
@@ -712,7 +712,7 @@ class GymRepository(context: Context) {
             }
             for (index in 0 until machines.length()) {
                 val item = machines.getJSONObject(index)
-                val trackingMode = item.getString("trackingMode")
+                val trackingMode = TrackingMode.fromStorage(item.getString("trackingMode")).name
                 val id = database.insertOrThrow("machines", null, ContentValues().apply {
                     if (preserveIds) put("id", item.getLong("id"))
                     put("plan_id", importedPlanIds[item.getLong("planId")] ?: targetPlanId)
@@ -720,7 +720,7 @@ class GymRepository(context: Context) {
                     put("title_note", item.optString("titleNote"))
                     put("notes", item.optString("notes"))
                     put("pause_time", item.optString("pauseTime"))
-                    put("chart_window", item.optString("chartWindow", "3M"))
+                    put("chart_window", ChartRange.fromStorage(item.optString("chartWindow", "3M")).storageValue)
                     put("trailing_average", item.optInt("trailingAverage", 0))
                     put("tracking_mode", trackingMode)
                     put("current_weight", item.getDouble("currentWeight"))
@@ -752,7 +752,7 @@ class GymRepository(context: Context) {
                     val change = changes.getJSONObject(changeIndex)
                     addWeightHistory(database, id, change.getDouble("weight"), change.getLong("changedAt"))
                 }
-                if (changes.length() == 0) addWeightHistory(database, id, item.getDouble("currentWeight"), System.currentTimeMillis())
+                if (changes.length() == 0) addWeightHistory(database, id, item.getDouble("currentWeight"), gymClock.now())
                 preferences.edit()
                     .putInt("ranking_priority_$id", item.optInt("rankingPriority", 0))
                     .putBoolean("ranking_excluded_$id", item.optBoolean("excludedFromAutoRanking", false))
@@ -801,7 +801,7 @@ class GymRepository(context: Context) {
     }
 
     private fun countRecentSets(database: SQLiteDatabase, id: Long): Int {
-        val cutoff = System.currentTimeMillis() - 30L * 24 * 60 * 60 * 1000
+        val cutoff = gymClock.now() - 30L * 24 * 60 * 60 * 1000
         return database.rawQuery(
             "SELECT COUNT(*) FROM sets WHERE machine_id=? AND performed_at>=?",
             arrayOf(id.toString(), cutoff.toString()),
@@ -826,11 +826,7 @@ class GymRepository(context: Context) {
     }
 
     /** A training day runs from 06:00 to 05:59, so late-night sessions remain one training. */
-    private fun trainingDayStart(timestamp: Long): Long {
-        val local = java.time.Instant.ofEpochMilli(timestamp).atZone(java.time.ZoneId.systemDefault())
-        val date = local.toLocalDate().minusDays(if (local.hour < 6) 1 else 0)
-        return date.atTime(6, 0).atZone(local.zone).toInstant().toEpochMilli()
-    }
+    private fun trainingDayStart(timestamp: Long): Long = gymClock.trainingDayStart(timestamp)
     private fun ensureTrainingPlan(database: SQLiteDatabase): Long {
         val preferred = preferences.getLong("active_training_plan", -1L)
         if (preferred > 0 && database.rawQuery("SELECT 1 FROM training_plans WHERE id=?", arrayOf(preferred.toString())).use { it.moveToFirst() }) return preferred

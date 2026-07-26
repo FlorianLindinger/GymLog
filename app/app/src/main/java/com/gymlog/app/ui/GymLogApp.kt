@@ -43,6 +43,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -73,7 +74,7 @@ import kotlinx.coroutines.launch
 private enum class Screen { OVERVIEW, BODY, STATS, ORDER, HISTORY, BACKUP, PLANS, DETAIL }
 enum class ExerciseEditField { NAME, TITLE_NOTE, OVERVIEW_NOTE }
 
-private data class AppUiState(
+internal data class AppUiState(
     val machines: List<MachineSummary>,
     val history: List<HistorySet>,
     val areaColors: Map<BodyArea, Long>,
@@ -85,7 +86,7 @@ private data class AppUiState(
     val backupSyncStatus: BackupSyncStatus,
 )
 
-private fun GymRepository.loadUiState(): AppUiState {
+internal fun GymRepository.loadUiState(): AppUiState {
     val machines = loadMachines()
     return AppUiState(
         machines = machines,
@@ -100,7 +101,7 @@ private fun GymRepository.loadUiState(): AppUiState {
     )
 }
 
-private fun GymRepository.loadUiStateResult(): Result<AppUiState> = try {
+internal fun GymRepository.loadUiStateResult(): Result<AppUiState> = try {
     Result.success(loadUiState())
 } catch (exception: Exception) {
     Result.failure(exception)
@@ -118,7 +119,8 @@ fun GymLogApp(
     healthSyncStatus: String,
     onHealthSync: () -> Unit,
 ) {
-    var uiStateResult by remember(repository) { mutableStateOf(repository.loadUiStateResult()) }
+    val viewModel: GymLogViewModel = androidx.lifecycle.viewmodel.compose.viewModel(factory = GymLogViewModel.factory(repository))
+    val uiStateResult by viewModel.uiState.collectAsState()
     var screen by remember { mutableStateOf(Screen.OVERVIEW) }
     var selectedId by remember { mutableStateOf<Long?>(null) }
     var showAdd by remember { mutableStateOf(false) }
@@ -138,7 +140,7 @@ fun GymLogApp(
     val scope = rememberCoroutineScope()
 
     fun refresh() {
-        uiStateResult = repository.loadUiStateResult()
+        viewModel.refresh()
     }
     fun deleteWithUndo(message: String, action: () -> Unit) {
         val snapshot = repository.exportJson()
@@ -168,14 +170,7 @@ fun GymLogApp(
         DataRecoveryDialog(
             error = loadError,
             onRetry = ::refresh,
-            onCreateFresh = {
-                uiStateResult = try {
-                    repository.createFreshDatabase()
-                    Result.success(repository.loadUiState())
-                } catch (exception: Exception) {
-                    Result.failure(exception)
-                }
-            },
+            onCreateFresh = viewModel::createFreshDatabase,
         )
         return
     }
@@ -511,7 +506,7 @@ fun GymLogApp(
         onDismiss = { showProgressionSettings = false; showMenu = true },
         onSave = {
             repository.saveProgressionSettings(it)
-            uiStateResult = Result.success(uiState.copy(progressionSettings = it))
+            viewModel.replace(Result.success(uiState.copy(progressionSettings = it)))
             showProgressionSettings = false
             showMenu = true
         },
