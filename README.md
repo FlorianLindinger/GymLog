@@ -53,7 +53,7 @@ Open the project in Android Studio, allow Gradle to sync, and run the `app` conf
 scripts\windows\build.bat
 ```
 
-The finished debug APK is published inside the Android project at `app\artifacts\debug\app-debug.apk`, where Google Drive can synchronize it. Disposable Gradle intermediates stay outside the repository to prevent cloud-sync file locks. Run the complete local verification with:
+The finished debug APK is published inside the Android project at `app\app\artifacts\debug\app-debug.apk`, where Google Drive can synchronize it. Disposable Gradle intermediates stay outside the repository to prevent cloud-sync file locks. Run the complete local verification with:
 
 ```powershell
 scripts\windows\verify.bat
@@ -84,7 +84,7 @@ docs/        Product documentation and screenshots
 scripts/windows/ Development, device, and release helpers
 ```
 
-- [Professional TODO](TODO.md)
+- [ToDo-List](TODO.md)
 
 ## License
 
