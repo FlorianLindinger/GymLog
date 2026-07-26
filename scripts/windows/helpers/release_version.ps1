@@ -15,6 +15,10 @@ Set-Location $repoRoot
 if (git status --porcelain) { throw 'The Git working tree must be clean before starting a release.' }
 if ((git branch --show-current) -ne 'main') { throw 'Releases must be created from the main branch.' }
 
+$requiredSigningVariables = 'GYMLOG_KEYSTORE_FILE', 'GYMLOG_KEYSTORE_PASSWORD', 'GYMLOG_KEY_ALIAS', 'GYMLOG_KEY_PASSWORD'
+$missing = $requiredSigningVariables | Where-Object { [string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($_)) }
+if ($missing) { throw "Set signing environment variables before releasing: $($missing -join ', ')" }
+if (-not (Test-Path -LiteralPath $env:GYMLOG_KEYSTORE_FILE -PathType Leaf)) { throw 'GYMLOG_KEYSTORE_FILE does not point to an existing file.' }
 $content = Get-Content -Raw -LiteralPath $gradleFile
 $nameMatch = [regex]::Match($content, 'versionName\s*=\s*"(?<version>\d+\.\d+)"')
 $codeMatch = [regex]::Match($content, 'versionCode\s*=\s*(?<code>\d+)')
