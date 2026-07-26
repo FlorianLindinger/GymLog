@@ -118,12 +118,12 @@ class GymRepository(context: Context, private val gymClock: GymClock = GymClock(
             val areas: List<Pair<BodyArea, Strength>>,
         )
         val exercises = listOf(
-            DemoExercise("Bench Press", "Push", 72.5, listOf(BodyArea.CHEST to Strength.FULL, BodyArea.TRICEPS to Strength.HALF, BodyArea.SHOULDERS to Strength.HALF)),
             DemoExercise("Lat Pulldown", "Pull", 67.5, listOf(BodyArea.UPPER_BACK to Strength.FULL, BodyArea.BICEPS to Strength.HALF)),
             DemoExercise("Leg Press", "Legs", 150.0, listOf(BodyArea.QUADS to Strength.FULL, BodyArea.GLUTES to Strength.HALF)),
-            DemoExercise("Shoulder Press", "Push", 42.5, listOf(BodyArea.SHOULDERS to Strength.FULL, BodyArea.TRICEPS to Strength.HALF)),
-            DemoExercise("Leg Curl", "Legs", 52.5, listOf(BodyArea.HAMSTRINGS to Strength.FULL, BodyArea.CALVES to Strength.HALF)),
+            DemoExercise("Bench Press", "Push", 72.5, listOf(BodyArea.CHEST to Strength.FULL, BodyArea.TRICEPS to Strength.HALF, BodyArea.SHOULDERS to Strength.HALF)),
             DemoExercise("Cable Crunch", "Core", 45.0, listOf(BodyArea.CORE to Strength.FULL)),
+            DemoExercise("Shoulder Press", "Push", 42.5, listOf(BodyArea.SHOULDERS to Strength.FULL, BodyArea.TRICEPS to Strength.HALF)),
+            DemoExercise("Chest Fly", "Push", 55.0, listOf(BodyArea.CHEST to Strength.FULL, BodyArea.SHOULDERS to Strength.HALF)),
         )
         val database = db.writableDatabase
         val now = gymClock.now()
