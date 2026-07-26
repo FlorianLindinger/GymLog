@@ -14,8 +14,6 @@
   <img src="https://img.shields.io/badge/Android-8.0%2B-3DDC84" alt="Android 8.0 or newer">
 </p>
 
-GymLog is built with Kotlin, Jetpack Compose, SQLite, and Health Connect. Workout data remains local by default; the app has no account system, analytics SDK, or internet permission.
-
 ## Features
 
 - Convenient weight-, level-, and duration-based workout logging
@@ -37,55 +35,36 @@ GymLog is built with Kotlin, Jetpack Compose, SQLite, and Health Connect. Workou
 | --- | --- |
 | <img src="docs/screenshots/history.png" alt="Training history" width="320"> | <img src="docs/screenshots/statistics.png" alt="Training statistics" width="320"> |
 
-Screenshots use sample data.
+## How to install
 
-## Getting Started
+1) WIP: how to downlaod relase
 
-Requirements:
+2) WIP how to build self:
 
-- Android Studio and Android SDK 36
-- JDK 17 or newer
-- Android 8.0 (API 26) or newer device or emulator
+    Requirements:
 
-Open the project in Android Studio, allow Gradle to sync, and run the `app` configuration. To build from PowerShell:
+    - Android Studio and Android SDK 36
+    - JDK 17 or newer
+    - Android 8.0 (API 26) or newer device or emulator
 
-```powershell
-scripts\windows\build.bat
-```
+    Open the project in Android Studio, allow Gradle to sync, and run the `app` configuration. To build from PowerShell:
 
-The finished debug APK is published inside the Android project at `app\app\artifacts\debug\app-debug.apk`, where Google Drive can synchronize it. Disposable Gradle intermediates stay outside the repository to prevent cloud-sync file locks. Run the complete local verification with:
+    ```powershell
+    scripts\windows\build.bat
+    ```
 
-```powershell
-scripts\windows\verify.bat
-```
+    The finished debug APK is published inside the Android project at `app\app\artifacts\debug\app-debug.apk`, where Google Drive can synchronize it. Disposable Gradle intermediates stay outside the repository to prevent cloud-sync file locks. Run the complete local verification with:
 
-Windows development and release helpers are described in [scripts/windows](scripts/windows/README.md). GitHub Actions runs the same compile, lint, test, and APK checks on pushes and pull requests.
+    ```powershell
+    scripts\windows\verify.bat
+    ```
 
-The [`google_drive_synced`](google_drive_synced/README.md) folder contains portable launchers for the debug and release output folders plus signed-release instructions.
-
-## Demo Data
-
-Open **Menu → Training Plans → Add Demo Training Plan** to create an isolated sample plan with ten weeks of history and a halfway-completed live workout. Repeating the action creates another uniquely named plan.
-
-## Data and Privacy
-
-Workout data is stored in the app's local SQLite database. Health Connect access is optional and controlled by Android permissions. JSON backups can be saved locally or through a document provider such as Google Drive.
-
-Release signing is read only from `GYMLOG_KEYSTORE_FILE`, `GYMLOG_KEYSTORE_PASSWORD`, `GYMLOG_KEY_ALIAS`, and `GYMLOG_KEY_PASSWORD`. Never commit signing files or credentials.
-
-## Project
-
-```text
-app/app/src/main/java/com/gymlog/app/
-├── data/        SQLite repository and models
-├── ui/          Compose screens and Health Connect integration
-└── MainActivity.kt
-docs/        Product documentation and screenshots
-scripts/windows/ Development, device, and release helpers
-```
-
-- [ToDo-List](TODO.md)
+    Windows development and release helpers are described in [scripts/windows](scripts/windows/README.md). GitHub Actions runs the same compile, lint, test, and APK checks on pushes and pull requests.
 
 ## License
 
 [MIT](LICENSE.txt)
+
+## Backend
+
+GymLog is built with Kotlin, Jetpack Compose, SQLite, and Health Connect. Workout data remains local by default; the app has no account system, analytics SDK, or internet permission.
