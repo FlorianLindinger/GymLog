@@ -9,7 +9,6 @@ $ErrorActionPreference = 'Stop'
 $scriptDirectory = Split-Path -Parent $PSCommandPath
 $repoRoot = (Resolve-Path (Join-Path $scriptDirectory '..\..\..')).Path
 $gradleFile = Join-Path $repoRoot 'app\app\build.gradle.kts'
-$releaseScript = Join-Path $repoRoot 'scripts\windows\helpers\release.bat'
 
 Set-Location $repoRoot
 if (git status --porcelain) { throw 'The Git working tree must be clean before starting a release.' }
@@ -36,17 +35,14 @@ if ($Bump -ne 'none') {
     if ($LASTEXITCODE -ne 0) { throw 'Could not commit the version bump.' }
 }
 
-& $releaseScript $version '--create-tag'
-if ($LASTEXITCODE -ne 0) { throw 'Release build failed. No push was performed.' }
+if ((git tag --list "v$version") -eq "v$version") { throw "Tag v$version already exists." }
 
-$source = Join-Path $repoRoot "app\artifacts\release\$version"
-$destination = Join-Path $scriptDirectory "releases\$version"
-New-Item -ItemType Directory -Force -Path $destination | Out-Null
-Copy-Item -Path (Join-Path $source '*') -Destination $destination -Force
 
 git push origin main
-if ($LASTEXITCODE -ne 0) { throw 'Release assets were copied, but pushing main failed. The tag was not pushed.' }
+if ($LASTEXITCODE -ne 0) { throw 'Pushing main failed. No tag was created.' }
+git tag -a "v$version" -m "GymLog v$version"
+if ($LASTEXITCODE -ne 0) { throw "Could not create tag v$version." }
 git push origin "v$version"
-if ($LASTEXITCODE -ne 0) { throw "Release assets and main were pushed, but v$version was not. Push it with: git push origin v$version" }
+if ($LASTEXITCODE -ne 0) { throw "Main was pushed, but v$version was not. Push it with: git push origin v$version" }
 
-Write-Host "Release v$version completed. Copied assets: $destination"
+Write-Host "Release v$version queued. GitHub Actions will verify, sign, and publish it."

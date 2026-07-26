@@ -41,7 +41,7 @@ jobs:
           GYMLOG_KEY_PASSWORD: ${{ secrets.GYMLOG_KEY_PASSWORD }}
         run: |
           chmod +x gradlew
-          ./gradlew :app:assembleRelease :app:bundleRelease --no-daemon
+          ./gradlew :app:compileDebugKotlin :app:testDebugUnitTest :app:lintDebug :app:assembleRelease :app:bundleRelease --no-daemon
           mkdir -p release-assets
           cp app/build/outputs/apk/release/app-release.apk "release-assets/GymLog-${GITHUB_REF_NAME#v}.apk"
           cp app/build/outputs/bundle/release/app-release.aab "release-assets/GymLog-${GITHUB_REF_NAME#v}.aab"

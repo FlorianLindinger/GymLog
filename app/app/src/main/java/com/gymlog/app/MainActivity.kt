@@ -21,11 +21,31 @@ import androidx.lifecycle.compose.LifecycleEventEffect
 import com.gymlog.app.data.GymRepository
 import com.gymlog.app.ui.GymLogApp
 import com.gymlog.app.ui.BodyDataSnapshot
+import com.gymlog.app.ui.BodyMeasurement
+import com.gymlog.app.ui.BodyMetric
 import com.gymlog.app.ui.HealthConnectGateway
 import com.gymlog.app.ui.theme.GymLogTheme
 import java.time.LocalDate
 import kotlinx.coroutines.launch
 
+private fun demoBodyData(): BodyDataSnapshot {
+    val now = System.currentTimeMillis()
+    val week = 7L * 24L * 60L * 60L * 1000L
+    val measurements = (0..11).flatMap { index ->
+        val timestamp = now - (11L - index) * week
+        val weight = 84.2 - index * 0.48 + if (index % 3 == 0) 0.25 else 0.0
+        val fatPercent = 23.4 - index * 0.42
+        val muscleMass = 64.5 + index * 0.12
+        listOf(
+            BodyMeasurement(BodyMetric.WEIGHT, weight, timestamp, "GymLog demo"),
+            BodyMeasurement(BodyMetric.FAT_PERCENTAGE, fatPercent, timestamp, "GymLog demo"),
+            BodyMeasurement(BodyMetric.FAT_MASS, weight * fatPercent / 100.0, timestamp, "GymLog demo"),
+            BodyMeasurement(BodyMetric.MUSCLE_MASS, muscleMass, timestamp, "GymLog demo"),
+            BodyMeasurement(BodyMetric.MUSCLE_PERCENTAGE, muscleMass / weight * 100.0, timestamp, "GymLog demo"),
+        )
+    }
+    return BodyDataSnapshot(measurements, now)
+}
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -33,7 +53,7 @@ class MainActivity : ComponentActivity() {
         setContent {
             var dataVersion by remember { mutableIntStateOf(0) }
             var accentColor by remember { mutableStateOf(repository.accentColor()) }
-            var bodyData by remember { mutableStateOf(BodyDataSnapshot()) }
+            var bodyData by remember { mutableStateOf(if (BuildConfig.DEBUG && intent.getBooleanExtra("demo_body_data", false)) demoBodyData() else BodyDataSnapshot()) }
             var healthSyncStatus by remember { mutableStateOf("Not synced yet.") }
             val healthGateway = remember { HealthConnectGateway(this) }
             val scope = rememberCoroutineScope()
