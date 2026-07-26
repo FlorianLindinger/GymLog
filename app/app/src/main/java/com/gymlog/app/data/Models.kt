@@ -1,21 +1,29 @@
 package com.gymlog.app.data
 
+enum class ExerciseOrderGroup { MANUAL_TOP, AUTOMATIC, MANUAL_BOTTOM }
+
 data class Machine(
     val id: Long,
     val name: String,
     val titleNote: String,
     val notes: String,
     val pauseTime: String,
-    val chartWindow: String,
+    val chartWindow: ChartRange,
     val trailingAverage: Int,
-    val trackingMode: String,
+    val trackingMode: TrackingMode,
     val currentWeight: Double,
     val sortOrder: Int,
     val pinned: Boolean = false,
     val rankingPriority: Int = 0,
     val excludedFromAutoRanking: Boolean = false,
     val showTrend: Boolean = true,
-)
+) {
+    val orderGroup: ExerciseOrderGroup get() = when {
+        pinned -> ExerciseOrderGroup.MANUAL_TOP
+        excludedFromAutoRanking -> ExerciseOrderGroup.MANUAL_BOTTOM
+        else -> ExerciseOrderGroup.AUTOMATIC
+    }
+}
 
 enum class BodyArea(val label: String, val color: Long) {
     CHEST("Chest / Brust", 0xFFE6194B),
@@ -62,12 +70,6 @@ data class ProgressionSettings(
     val volumeMinimumIncreasePercent: Int = 5,
 )
 
-enum class ExerciseOrderingMode {
-    AUTOMATIC,
-    MIXED,
-    FIXED,
-}
-
 data class BackupSyncStatus(
     val automaticBackupEnabled: Boolean,
     val lastBackupAt: Long?,
@@ -112,7 +114,7 @@ data class HistorySet(
     val id: Long,
     val machineId: Long,
     val machineName: String,
-    val trackingMode: String,
+    val trackingMode: TrackingMode,
     val reps: Int,
     val weight: Double,
     val performedAt: Long,

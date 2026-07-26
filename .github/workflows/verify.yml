@@ -32,4 +32,6 @@ jobs:
 
       - name: Verify Compilation, Tests, Lint, and Debug APK
         working-directory: app
-        run: ./gradlew :app:compileDebugKotlin :app:testDebugUnitTest :app:lintDebug :app:assembleDebug --no-daemon
+        run: |
+          chmod +x gradlew
+          ./gradlew :app:compileDebugKotlin :app:testDebugUnitTest :app:lintDebug :app:assembleDebug --no-daemon

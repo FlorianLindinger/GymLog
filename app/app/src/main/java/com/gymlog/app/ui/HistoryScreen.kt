@@ -36,6 +36,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import com.gymlog.app.data.TrackingMode
 import com.gymlog.app.data.HistorySet
 import java.time.DayOfWeek
 import java.time.Instant
@@ -313,7 +314,7 @@ private fun ConfirmDeleteDialog(title: String, message: String, onDismiss: () ->
 
 @Composable
 fun EditSetDialog(
-    trackingMode: String,
+    trackingMode: TrackingMode,
     initialReps: Int,
     initialWeight: Double,
     title: String = "Edit Entry",
@@ -332,11 +333,11 @@ fun EditSetDialog(
         title = { Text(title) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                if (trackingMode != "DURATION") OutlinedTextField(reps, { reps = it.filter(Char::isDigit) }, label = { Text(if (trackingMode == "STRENGTH") "Level" else "Reps") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), singleLine = true)
-                OutlinedTextField(weight, { weight = it.filter { char -> char.isDigit() || char == '.' || char == ',' } }, label = { Text(if (trackingMode == "WEIGHT") "Weight (kg)" else "Minutes") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal), singleLine = true)
+                if (trackingMode != TrackingMode.DURATION) OutlinedTextField(reps, { reps = it.filter(Char::isDigit) }, label = { Text(if (trackingMode == TrackingMode.STRENGTH) "Level" else "Reps") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), singleLine = true)
+                OutlinedTextField(weight, { weight = it.filter { char -> char.isDigit() || char == '.' || char == ',' } }, label = { Text(if (trackingMode == TrackingMode.WEIGHT) "Weight (kg)" else "Minutes") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal), singleLine = true)
             }
         },
-        confirmButton = { Button(onClick = { onSave(if (trackingMode == "DURATION") initialReps else parsedReps ?: 1, parsedWeight ?: 0.0) }, enabled = parsedWeight != null && parsedWeight >= 0 && (trackingMode == "DURATION" || parsedReps != null && parsedReps > 0)) { Text("Save") } },
+        confirmButton = { Button(onClick = { onSave(if (trackingMode == TrackingMode.DURATION) initialReps else parsedReps ?: 1, parsedWeight ?: 0.0) }, enabled = parsedWeight != null && parsedWeight >= 0 && (trackingMode == TrackingMode.DURATION || parsedReps != null && parsedReps > 0)) { Text("Save") } },
         dismissButton = { TextButton(onClick = requestDismiss) { Text("Cancel") } },
     )
     if (confirmDiscard) AlertDialog(
@@ -351,7 +352,7 @@ private fun formatVolume(volume: Double): String = if (volume >= 1000) String.fo
 
 private fun formatSessionTotals(sets: List<HistorySet>): String {
     val parts = mutableListOf<String>()
-    sets.filter { it.trackingMode == "WEIGHT" }.sumOf { it.volume }.takeIf { it > 0 }?.let { parts += formatVolume(it) }
+    sets.filter { it.trackingMode == TrackingMode.WEIGHT }.sumOf { it.volume }.takeIf { it > 0 }?.let { parts += formatVolume(it) }
     sets.filter { isDirectMetric(it.trackingMode) }.sumOf { it.weight }.takeIf { it > 0 }?.let { parts += "${formatHistoryAmount(it)} min" }
     return parts.joinToString(" · ").ifEmpty { "0" }
 }

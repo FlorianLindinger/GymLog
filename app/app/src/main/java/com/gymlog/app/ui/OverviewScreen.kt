@@ -2,10 +2,6 @@ package com.gymlog.app.ui
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.combinedClickable
-import androidx.compose.foundation.gestures.detectDragGestures
-import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
-import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -20,7 +16,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.AlertDialog
@@ -39,16 +35,13 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateListOf
-import androidx.compose.runtime.toMutableStateList
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
@@ -61,8 +54,9 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import android.widget.NumberPicker
+import com.gymlog.app.data.TrackingMode
 import com.gymlog.app.data.MachineSummary
-import com.gymlog.app.data.ExerciseOrderingMode
+import com.gymlog.app.data.ExerciseOrderGroup
 import com.gymlog.app.data.BodyArea
 import com.gymlog.app.data.ProgressionSettings
 import com.gymlog.app.data.SetRecord
@@ -92,7 +86,12 @@ fun OverviewScreen(
     onAdd: () -> Unit,
     onMenu: () -> Unit,
     onStats: () -> Unit,
+    onOrder: () -> Unit,
     onBody: () -> Unit,
+    listState: LazyListState,
+    showHidden: Boolean,
+    onShowHiddenChanged: (Boolean) -> Unit,
+    onTrainingHeader: () -> Unit,
     onEditPlanNotes: () -> Unit,
     areaFrequency: Map<BodyArea, Double>,
     onQuickSet: (MachineSummary, List<Int>) -> Unit,
@@ -100,14 +99,6 @@ fun OverviewScreen(
     onMetricChange: (MachineSummary, Double) -> Unit,
     onMetricChangeForSession: (MachineSummary, Double) -> Unit,
     progressionSettings: ProgressionSettings,
-    orderingMode: ExerciseOrderingMode,
-    onReorder: (List<Long>) -> Unit,
-    onSetPinned: (MachineSummary, Boolean) -> Unit,
-    onMovePinned: (MachineSummary, Int) -> Unit,
-    onHide: (MachineSummary) -> Unit,
-    onRankingChange: (MachineSummary, Int) -> Unit,
-    onRankingExcluded: (MachineSummary, Boolean) -> Unit,
-    onUnhide: (MachineSummary) -> Unit,
 ) {
     val zone = ZoneId.systemDefault()
     val now = System.currentTimeMillis()
@@ -116,27 +107,13 @@ fun OverviewScreen(
     val hasCurrentTraining = latestTrainingEntry?.let { trainingDate(it, zone) == todayTrainingDate } == true
     val trainingUnitCutoff = if (hasCurrentTraining) trainingDayStart(now, zone) else Long.MAX_VALUE
     val lastExerciseInUnit = mostRecentlyTrainedInUnit(machines, trainingUnitCutoff)
-    val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
-    val rankedMachines = remember(machines, orderingMode, hasCurrentTraining) {
-        rankOverviewMachines(machines, orderingMode, trainingUnitCutoff, lastExerciseInUnit)
+    val rankedMachines = remember(machines, hasCurrentTraining) {
+        rankOverviewMachines(machines, trainingUnitCutoff, lastExerciseInUnit)
     }
-    val orderedMachines = remember(rankedMachines) { rankedMachines.toMutableStateList() }
-    var draggedId by remember { mutableStateOf<Long?>(null) }
-    var dragOffset by remember { mutableFloatStateOf(0f) }
-    var reorderMode by remember { mutableStateOf(false) }
-    var showHidden by remember { mutableStateOf(false) }
     Box(modifier.fillMaxSize()) {
-        Column(Modifier.fillMaxSize().padding(bottom = 64.dp)) {
-            if (reorderMode) {
-                Text(
-                    if (orderingMode == ExerciseOrderingMode.FIXED) "Reordering Fixed Exercises" else "Reordering Pinned Exercises",
-                    modifier = Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.primaryContainer).padding(horizontal = 16.dp, vertical = 8.dp),
-                    style = MaterialTheme.typography.titleSmall,
-                    color = MaterialTheme.colorScheme.onPrimaryContainer,
-                )
-            }
-            TrainingDurationCard(machines, activePlanName, zone)
+        Column(Modifier.fillMaxSize().padding(bottom = 50.dp)) {
+            TrainingDurationCard(machines, activePlanName, zone, onTrainingHeader)
             if (activePlanNotesPinned && activePlanNotes.isNotBlank()) {
                 Card(
                     Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp).clickable(onClick = onEditPlanNotes),
@@ -165,10 +142,7 @@ fun OverviewScreen(
                 contentPadding = PaddingValues(horizontal = 8.dp, vertical = 6.dp),
                 verticalArrangement = Arrangement.spacedBy(6.dp),
             ) {
-                items(orderedMachines, key = { it.machine.id }, contentType = { "machine" }) { summary ->
-                    val id = summary.machine.id
-                    val reorderable = orderingMode == ExerciseOrderingMode.FIXED ||
-                        orderingMode == ExerciseOrderingMode.MIXED && summary.machine.pinned
+                items(rankedMachines, key = { it.machine.id }, contentType = { "machine" }) { summary ->
                     MachineCard(
                         summary, lastExerciseInUnit, trainingUnitCutoff, areaFrequency, onMachine, { machine, reps ->
                             val firstEntry = !hasCurrentTraining
@@ -183,12 +157,23 @@ fun OverviewScreen(
                     )
                 }
                 if (hiddenMachines.isNotEmpty()) {
-                    item { TextButton(onClick = { showHidden = !showHidden }, modifier = Modifier.fillMaxWidth()) { Text(if (showHidden) "Hide Hidden Exercises" else "Show hidden exercises") } }
+                    item {
+                        TextButton(
+                            onClick = {
+                                val reveal = !showHidden
+                                onShowHiddenChanged(reveal)
+                                if (reveal) scope.launch {
+                                    delay(80)
+                                    listState.animateScrollToItem(rankedMachines.size + 1)
+                                }
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                        ) { Text(if (showHidden) "Hide hidden exercises" else "Show hidden exercises") }
+                    }
                     if (showHidden) {
-                        val rankedHidden = rankOverviewMachines(hiddenMachines, orderingMode, trainingUnitCutoff, lastExerciseInUnit)
+                        val rankedHidden = rankOverviewMachines(hiddenMachines, trainingUnitCutoff, lastExerciseInUnit)
                         items(rankedHidden, key = { "hidden_${it.machine.id}" }) { summary ->
                             MachineCard(summary, lastExerciseInUnit, trainingUnitCutoff, areaFrequency, onMachine, { machine, reps -> onQuickSet(machine, reps) }, onDeleteCurrentExerciseSets, onMetricChange, onMetricChangeForSession, progressionSettings, Modifier, {}, false, false)
-                            TextButton(onClick = { onUnhide(summary) }, modifier = Modifier.fillMaxWidth()) { Text("Unhide exercise") }
                         }
                     }
                 }            }
@@ -196,23 +181,15 @@ fun OverviewScreen(
         }
         Row(
             modifier = Modifier.align(Alignment.BottomCenter)
-                .fillMaxWidth().background(MaterialTheme.colorScheme.surface).padding(8.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                .fillMaxWidth().background(MaterialTheme.colorScheme.surface).padding(horizontal = 4.dp, vertical = 3.dp),
+            horizontalArrangement = Arrangement.spacedBy(3.dp),
         ) {
-                if (reorderMode) {
-                    Button(
-                        onClick = {
-                            onReorder(orderedMachines.map { it.machine.id })
-                            reorderMode = false
-                        },
-                        modifier = Modifier.fillMaxWidth(),
-                    ) { Text("Done") }
-                } else {
-                    FilledTonalButton(onClick = onBody, modifier = Modifier.weight(1f)) { OverviewButtonLabel("Body") }
-                    FilledTonalButton(onClick = onMenu, modifier = Modifier.weight(1f)) { OverviewButtonLabel("Menu") }
-                    FilledTonalButton(onClick = onStats, modifier = Modifier.weight(1f)) { OverviewButtonLabel("Stats") }
-                    FilledTonalButton(onClick = onAdd, modifier = Modifier.weight(1f)) { OverviewButtonLabel("+ Add") }
-                }
+                val compactPadding = PaddingValues(horizontal = 2.dp, vertical = 2.dp)
+                FilledTonalButton(onClick = onBody, modifier = Modifier.weight(1f), contentPadding = compactPadding) { OverviewButtonLabel("Body") }
+                FilledTonalButton(onClick = onMenu, modifier = Modifier.weight(1f), contentPadding = compactPadding) { OverviewButtonLabel("Menu") }
+                FilledTonalButton(onClick = onStats, modifier = Modifier.weight(1f), contentPadding = compactPadding) { OverviewButtonLabel("Stats") }
+                FilledTonalButton(onClick = onOrder, modifier = Modifier.weight(1f), contentPadding = compactPadding) { OverviewButtonLabel("Order") }
+                FilledTonalButton(onClick = onAdd, modifier = Modifier.weight(1f), contentPadding = compactPadding) { OverviewButtonLabel("+ Add") }
         }
     }
 
@@ -225,7 +202,7 @@ private fun OverviewButtonLabel(text: String) {
 }
 
 @Composable
-private fun TrainingDurationCard(machines: List<MachineSummary>, activePlanName: String, zone: ZoneId) {
+private fun TrainingDurationCard(machines: List<MachineSummary>, activePlanName: String, zone: ZoneId, onClick: () -> Unit) {
     var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
     val lifecycleState by LocalLifecycleOwner.current.lifecycle.currentStateAsState()
     val isForeground = lifecycleState.isAtLeast(Lifecycle.State.RESUMED)
@@ -243,7 +220,7 @@ private fun TrainingDurationCard(machines: List<MachineSummary>, activePlanName:
     val firstMode = firstSet?.let { set -> machines.firstOrNull { it.machine.id == set.machineId }?.machine?.trackingMode }
     val estimatedLeadMillis = when {
         firstSet == null -> 0L
-        isDirectMetric(firstMode ?: "") -> (firstSet.weight * 60_000L).toLong()
+        isDirectMetric(firstMode ?: TrackingMode.WEIGHT) -> (firstSet.weight * 60_000L).toLong()
         else -> sessionSets.size * 3L * 60_000L
     }
     val estimatedStart = first?.minus(estimatedLeadMillis)
@@ -253,7 +230,7 @@ private fun TrainingDurationCard(machines: List<MachineSummary>, activePlanName:
     val completedExercises = machines.count { summary -> summary.recentSets.any { first != null && it.performedAt >= first } }
 
     Card(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick),
         shape = RoundedCornerShape(16.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
         elevation = CardDefaults.cardElevation(defaultElevation = 5.dp),
@@ -275,12 +252,13 @@ private fun TrainingDurationCard(machines: List<MachineSummary>, activePlanName:
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                Text(
-                    "$completedExercises/${machines.size} exercises",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = if (completedExercises == machines.size) Color(0xFF2E7D32) else MaterialTheme.colorScheme.tertiary,
-                )
             }
+            Text(
+                "$completedExercises/${machines.size} exercises",
+                modifier = Modifier.padding(horizontal = 8.dp),
+                style = MaterialTheme.typography.labelSmall,
+                color = if (completedExercises == machines.size) Color(0xFF2E7D32) else MaterialTheme.colorScheme.tertiary,
+            )
             Column(horizontalAlignment = Alignment.End) {
                 Text(
                     formatElapsed(durationMillis),
@@ -289,17 +267,18 @@ private fun TrainingDurationCard(machines: List<MachineSummary>, activePlanName:
                     color = MaterialTheme.colorScheme.onPrimaryContainer,
                 )
                 Text(
-                    if (isActive) "● Live" else "✓ Completed",
+                    when {
+                        last == null -> "Not started"
+                        isActive -> "● Live"
+                        else -> "✓ Completed ${completedTrainingDateLabel(trainingDate(last, zone), trainingDate(now, zone))}"
+                    },
                     style = MaterialTheme.typography.labelSmall,
-                    color = if (isActive) MaterialTheme.colorScheme.primary else Color(0xFF2E7D32),
+                    color = when {
+                        last == null -> MaterialTheme.colorScheme.onSurfaceVariant
+                        isActive -> MaterialTheme.colorScheme.primary
+                        else -> Color(0xFF2E7D32)
+                    },
                 )
-                if (!isActive && last != null) {
-                    Text(
-                        "Completed ${completedTrainingDateLabel(trainingDate(last, zone), trainingDate(now, zone))}",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
             }
         }
     }
@@ -349,7 +328,7 @@ fun ProgressionSettingsDialog(current: ProgressionSettings, onDismiss: () -> Uni
     )
 }
 private fun progressionWarning(summary: MachineSummary, settings: ProgressionSettings): String? {
-    if (summary.machine.trackingMode != "WEIGHT" || summary.recentSets.isEmpty()) return null
+    if (summary.machine.trackingMode != TrackingMode.WEIGHT || summary.recentSets.isEmpty()) return null
     val reference = summary.weightIncreases().maxOfOrNull { it.changedAt } ?: summary.weightChanges.minOfOrNull { it.changedAt }
     val weeksWithoutIncrease = reference?.let { ((System.currentTimeMillis() - it).coerceAtLeast(0L) / 604_800_000L).toInt() } ?: 0
     val zone = ZoneId.systemDefault()
@@ -400,6 +379,8 @@ private fun MachineCard(
         clash != null -> Color(0xFFFBC02D)
         else -> Color(0xFF43A047)
     }
+    val metricInHeader = summary.machine.titleNote.isBlank() ||
+        summary.machine.name.length + summary.machine.titleNote.length <= 30
     Card(
         modifier = modifier.fillMaxWidth().clickable(enabled = !isReordering) { onMachine(summary.machine.id) },
         elevation = CardDefaults.cardElevation(defaultElevation = if (isDragging) 10.dp else 1.dp),
@@ -432,6 +413,14 @@ private fun MachineCard(
                     if (summary.machine.titleNote.isNotBlank()) {
                         Text(" · ${summary.machine.titleNote}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
+                }
+                if (metricInHeader) {
+                    Text(
+                        formatMetric(summary.machine.currentWeight, summary.machine.trackingMode),
+                        modifier = Modifier.clickable(enabled = !isReordering) { changeMetric = true }.padding(horizontal = 6.dp, vertical = 2.dp),
+                        style = MaterialTheme.typography.titleSmall,
+                        color = sessionTrendColor(summary),
+                    )
                 }
             }
             progressionWarning(summary, progressionSettings)?.let { warning ->
@@ -467,12 +456,14 @@ private fun MachineCard(
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
-                Text(
-                    formatMetric(summary.machine.currentWeight, summary.machine.trackingMode),
-                    modifier = Modifier.clickable(enabled = !isReordering) { changeMetric = true }.padding(horizontal = 6.dp, vertical = 4.dp),
-                    style = MaterialTheme.typography.titleSmall,
-                    color = sessionTrendColor(summary),
-                )
+                if (!metricInHeader) {
+                    Text(
+                        formatMetric(summary.machine.currentWeight, summary.machine.trackingMode),
+                        modifier = Modifier.clickable(enabled = !isReordering) { changeMetric = true }.padding(horizontal = 6.dp, vertical = 2.dp),
+                        style = MaterialTheme.typography.titleSmall,
+                        color = sessionTrendColor(summary),
+                    )
+                }
             }
         }
     }
@@ -533,7 +524,6 @@ private fun mostRecentlyTrainedInUnit(
 
 private fun rankOverviewMachines(
     machines: List<MachineSummary>,
-    mode: ExerciseOrderingMode,
     currentTrainingCutoff: Long,
     current: MachineSummary?,
 ): List<MachineSummary> {
@@ -547,28 +537,26 @@ private fun rankOverviewMachines(
     val trainingCounts = machines.associate { summary ->
         summary.machine.id to summary.recentSets.map { it.performedDate(zone) }.distinct().size
     }
-    val automatic = machines.sortedWith(
+    val currentFirst = listOfNotNull(current)
+    val manualTop = machines.filter {
+        it.machine.id != currentId && it.machine.orderGroup == ExerciseOrderGroup.MANUAL_TOP
+    }.sortedBy { it.machine.sortOrder }
+    val automatic = machines.filter {
+        it.machine.id != currentId && it.machine.orderGroup == ExerciseOrderGroup.AUTOMATIC
+    }.sortedWith(
         compareBy<MachineSummary>(
-            { if (it.machine.id == currentId) 0 else 1 },
-            { it.machine.id != currentId && it.recentSets.any { set -> set.performedAt >= currentTrainingCutoff } },
-            { if (current == null || it.machine.id == currentId) -1.0 else strongestClash(it, current) ?: 0.0 },
+            { it.recentSets.any { set -> set.performedAt >= currentTrainingCutoff } },
+            { if (current == null) -1.0 else strongestClash(it, current) ?: 0.0 },
             { previousTrainingDate != null && it.recentSets.any { set -> set.performedDate(zone) == previousTrainingDate } },
-            { it.machine.excludedFromAutoRanking },
             { it.machine.rankingPriority },
             { trainingCounts[it.machine.id] ?: 0 },
             { it.machine.name.lowercase(Locale.getDefault()) },
         ),
     )
-    val currentFirst = listOfNotNull(current)
-    return when (mode) {
-        ExerciseOrderingMode.AUTOMATIC -> automatic
-        ExerciseOrderingMode.FIXED -> currentFirst + machines
-            .filter { it.machine.id != currentId }
-            .sortedBy { it.machine.sortOrder }
-        ExerciseOrderingMode.MIXED -> currentFirst +
-            machines.filter { it.machine.pinned && it.machine.id != currentId }.sortedBy { it.machine.sortOrder } +
-            automatic.filter { !it.machine.pinned && it.machine.id != currentId }
-    }
+    val manualBottom = machines.filter {
+        it.machine.id != currentId && it.machine.orderGroup == ExerciseOrderGroup.MANUAL_BOTTOM
+    }.sortedBy { it.machine.sortOrder }
+    return currentFirst + manualTop + automatic + manualBottom
 }
 
 private fun strongestClash(current: MachineSummary, previous: MachineSummary): Double? {
@@ -611,14 +599,14 @@ private fun sessionPatternText(summary: MachineSummary): AnnotatedString {
     fun trend(index: Int): Int {
         val newer = batches.getOrNull(index)?.firstOrNull() ?: return 0
         val older = batches.getOrNull(index + 1)?.firstOrNull() ?: return 0
-        val newerMetric = if (summary.machine.trackingMode == "STRENGTH") newer.reps.toDouble() else newer.weight
-        val olderMetric = if (summary.machine.trackingMode == "STRENGTH") older.reps.toDouble() else older.weight
+        val newerMetric = if (summary.machine.trackingMode == TrackingMode.STRENGTH) newer.reps.toDouble() else newer.weight
+        val olderMetric = if (summary.machine.trackingMode == TrackingMode.STRENGTH) older.reps.toDouble() else older.weight
         return newerMetric.compareTo(olderMetric)
     }
     fun AnnotatedString.Builder.appendTrendMarker(trend: Int) {
         when {
-            trend > 0 -> withStyle(SpanStyle(color = Color(0xFF66BB6A), fontWeight = FontWeight.Bold)) { append("|") }
-            trend < 0 -> withStyle(SpanStyle(color = Color(0xFFEF5350), fontWeight = FontWeight.Bold)) { append("|") }
+            trend > 0 -> withStyle(SpanStyle(color = Color(0xFF66BB6A), fontWeight = FontWeight.Black)) { append("|") }
+            trend < 0 -> withStyle(SpanStyle(color = Color(0xFFEF5350), fontWeight = FontWeight.Black)) { append("|") }
             else -> append("|")
         }
     }
@@ -676,7 +664,7 @@ fun QuickTrainingDialog(initialMinutes: Int, isChange: Boolean = false, onDismis
 }
 
 private fun sessionTrendColor(summary: MachineSummary): Color {
-    if (summary.machine.trackingMode == "DURATION") return Color.White
+    if (summary.machine.trackingMode == TrackingMode.DURATION) return Color.White
     val zone = ZoneId.systemDefault()
     val latest = summary.weightChanges.firstOrNull() ?: return Color.White
     val before = summary.weightChanges.getOrNull(1) ?: return Color.White
@@ -763,10 +751,10 @@ fun QuickRepDialog(
 }
 
 @Composable
-fun AddMachineDialog(onDismiss: () -> Unit, onAdd: (String, Double, String, String) -> Unit) {
+fun AddMachineDialog(onDismiss: () -> Unit, onAdd: (String, Double, TrackingMode, String) -> Unit) {
     var name by remember { mutableStateOf("") }
     var weight by remember { mutableStateOf("") }
-    var trackingMode by remember { mutableStateOf("WEIGHT") }
+    var trackingMode by remember { mutableStateOf(TrackingMode.WEIGHT) }
     var note by remember { mutableStateOf("") }
     val parsedWeight = weight.replace(',', '.').toDoubleOrNull()
     AlertDialog(
@@ -782,10 +770,10 @@ fun AddMachineDialog(onDismiss: () -> Unit, onAdd: (String, Double, String, Stri
                     singleLine = true,
                 )
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    FilterChip(selected = trackingMode == "WEIGHT", onClick = { trackingMode = "WEIGHT" }, label = { Text("kg") })
-                    FilterChip(selected = trackingMode == "STRENGTH", onClick = { trackingMode = "STRENGTH" }, label = { Text("Level") })
+                    FilterChip(selected = trackingMode == TrackingMode.WEIGHT, onClick = { trackingMode = TrackingMode.WEIGHT }, label = { Text("kg") })
+                    FilterChip(selected = trackingMode == TrackingMode.STRENGTH, onClick = { trackingMode = TrackingMode.STRENGTH }, label = { Text("Level") })
                 }
-                if (trackingMode == "STRENGTH") {
+                if (trackingMode == TrackingMode.STRENGTH) {
                     Text(
                         "Trainings for Level exercises are recorded in minutes.",
                         style = MaterialTheme.typography.bodySmall,
@@ -796,7 +784,7 @@ fun AddMachineDialog(onDismiss: () -> Unit, onAdd: (String, Double, String, Stri
                         value = weight,
                         onValueChange = { weight = it.filter { char -> char.isDigit() || char == '.' || char == ',' } },
                         label = { Text(currentMetricLabel(trackingMode)) },
-                        keyboardOptions = KeyboardOptions(keyboardType = if (trackingMode == "WEIGHT") KeyboardType.Decimal else KeyboardType.Number),
+                        keyboardOptions = KeyboardOptions(keyboardType = if (trackingMode == TrackingMode.WEIGHT) KeyboardType.Decimal else KeyboardType.Number),
                         singleLine = true,
                     )
             }
@@ -826,32 +814,32 @@ private fun formatElapsed(totalMillis: Long): String {
     return if (hours > 0) "${hours}h${minutes.toString().padStart(2, '0')}" else "${minutes}m"
 }
 
-fun isDirectMetric(trackingMode: String): Boolean = trackingMode == "STRENGTH" || trackingMode == "DURATION"
+fun isDirectMetric(trackingMode: TrackingMode): Boolean = trackingMode == TrackingMode.STRENGTH || trackingMode == TrackingMode.DURATION
 
-fun metricName(trackingMode: String): String = when (trackingMode) {
-    "WEIGHT" -> "weight"
-    "DURATION" -> "duration"
+fun metricName(trackingMode: TrackingMode): String = when (trackingMode) {
+    TrackingMode.WEIGHT -> "weight"
+    TrackingMode.DURATION -> "duration"
     else -> "level"
 }
 
-fun metricTitle(trackingMode: String): String = metricName(trackingMode).replaceFirstChar { it.uppercase() }
+fun metricTitle(trackingMode: TrackingMode): String = metricName(trackingMode).replaceFirstChar { it.uppercase() }
 
-fun currentMetricLabel(trackingMode: String): String = when (trackingMode) {
-    "WEIGHT" -> "Current Weight (kg)"
-    "DURATION" -> "Current Duration (min)"
+fun currentMetricLabel(trackingMode: TrackingMode): String = when (trackingMode) {
+    TrackingMode.WEIGHT -> "Current Weight (kg)"
+    TrackingMode.DURATION -> "Current Duration (min)"
     else -> "Current Level"
 }
 
 private fun formatNumber(value: Double): String = if (value % 1.0 == 0.0) value.toInt().toString() else String.format(Locale.US, "%.1f", value)
 
-fun formatMetric(value: Double, trackingMode: String): String = when (trackingMode) {
-    "WEIGHT" -> formatWeight(value)
-    "DURATION" -> "${formatNumber(value)} min"
+fun formatMetric(value: Double, trackingMode: TrackingMode): String = when (trackingMode) {
+    TrackingMode.WEIGHT -> formatWeight(value)
+    TrackingMode.DURATION -> "${formatNumber(value)} min"
     else -> "Level ${formatNumber(value)}"
 }
 
-fun formatTrainingEntry(value: Double, trackingMode: String, level: Int? = null): String = when (trackingMode) {
-    "STRENGTH" -> "Level ${(level ?: 0).toString().padStart(2)} · ${formatNumber(value).padStart(3)} min"
-    "DURATION" -> "${formatNumber(value)} min"
+fun formatTrainingEntry(value: Double, trackingMode: TrackingMode, level: Int? = null): String = when (trackingMode) {
+    TrackingMode.STRENGTH -> "Level ${(level ?: 0).toString().padStart(2)} · ${formatNumber(value).padStart(3)} min"
+    TrackingMode.DURATION -> "${formatNumber(value)} min"
     else -> formatMetric(value, trackingMode)
 }

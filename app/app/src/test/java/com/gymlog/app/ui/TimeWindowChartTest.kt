@@ -1,5 +1,6 @@
 package com.gymlog.app.ui
 
+import androidx.compose.ui.graphics.Color
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
@@ -44,5 +45,25 @@ class TimeWindowChartTest {
 
         assertEquals(4_000L, range.start)
         assertEquals(6_000L, range.end)
+    }
+
+    @Test
+    fun trendUsesOnlySelectedIntervalAndReachesBothEdges() {
+        val day = 86_400_000L
+        val trend = trendTimeSeries(
+            points = listOf(
+                TimeValue(0L, 100.0),
+                TimeValue(10L * day, 0.0),
+                TimeValue(11L * day, 1.0),
+            ),
+            color = Color.Black,
+            axis = PlotAxis.LEFT,
+            window = ChartWindow(day, endMillis = 11L * day, key = "1W"),
+        )
+
+        assertEquals(10L * day, trend.points.first().timestamp)
+        assertEquals(11L * day, trend.points.last().timestamp)
+        assertEquals(0.0, trend.points.first().value, 0.0001)
+        assertEquals(1.0, trend.points.last().value, 0.0001)
     }
 }

@@ -20,7 +20,7 @@ GymLog is built with Kotlin, Jetpack Compose, SQLite, and Health Connect. Workou
 
 - Convenient weight-, level-, and duration-based workout logging
 - Multiple independent training plans
-- Automatic, mixed pinned, and fully fixed exercise ordering
+- Per-exercise Manual top, Auto sorted, and Manual bottom ordering
 - Editable history, progression warnings, and live-training status
 - Interval charts with gridlines, rolling averages, linear fits, and targets
 - Body trends for weight, body fat, and lean body mass

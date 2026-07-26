@@ -1,5 +1,6 @@
 package com.gymlog.app.ui
 
+import com.gymlog.app.data.ChartRange
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -59,7 +60,6 @@ private val bodyMetricDisplayOrder = listOf(
 )
 
 private data class BodyFit(
-    val values: List<Double>,
     val slopePerDay: Double,
     val fittedLast: Double,
 )
@@ -74,7 +74,7 @@ fun BodyOverviewScreen(
 ) {
     val context = LocalContext.current
     val preferences = remember { context.getSharedPreferences("body_graph_settings", 0) }
-    var window by remember { mutableStateOf(preferences.getString("window", "6M") ?: "6M") }
+    var window by remember { mutableStateOf(ChartRange.fromStorage(preferences.getString("window", ChartRange.SIX_MONTHS.storageValue))) }
     var showTrend by remember { mutableStateOf(preferences.getBoolean("show_trend", true)) }
     var showBodyMenu by remember { mutableStateOf(false) }
     var showCustomRange by remember { mutableStateOf(false) }
@@ -96,13 +96,13 @@ fun BodyOverviewScreen(
     val newestMeasurement = snapshot.measurements.maxOfOrNull { it.measuredAt } ?: System.currentTimeMillis()
     val oldestMeasurement = snapshot.measurements.minOfOrNull { it.measuredAt }
     val bodyChartWindow = ChartWindow(
-        durationMillis = if (window == "CUSTOM") {
+        durationMillis = if (window == ChartRange.CUSTOM) {
             customStart?.let { start -> customEnd?.let { end -> (end - start).coerceAtLeast(1L) } }
         } else {
             chartWindowDuration(window)
         },
-        endMillis = if (window == "CUSTOM") customEnd else System.currentTimeMillis(),
-        startMillis = if (window == "CUSTOM") customStart else null,
+        endMillis = if (window == ChartRange.CUSTOM) customEnd else System.currentTimeMillis(),
+        startMillis = if (window == ChartRange.CUSTOM) customStart else null,
         key = "$window:$customStart:$customEnd",
     )
 
@@ -136,7 +136,7 @@ fun BodyOverviewScreen(
                     showTrend = showTrend,
                     onWindowSelected = { preset ->
                         window = preset
-                        preferences.edit().putString("window", preset).apply()
+                        preferences.edit().putString("window", preset.storageValue).apply()
                     },
                     onCustomSelected = { showCustomRange = true },
                     onTrendSelected = {
@@ -187,14 +187,14 @@ fun BodyOverviewScreen(
         val now = System.currentTimeMillis()
         CustomBodyRangeDialog(
             maxTimestamp = now,
-            initialStart = customStart ?: bodyWindowStart("1M", now, oldestMeasurement),
+            initialStart = customStart ?: bodyWindowStart(ChartRange.ONE_MONTH, now, oldestMeasurement),
             initialEnd = customEnd ?: now,
             onDismiss = { showCustomRange = false },
             onSave = { start, end ->
                 customStart = start
                 customEnd = end
-                window = "CUSTOM"
-                preferences.edit().putLong("custom_start", start).putLong("custom_end", end).putString("window", "CUSTOM").apply()
+                window = ChartRange.CUSTOM
+                preferences.edit().putLong("custom_start", start).putLong("custom_end", end).putString("window", ChartRange.CUSTOM.storageValue).apply()
                 showCustomRange = false
             },
         )
@@ -219,9 +219,6 @@ private fun BodyMetricCard(
         sorted.filter { it.measuredAt in range.start..range.end }
     }
     val fit = bodyLinearFit(intervalValues)
-    val fitPoints = fit.values.mapIndexed { index, value ->
-        TimeValue(intervalValues[index].measuredAt, value)
-    }
     val latest = sorted.lastOrNull()
     val targetEta = settings.target?.let { target ->
         ((target - fit.fittedLast) / fit.slopePerDay).takeIf {
@@ -231,6 +228,12 @@ private fun BodyMetricCard(
     val primary = MaterialTheme.colorScheme.primary
     val fitColor = MaterialTheme.colorScheme.tertiary
     val targetColor = Color(0xFF66BB6A)
+    val fitPoints = trendTimeSeries(
+        intervalValues.map { TimeValue(it.measuredAt, it.value) },
+        fitColor,
+        PlotAxis.LEFT,
+        window,
+    ).points
     Card(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(horizontal = 6.dp, vertical = 3.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -250,7 +253,7 @@ private fun BodyMetricCard(
             }
             if (showTrend && intervalValues.size >= 2) {
                 Text(
-                    "Linear fit: ${String.format(Locale.US, "%+.2f", fit.slopePerDay * 30.44)} ${metric.unit} / month",
+                    "Linear fit: ${String.format(Locale.US, "%+.2f", fit.slopePerDay * 30.44)} ${metric.unit}/month",
                     color = fitColor,
                     style = MaterialTheme.typography.bodySmall,
                 )
@@ -405,17 +408,17 @@ private fun BodyChartSettingsDialog(
     )
 }
 private fun bodyLinearFit(values: List<BodyMeasurement>): BodyFit {
-    if (values.size < 2) return BodyFit(values.map { it.value }, 0.0, values.lastOrNull()?.value ?: 0.0)
+    if (values.size < 2) return BodyFit(0.0, values.lastOrNull()?.value ?: 0.0)
     val origin = values.first().measuredAt
     val x = values.map { (it.measuredAt - origin) / DAY_MILLIS.toDouble() }
     val meanX = x.average()
     val meanY = values.map { it.value }.average()
     val denominator = x.sumOf { (it - meanX) * (it - meanX) }
-    if (denominator == 0.0) return BodyFit(values.map { it.value }, 0.0, values.last().value)
+    if (denominator == 0.0) return BodyFit(0.0, values.last().value)
     val slope = values.indices.sumOf { (x[it] - meanX) * (values[it].value - meanY) } / denominator
     val intercept = meanY - slope * meanX
     val fitted = x.map { intercept + slope * it }
-    return BodyFit(fitted, slope, fitted.last())
+    return BodyFit(slope, fitted.last())
 }
 
 private fun formatBodyEta(days: Double): String {
@@ -431,23 +434,24 @@ private fun formatBodyEta(days: Double): String {
         if (remainingDays > 0 && isEmpty()) add("$remainingDays day${if (remainingDays == 1L) "" else "s"}")
     }.take(2).joinToString(" ")
 }
-private fun bodyWindowStart(window: String, newest: Long, oldest: Long?): Long {
-    val days = when (window) {
-        "1W" -> 7L
-        "2W" -> 14L
-        "3W" -> 21L
-        "1M" -> 30L
-        "3M" -> 90L
-        "6M" -> 182L
-        "1Y" -> 365L
-        "3Y" -> 1_095L
-        else -> null
-    }
-    return days?.let { newest - it * DAY_MILLIS } ?: (oldest ?: newest - DAY_MILLIS)
-}
+private fun bodyWindowStart(window: ChartRange, newest: Long, oldest: Long?): Long =
+    chartWindowDuration(window)?.let { newest - it } ?: (oldest ?: newest - DAY_MILLIS)
 
-private fun formatBodySyncTime(timestamp: Long): String =
-    Instant.ofEpochMilli(timestamp).atZone(ZoneId.systemDefault()).format(DateTimeFormatter.ofPattern("d MMM yyyy, HH:mm"))
+private fun formatBodySyncTime(timestamp: Long): String {
+    val zone = ZoneId.systemDefault()
+    val synced = Instant.ofEpochMilli(timestamp).atZone(zone)
+    val today = LocalDate.now(zone)
+    val dayLabel = when (synced.toLocalDate()) {
+        today -> "Today"
+        today.minusDays(1) -> "Yesterday"
+        else -> if (synced.toLocalDate().isAfter(today.minusDays(7))) {
+            synced.format(DateTimeFormatter.ofPattern("EEEE", Locale.ENGLISH))
+        } else {
+            synced.format(DateTimeFormatter.ofPattern("d MMM yyyy", Locale.ENGLISH))
+        }
+    }
+    return "$dayLabel, ${synced.format(DateTimeFormatter.ofPattern("HH:mm"))}"
+}
 private fun formatBodyValue(value: Double): String =
     if (value % 1.0 == 0.0) value.toInt().toString() else String.format(Locale.US, "%.1f", value)
 

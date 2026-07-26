@@ -8,8 +8,13 @@ automatically, so it can also be launched from another working directory.
 - `build.bat` builds a debug APK and copies it to
   `app\artifacts\debug\app-debug.apk`.
 - `verify.bat` compiles, tests, lints, assembles, and checks Git whitespace.
-- `release.bat VERSION` verifies the project and produces signed APK/AAB
-  artifacts and checksums.
+- `release\release_minor.bat` changes `x.y` to `x.(y+1)`, builds, signs, tags,
+  pushes, and copies the release assets.
+- `release\release_major.bat` changes `x.y` to `(x+1).0` and performs the same
+  flow.
+- `release\release_no_bump.bat` releases the version already in Gradle. All
+  three require a clean `main` branch and copy assets to
+  `scripts\windows\release\releases\VERSION`.
 
 ## Phone and debugging tools
 
@@ -31,6 +36,8 @@ be run directly:
 
 - `helpers\android_env.bat` locates Java, the Android SDK, and ADB, and keeps
   disposable Gradle output outside the repository.
+- helpers\release.bat builds, signs, and tags an explicit release version.
+- helpers\release_version.ps1 implements the shared version bump, copy, and push flow.
 - `helpers\google_drive_sync_status.ps1` performs a short, bounded query for a
   Windows per-file sync status.
 

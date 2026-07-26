@@ -30,6 +30,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import com.gymlog.app.data.ChartRange
+import com.gymlog.app.data.TrackingMode
 import com.gymlog.app.data.HistorySet
 import com.gymlog.app.data.BodyArea
 import com.gymlog.app.data.MachineSummary
@@ -49,15 +51,15 @@ fun StatsScreen(
     modifier: Modifier = Modifier,
     onHistory: () -> Unit,
 ) {
-    var window by remember { mutableStateOf("3M") }
+    var window by remember { mutableStateOf(ChartRange.THREE_MONTHS) }
     var showTrend by remember { mutableStateOf(true) }
     var showCustomRange by remember { mutableStateOf(false) }
     var customStart by remember { mutableStateOf<Long?>(null) }
     var customEnd by remember { mutableStateOf<Long?>(null) }
-    val cutoff = if (window == "CUSTOM") customStart else statsCutoff(window)
+    val cutoff = if (window == ChartRange.CUSTOM) customStart else statsCutoff(window)
     val visible = history.filter {
         (cutoff == null || it.performedAt >= cutoff) &&
-            (window != "CUSTOM" || customEnd == null || it.performedAt <= customEnd!!)
+            (window != ChartRange.CUSTOM || customEnd == null || it.performedAt <= customEnd!!)
     }
     val zone = ZoneId.systemDefault()
     val sessions = visible.groupBy { trainingDate(it.performedAt, zone) }.toSortedMap()
@@ -90,7 +92,7 @@ fun StatsScreen(
         cutoff != null -> ((System.currentTimeMillis() - cutoff) / 604_800_000.0).coerceAtLeast(1.0)
         else -> ((visible.maxOf { it.performedAt } - visible.minOf { it.performedAt }) / 604_800_000.0).coerceAtLeast(1.0)
     }
-    val weightMachines = machines.filter { it.machine.trackingMode == "WEIGHT" }
+    val weightMachines = machines.filter { it.machine.trackingMode == TrackingMode.WEIGHT }
     val allIncreases = weightMachines.flatMap { it.weightIncreases() }
     val increases = allIncreases.filter { cutoff == null || it.changedAt >= cutoff }
     val increaseWeeksByDate = allIncreases.groupingBy {
@@ -145,12 +147,12 @@ fun StatsScreen(
     val newestEntry = history.maxOfOrNull { it.performedAt } ?: System.currentTimeMillis()
     val oldestEntry = history.minOfOrNull { it.performedAt } ?: newestEntry - 30L * 86_400_000L
     val statsChartWindow = ChartWindow(
-        durationMillis = if (window == "CUSTOM") {
+        durationMillis = if (window == ChartRange.CUSTOM) {
             customStart?.let { start -> customEnd?.let { end -> (end - start).coerceAtLeast(1L) } }
         } else chartWindowDuration(window),
-        endMillis = if (window == "CUSTOM") customEnd else System.currentTimeMillis(),
-        startMillis = if (window == "CUSTOM") customStart else null,
-        key = window,
+        endMillis = if (window == ChartRange.CUSTOM) customEnd else System.currentTimeMillis(),
+        startMillis = if (window == ChartRange.CUSTOM) customStart else null,
+        key = window.storageValue,
     )
     fun datedPoints(dates: List<LocalDate>, values: List<Double>): List<TimeValue> =
         dates.zip(values).map { (date, value) -> TimeValue(date.atStartOfDay(zone).toInstant().toEpochMilli(), value) }
@@ -247,7 +249,7 @@ fun StatsScreen(
             onSave = { start, end ->
                 customStart = start
                 customEnd = end
-                window = "CUSTOM"
+                window = ChartRange.CUSTOM
                 showCustomRange = false
             },
         )
@@ -343,7 +345,7 @@ private fun StatsChart(
             val primary = MaterialTheme.colorScheme.primary
             TimeWindowChart(
                 series = listOf(TimeSeries(points, primary, strokeWidth = 4f, pointRadius = 5f)) +
-                    if (showTrend) listOf(trendTimeSeries(points, primary, PlotAxis.LEFT)) else emptyList(),
+                    if (showTrend) listOf(trendTimeSeries(points, primary, PlotAxis.LEFT, window)) else emptyList(),
                 window = window,
                 leftColor = primary,
                 formatLeft = ::formatStatsAxisValue,
@@ -355,18 +357,7 @@ private fun StatsChart(
 
 private fun formatStatsAxisValue(value: Double): String = if (value % 1.0 == 0.0) value.toInt().toString() else String.format(Locale.US, "%.1f", value)
 
-private fun statsCutoff(window: String): Long? {
-    val days = when (window) {
-        "1W" -> 7L
-        "1M" -> 30L
-        "3M" -> 90L
-        "6M" -> 182L
-        "1Y" -> 365L
-        "2Y" -> 730L
-        "3Y" -> 1_095L
-        else -> return null
-    }
-    return Instant.now().minus(Duration.ofDays(days)).toEpochMilli()
-}
+private fun statsCutoff(window: ChartRange): Long? =
+    chartWindowDuration(window)?.let { duration -> System.currentTimeMillis() - duration }
 
 private fun Collection<Double>.averageOrZero(): Double = if (isEmpty()) 0.0 else average()

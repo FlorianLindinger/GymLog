@@ -1,18 +1,20 @@
 @echo off
 setlocal EnableExtensions
 set "SCRIPT_DIR=%~dp0"
-for %%I in ("%SCRIPT_DIR%..\..") do set "REPO_ROOT=%%~fI"
+for %%I in ("%SCRIPT_DIR%..\..\..") do set "REPO_ROOT=%%~fI"
 set "APP_ROOT=%REPO_ROOT%\app"
 cd /d "%APP_ROOT%"
 
 if "%~1"=="" (
-    echo Usage: scripts\windows\release.bat VERSION
-    echo Example: scripts\windows\release.bat 1.0.0
+    echo Usage: scripts\windows\helpers\release.bat VERSION [--create-tag]
+    echo Example: scripts\windows\helpers\release.bat 1.0
     exit /b 1
 )
 
 set "VERSION=%~1"
 if /i "%VERSION:~0,1%"=="v" set "VERSION=%VERSION:~1%"
+set "CREATE_TAG="
+if /i "%~2"=="--create-tag" set "CREATE_TAG=y"
 
 set "CURRENT_VERSION="
 for /f "tokens=3" %%V in ('findstr /C:"versionName = " app\build.gradle.kts') do set "CURRENT_VERSION=%%~V"
@@ -44,10 +46,10 @@ if not exist "%GYMLOG_KEYSTORE_FILE%" (
     exit /b 1
 )
 
-call "%SCRIPT_DIR%helpers\android_env.bat"
+call "%SCRIPT_DIR%android_env.bat"
 if errorlevel 1 exit /b 1
 
-call "%SCRIPT_DIR%verify.bat"
+call "%SCRIPT_DIR%..\verify.bat"
 if errorlevel 1 exit /b 1
 
 echo Building signed release APK and Android App Bundle...
@@ -101,7 +103,7 @@ echo APK:      %APK%
 echo AAB:      %AAB%
 echo Checksums: %CHECKSUMS%
 echo.
-set /p CREATE_TAG="Create local Git tag v%VERSION% now? [y/N] "
+if not defined CREATE_TAG set /p CREATE_TAG="Create local Git tag v%VERSION% now? [y/N] "
 if /i "%CREATE_TAG%"=="y" (
     git tag -a "v%VERSION%" -m "GymLog v%VERSION%"
     if errorlevel 1 exit /b 1
