@@ -1,17 +1,23 @@
+# Android Studio
 *.iml
-.gradle
+/app/.idea/
+/app/local.properties
+*.hprof
+
+# Gradle and build output
+.gradle/
 .kotlin/
-/local.properties
-/.idea
-/build
-/app/build
-/artifacts/
-/captures
-/screenshots
+/app/**/build/
+.externalNativeBuild/
+.cxx/
+
+# Locally generated artifacts
+/app/artifacts/
+/app/captures/
+/app/screenshots/
+google_drive_synced/*.apk
+
+# Signing and upload credentials
 *.jks
 *.keystore
 *.driveupload
-.externalNativeBuild
-.cxx
-local.properties
-google_drive_synced/*.apk

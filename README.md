@@ -1,7 +1,7 @@
 # GymLog
 
 <p align="center">
-  <img src="app/src/main/res/drawable-nodpi/ic_launcher_foreground.png" alt="GymLog app icon" width="180">
+  <img src="app/app/src/main/res/drawable-nodpi/ic_launcher_foreground.png" alt="GymLog app icon" width="180">
 </p>
 
 <p align="center">
@@ -26,8 +26,6 @@ GymLog is built with Kotlin, Jetpack Compose, SQLite, and Health Connect. Workou
 - Body trends for weight, body fat, and lean body mass
 - Optional, permission-controlled Health Connect import
 - Local JSON export and restore
-
-The ordering modes and their exact priority rules are documented in [Exercise Ordering](docs/exercise-ordering.md).
 
 ## Screenshots
 
@@ -55,7 +53,7 @@ Open the project in Android Studio, allow Gradle to sync, and run the `app` conf
 scripts\windows\build.bat
 ```
 
-The finished debug APK is published inside the repository at `artifacts\debug\app-debug.apk`, where Google Drive can synchronize it. Disposable Gradle intermediates stay outside the repository to prevent cloud-sync file locks. Run the complete local verification with:
+The finished debug APK is published inside the Android project at `app\artifacts\debug\app-debug.apk`, where Google Drive can synchronize it. Disposable Gradle intermediates stay outside the repository to prevent cloud-sync file locks. Run the complete local verification with:
 
 ```powershell
 scripts\windows\verify.bat
@@ -73,26 +71,21 @@ Open **Menu → Training Plans → Add Demo Training Plan** to create an isolate
 
 Workout data is stored in the app's local SQLite database. Health Connect access is optional and controlled by Android permissions. JSON backups can be saved locally or through a document provider such as Google Drive.
 
-This work-in-progress build resets incompatible local database schemas and accepts only its current backup format. The intended stable-release migration policy is documented in [Data Format Policy](docs/data-format.md).
-
 Release signing is read only from `GYMLOG_KEYSTORE_FILE`, `GYMLOG_KEYSTORE_PASSWORD`, `GYMLOG_KEY_ALIAS`, and `GYMLOG_KEY_PASSWORD`. Never commit signing files or credentials.
 
 ## Project
 
 ```text
-app/src/main/java/com/gymlog/app/
+app/app/src/main/java/com/gymlog/app/
 ├── data/        SQLite repository and models
 ├── ui/          Compose screens and Health Connect integration
 └── MainActivity.kt
-docs/            Product documentation and screenshots
+docs/        Product documentation and screenshots
 scripts/windows/ Development, device, and release helpers
 ```
 
 - [Professional TODO](TODO.md)
-- [Feature Ideas](docs/feature-ideas.md)
-- [Exercise Ordering](docs/exercise-ordering.md)
-- [Data Format Policy](docs/data-format.md)
 
 ## License
 
-[MIT](LICENSE)
+[MIT](LICENSE.txt)

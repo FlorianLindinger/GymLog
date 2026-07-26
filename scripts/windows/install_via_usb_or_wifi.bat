@@ -9,12 +9,13 @@ rem 4. Run build.bat after changing the app, then run this installer.
 
 set "SCRIPT_DIR=%~dp0"
 for %%I in ("%SCRIPT_DIR%..\..") do set "REPO_ROOT=%%~fI"
+set "APP_ROOT=%REPO_ROOT%\app"
 cd /d "%REPO_ROOT%"
 
 call "%SCRIPT_DIR%helpers\android_env.bat"
 if errorlevel 1 exit /b 1
 
-set "APK=%REPO_ROOT%\artifacts\debug\app-debug.apk"
+set "APK=%APP_ROOT%\artifacts\debug\app-debug.apk"
 set "ADB=%GYMLOG_ADB%"
 set "ADB_TARGET="
 if not "%~1"=="" set "ADB_TARGET=-s %~1"

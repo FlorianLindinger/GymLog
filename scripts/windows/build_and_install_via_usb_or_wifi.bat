@@ -8,5 +8,5 @@ echo Building, installing, and launching GymLog...
 call "%SCRIPT_DIR%build.bat"
 if errorlevel 1 exit /b 1
 
-call "%SCRIPT_DIR%install_via_usb.bat" %1
+call "%SCRIPT_DIR%install_via_usb_or_wifi.bat" %1
 exit /b %errorlevel%

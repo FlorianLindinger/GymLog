@@ -2,7 +2,8 @@
 setlocal EnableExtensions
 set "SCRIPT_DIR=%~dp0"
 for %%I in ("%SCRIPT_DIR%..\..") do set "REPO_ROOT=%%~fI"
-cd /d "%REPO_ROOT%"
+set "APP_ROOT=%REPO_ROOT%\app"
+cd /d "%APP_ROOT%"
 
 if "%~1"=="" (
     echo Usage: scripts\windows\release.bat VERSION
@@ -79,7 +80,7 @@ if errorlevel 1 (
     exit /b 1
 )
 
-set "ARTIFACT_DIR=%REPO_ROOT%\artifacts\release\%VERSION%"
+set "ARTIFACT_DIR=%APP_ROOT%\artifacts\release\%VERSION%"
 if not exist "%ARTIFACT_DIR%" mkdir "%ARTIFACT_DIR%"
 copy /y "%APK%" "%ARTIFACT_DIR%\GymLog-%VERSION%.apk" >nul
 if errorlevel 1 goto publish_failed
