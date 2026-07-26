@@ -13,6 +13,7 @@ class GymRepository(context: Context, private val gymClock: GymClock = GymClock(
     private val appContext = context.applicationContext
     private var db = GymDatabase(appContext)
     private val preferences = appContext.getSharedPreferences(GYMLOG_PREFERENCES, Context.MODE_PRIVATE)
+    private val exerciseReads by lazy { ExerciseReadRepository({ db.readableDatabase }, gymClock::now, ::loadSetWheelValues) }
 
     fun createFreshDatabase() {
         runCatching { db.close() }
@@ -142,9 +143,9 @@ class GymRepository(context: Context, private val gymClock: GymClock = GymClock(
                     put("title_note", exercise.title)
                     put("notes", "Sample exercise generated for UI and workflow testing.")
                     put("pause_time", "90 sec")
-                    put("chart_window", "3M")
+                    put("chart_window", ChartRange.THREE_MONTHS.storageValue)
                     put("trailing_average", 3)
-                    put("tracking_mode", "WEIGHT")
+                    put("tracking_mode", TrackingMode.WEIGHT.name)
                     put("current_weight", exercise.weight)
                     put("sort_order", index)
                     put("pinned", if (index == 0) 1 else 0)
@@ -210,9 +211,9 @@ class GymRepository(context: Context, private val gymClock: GymClock = GymClock(
                     put("title_note", machine.titleNote)
                     put("notes", machine.notes)
                     put("pause_time", machine.pauseTime)
-                    put("chart_window", machine.chartWindow)
+                    put("chart_window", machine.chartWindow.storageValue)
                     put("trailing_average", machine.trailingAverage)
-                    put("tracking_mode", machine.trackingMode)
+                    put("tracking_mode", machine.trackingMode.name)
                     put("current_weight", machine.currentWeight)
                     put("sort_order", machine.sortOrder)
                     put("pinned", if (machine.pinned) 1 else 0)
@@ -268,51 +269,8 @@ class GymRepository(context: Context, private val gymClock: GymClock = GymClock(
 
     private fun loadMachinesForPlan(planId: Long): List<MachineSummary> {
         migrateLegacyMachineState()
-        val database = db.readableDatabase
-        val machines = mutableListOf<Machine>()
-        database.rawQuery(
-            "SELECT id,name,title_note,notes,pause_time,chart_window,trailing_average,tracking_mode,current_weight,sort_order,order_group,ranking_priority,show_trend FROM machines WHERE plan_id=? ORDER BY sort_order,id",
-            arrayOf(planId.toString()),
-        ).use { cursor ->
-            while (cursor.moveToNext()) {
-                val group = runCatching { ExerciseOrderGroup.valueOf(cursor.getString(10)) }.getOrDefault(ExerciseOrderGroup.AUTOMATIC)
-                machines += Machine(
-                    id = cursor.getLong(0), name = cursor.getString(1), titleNote = cursor.getString(2), notes = cursor.getString(3),
-                    pauseTime = cursor.getString(4), chartWindow = ChartRange.fromStorage(cursor.getString(5)).storageValue,
-                    trailingAverage = cursor.getInt(6), trackingMode = TrackingMode.fromStorage(cursor.getString(7)).name,
-                    currentWeight = cursor.getDouble(8), sortOrder = cursor.getInt(9),
-                    pinned = group == ExerciseOrderGroup.MANUAL_TOP, rankingPriority = cursor.getInt(11),
-                    excludedFromAutoRanking = group == ExerciseOrderGroup.MANUAL_BOTTOM, showTrend = cursor.getInt(12) != 0,
-                )
-            }
-        }
-        if (machines.isEmpty()) return emptyList()
-        val placeholders = machines.joinToString(",") { "?" }
-        val args = machines.map { it.id.toString() }.toTypedArray()
-        val areas = mutableMapOf<Long, MutableList<AreaAssignment>>()
-        database.rawQuery("SELECT ma.machine_id,ma.area,ma.strength,ac.color FROM machine_areas ma LEFT JOIN area_colors ac ON ac.area=ma.area WHERE ma.machine_id IN ($placeholders) ORDER BY ma.area", args).use { cursor ->
-            while (cursor.moveToNext()) {
-                val area = runCatching { BodyArea.valueOf(cursor.getString(1)) }.getOrNull() ?: continue
-                areas.getOrPut(cursor.getLong(0)) { mutableListOf() } += AreaAssignment(area, if (cursor.getDouble(2) >= 0.75) Strength.FULL else Strength.HALF, if (cursor.isNull(3)) area.color else cursor.getLong(3))
-            }
-        }
-        val sets = mutableMapOf<Long, MutableList<SetRecord>>()
-        database.rawQuery("SELECT id,machine_id,reps,weight,performed_at FROM sets WHERE machine_id IN ($placeholders) ORDER BY performed_at DESC,id DESC", args).use { cursor ->
-            while (cursor.moveToNext()) sets.getOrPut(cursor.getLong(1)) { mutableListOf() } += SetRecord(cursor.getLong(0), cursor.getLong(1), cursor.getInt(2), cursor.getDouble(3), cursor.getLong(4))
-        }
-        val weights = mutableMapOf<Long, MutableList<WeightChange>>()
-        database.rawQuery("SELECT machine_id,weight,changed_at FROM weight_history WHERE machine_id IN ($placeholders) ORDER BY changed_at DESC,id DESC", args).use { cursor ->
-            while (cursor.moveToNext()) weights.getOrPut(cursor.getLong(0)) { mutableListOf() } += WeightChange(cursor.getDouble(1), cursor.getLong(2))
-        }
-        val counts = mutableMapOf<Long, Int>()
-        database.rawQuery("SELECT machine_id,COUNT(*) FROM sets WHERE machine_id IN ($placeholders) AND performed_at>=? GROUP BY machine_id", args + (gymClock.now() - 30L * 24 * 60 * 60 * 1000).toString()).use { cursor ->
-            while (cursor.moveToNext()) counts[cursor.getLong(0)] = cursor.getInt(1)
-        }
-        return machines.map { machine ->
-            MachineSummary(machine, areas[machine.id].orEmpty(), sets[machine.id].orEmpty(), weights[machine.id].orEmpty(), counts[machine.id] ?: 0, loadSetWheelValues(machine.id))
-        }
+        return exerciseReads.loadForPlan(planId)
     }
-
     private fun migrateLegacyMachineState() {
         if (preferences.getBoolean("machine_state_in_sqlite", false)) return
         val database = db.writableDatabase
@@ -336,7 +294,7 @@ class GymRepository(context: Context, private val gymClock: GymClock = GymClock(
         }
         check(preferences.edit().putBoolean("machine_state_in_sqlite", true).commit()) { "Could not migrate exercise settings" }
     }
-    fun addMachine(name: String, weight: Double, trackingMode: String, titleNote: String = ""): Long {
+    fun addMachine(name: String, weight: Double, trackingMode: TrackingMode, titleNote: String = ""): Long {
         val database = db.writableDatabase
         val planId = ensureTrainingPlan(database)
         val nextOrder = database.rawQuery("SELECT COALESCE(MAX(sort_order),-1)+1 FROM machines WHERE plan_id=?", arrayOf(planId.toString()))
@@ -346,7 +304,7 @@ class GymRepository(context: Context, private val gymClock: GymClock = GymClock(
             put("plan_id", planId)
             put("notes", "")
             put("title_note", titleNote.trim())
-            put("tracking_mode", trackingMode)
+            put("tracking_mode", trackingMode.name)
             put("current_weight", weight)
             put("sort_order", nextOrder)
         })
@@ -430,7 +388,7 @@ class GymRepository(context: Context, private val gymClock: GymClock = GymClock(
             arrayOf(planId.toString()),
         ).use { cursor ->
             while (cursor.moveToNext()) {
-                result += HistorySet(cursor.getLong(0), cursor.getLong(1), cursor.getString(2), cursor.getString(3), cursor.getInt(4), cursor.getDouble(5), cursor.getLong(6))
+                result += HistorySet(cursor.getLong(0), cursor.getLong(1), cursor.getString(2), TrackingMode.fromStorage(cursor.getString(3)), cursor.getInt(4), cursor.getDouble(5), cursor.getLong(6))
             }
         }
         return result
@@ -463,7 +421,7 @@ class GymRepository(context: Context, private val gymClock: GymClock = GymClock(
             database.update("machines", ContentValues().apply { put("current_weight", value) }, "id=?", arrayOf(id.toString()))
             addWeightHistory(database, id, value, now)
             val setValues = ContentValues().apply {
-                if (trackingMode == "STRENGTH") put("reps", value.toInt().coerceAtLeast(1)) else put("weight", value)
+                if (trackingMode == TrackingMode.STRENGTH.name) put("reps", value.toInt().coerceAtLeast(1)) else put("weight", value)
             }
             database.update(
                 "sets",
@@ -500,7 +458,7 @@ class GymRepository(context: Context, private val gymClock: GymClock = GymClock(
             arrayOf(machineId.toString()),
         ).use { cursor ->
             require(cursor.moveToFirst()) { "Exercise does not exist" }
-            if (cursor.getString(0) == "STRENGTH") cursor.getDouble(1).roundToInt().coerceAtLeast(1) else 1
+            if (TrackingMode.fromStorage(cursor.getString(0)) == TrackingMode.STRENGTH) cursor.getDouble(1).roundToInt().coerceAtLeast(1) else 1
         }
         val now = gymClock.now()
         database.transaction {
@@ -796,9 +754,9 @@ class GymRepository(context: Context, private val gymClock: GymClock = GymClock(
                     put("titleNote", summary.machine.titleNote)
                     put("notes", summary.machine.notes)
                     put("pauseTime", summary.machine.pauseTime)
-                    put("chartWindow", summary.machine.chartWindow)
+                    put("chartWindow", summary.machine.chartWindow.storageValue)
                     put("trailingAverage", summary.machine.trailingAverage)
-                    put("trackingMode", summary.machine.trackingMode)
+                    put("trackingMode", summary.machine.trackingMode.name)
                     put("currentWeight", summary.machine.currentWeight)
                     put("sortOrder", summary.machine.sortOrder)
                     put("pinned", summary.machine.pinned)
@@ -812,7 +770,7 @@ class GymRepository(context: Context, private val gymClock: GymClock = GymClock(
                         loadSets(db.readableDatabase, summary.machine.id, null).forEach {
                             put(JSONObject().apply {
                                 put("id", it.id)
-                                if (summary.machine.trackingMode == "STRENGTH") {
+                                if (summary.machine.trackingMode == TrackingMode.STRENGTH) {
                                     put("recordedLevel", it.reps)
                                     put("trainingMinutes", it.weight)
                                 } else {
@@ -892,7 +850,7 @@ class GymRepository(context: Context, private val gymClock: GymClock = GymClock(
                     put("title_note", item.optString("titleNote"))
                     put("notes", item.optString("notes"))
                     put("pause_time", item.optString("pauseTime"))
-                    put("chart_window", ChartRange.fromStorage(item.optString("chartWindow", "3M")).storageValue)
+                    put("chart_window", ChartRange.fromStorage(item.optString("chartWindow", ChartRange.THREE_MONTHS.storageValue)).storageValue)
                     put("trailing_average", item.optInt("trailingAverage", 0))
                     put("tracking_mode", trackingMode)
                     put("current_weight", item.getDouble("currentWeight"))
@@ -918,8 +876,8 @@ class GymRepository(context: Context, private val gymClock: GymClock = GymClock(
                     database.insertOrThrow("sets", null, ContentValues().apply {
                         if (preserveIds && set.has("id")) put("id", set.getLong("id"))
                         put("machine_id", id)
-                        put("reps", if (trackingMode == "STRENGTH") set.getInt("recordedLevel") else set.getInt("reps"))
-                        put("weight", if (trackingMode == "STRENGTH") set.getDouble("trainingMinutes") else set.getDouble("weight"))
+                        put("reps", if (trackingMode == TrackingMode.STRENGTH.name) set.getInt("recordedLevel") else set.getInt("reps"))
+                        put("weight", if (trackingMode == TrackingMode.STRENGTH.name) set.getDouble("trainingMinutes") else set.getDouble("weight"))
                         put("performed_at", set.getLong("performedAt"))
                     })
                 }

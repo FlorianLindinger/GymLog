@@ -1,5 +1,6 @@
 package com.gymlog.app.ui
 
+import com.gymlog.app.data.ChartRange
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -148,48 +149,47 @@ internal fun trendTimeSeries(
     )
 }
 
-internal fun chartWindowDuration(window: String): Long? {
+internal fun chartWindowDuration(window: ChartRange): Long? {
     val days = when (window) {
-        "1W" -> 7L
-        "2W" -> 14L
-        "3W" -> 21L
-        "1M" -> 30L
-        "2M" -> 61L
-        "3M" -> 91L
-        "4M" -> 122L
-        "6M" -> 183L
-        "1Y" -> 365L
-        "2Y" -> 730L
-        "3Y" -> 1_095L
-        "ALL" -> return null
-        else -> return null
+        ChartRange.ONE_WEEK -> 7L
+        ChartRange.TWO_WEEKS -> 14L
+        ChartRange.THREE_WEEKS -> 21L
+        ChartRange.ONE_MONTH -> 30L
+        ChartRange.TWO_MONTHS -> 61L
+        ChartRange.THREE_MONTHS -> 91L
+        ChartRange.FOUR_MONTHS -> 122L
+        ChartRange.SIX_MONTHS -> 183L
+        ChartRange.ONE_YEAR -> 365L
+        ChartRange.TWO_YEARS -> 730L
+        ChartRange.THREE_YEARS -> 1_095L
+        ChartRange.ALL, ChartRange.CUSTOM -> return null
     }
     return days * DAY_MILLIS_SHARED
 }
 
 @Composable
 internal fun ChartRangeControls(
-    selectedWindow: String,
+    selectedWindow: ChartRange,
     showTrend: Boolean,
-    onWindowSelected: (String) -> Unit,
+    onWindowSelected: (ChartRange) -> Unit,
     onCustomSelected: () -> Unit,
     onTrendSelected: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val rows = listOf(
-        listOf("1W", "2W", "3W", "1M", "2M", "3M", "4M"),
-        listOf("6M", "1Y", "2Y", "3Y", "ALL", "CUSTOM", "TREND"),
+        listOf(ChartRange.ONE_WEEK, ChartRange.TWO_WEEKS, ChartRange.THREE_WEEKS, ChartRange.ONE_MONTH, ChartRange.TWO_MONTHS, ChartRange.THREE_MONTHS, ChartRange.FOUR_MONTHS),
+        listOf(ChartRange.SIX_MONTHS, ChartRange.ONE_YEAR, ChartRange.TWO_YEARS, ChartRange.THREE_YEARS, ChartRange.ALL, ChartRange.CUSTOM, null),
     )
     Column(modifier, verticalArrangement = Arrangement.spacedBy(4.dp)) {
         rows.forEach { row ->
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                row.forEach { value ->
-                    val selected = if (value == "TREND") showTrend else selectedWindow == value
-                    val label = when (value) {
-                        "ALL" -> "All"
-                        "CUSTOM" -> "Custom"
-                        "TREND" -> "Trend"
-                        else -> value
+                row.forEach { range ->
+                    val selected = if (range == null) showTrend else selectedWindow == range
+                    val label = when (range) {
+                        ChartRange.ALL -> "All"
+                        ChartRange.CUSTOM -> "Custom"
+                        null -> "Trend"
+                        else -> range.storageValue
                     }
                     Text(
                         text = label,
@@ -200,10 +200,10 @@ internal fun ChartRangeControls(
                                 RoundedCornerShape(7.dp),
                             )
                             .clickable {
-                                when (value) {
-                                    "CUSTOM" -> onCustomSelected()
-                                    "TREND" -> onTrendSelected()
-                                    else -> onWindowSelected(value)
+                                when (range) {
+                                    ChartRange.CUSTOM -> onCustomSelected()
+                                    null -> onTrendSelected()
+                                    else -> onWindowSelected(range)
                                 }
                             }
                             .padding(vertical = 6.dp),

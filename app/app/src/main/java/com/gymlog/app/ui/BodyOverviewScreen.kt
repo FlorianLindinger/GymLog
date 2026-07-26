@@ -1,5 +1,6 @@
 package com.gymlog.app.ui
 
+import com.gymlog.app.data.ChartRange
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -73,7 +74,7 @@ fun BodyOverviewScreen(
 ) {
     val context = LocalContext.current
     val preferences = remember { context.getSharedPreferences("body_graph_settings", 0) }
-    var window by remember { mutableStateOf(preferences.getString("window", "6M") ?: "6M") }
+    var window by remember { mutableStateOf(ChartRange.fromStorage(preferences.getString("window", ChartRange.SIX_MONTHS.storageValue))) }
     var showTrend by remember { mutableStateOf(preferences.getBoolean("show_trend", true)) }
     var showBodyMenu by remember { mutableStateOf(false) }
     var showCustomRange by remember { mutableStateOf(false) }
@@ -95,13 +96,13 @@ fun BodyOverviewScreen(
     val newestMeasurement = snapshot.measurements.maxOfOrNull { it.measuredAt } ?: System.currentTimeMillis()
     val oldestMeasurement = snapshot.measurements.minOfOrNull { it.measuredAt }
     val bodyChartWindow = ChartWindow(
-        durationMillis = if (window == "CUSTOM") {
+        durationMillis = if (window == ChartRange.CUSTOM) {
             customStart?.let { start -> customEnd?.let { end -> (end - start).coerceAtLeast(1L) } }
         } else {
             chartWindowDuration(window)
         },
-        endMillis = if (window == "CUSTOM") customEnd else System.currentTimeMillis(),
-        startMillis = if (window == "CUSTOM") customStart else null,
+        endMillis = if (window == ChartRange.CUSTOM) customEnd else System.currentTimeMillis(),
+        startMillis = if (window == ChartRange.CUSTOM) customStart else null,
         key = "$window:$customStart:$customEnd",
     )
 
@@ -135,7 +136,7 @@ fun BodyOverviewScreen(
                     showTrend = showTrend,
                     onWindowSelected = { preset ->
                         window = preset
-                        preferences.edit().putString("window", preset).apply()
+                        preferences.edit().putString("window", preset.storageValue).apply()
                     },
                     onCustomSelected = { showCustomRange = true },
                     onTrendSelected = {
@@ -186,14 +187,14 @@ fun BodyOverviewScreen(
         val now = System.currentTimeMillis()
         CustomBodyRangeDialog(
             maxTimestamp = now,
-            initialStart = customStart ?: bodyWindowStart("1M", now, oldestMeasurement),
+            initialStart = customStart ?: bodyWindowStart(ChartRange.ONE_MONTH, now, oldestMeasurement),
             initialEnd = customEnd ?: now,
             onDismiss = { showCustomRange = false },
             onSave = { start, end ->
                 customStart = start
                 customEnd = end
-                window = "CUSTOM"
-                preferences.edit().putLong("custom_start", start).putLong("custom_end", end).putString("window", "CUSTOM").apply()
+                window = ChartRange.CUSTOM
+                preferences.edit().putLong("custom_start", start).putLong("custom_end", end).putString("window", ChartRange.CUSTOM.storageValue).apply()
                 showCustomRange = false
             },
         )
@@ -433,20 +434,8 @@ private fun formatBodyEta(days: Double): String {
         if (remainingDays > 0 && isEmpty()) add("$remainingDays day${if (remainingDays == 1L) "" else "s"}")
     }.take(2).joinToString(" ")
 }
-private fun bodyWindowStart(window: String, newest: Long, oldest: Long?): Long {
-    val days = when (window) {
-        "1W" -> 7L
-        "2W" -> 14L
-        "3W" -> 21L
-        "1M" -> 30L
-        "3M" -> 90L
-        "6M" -> 182L
-        "1Y" -> 365L
-        "3Y" -> 1_095L
-        else -> null
-    }
-    return days?.let { newest - it * DAY_MILLIS } ?: (oldest ?: newest - DAY_MILLIS)
-}
+private fun bodyWindowStart(window: ChartRange, newest: Long, oldest: Long?): Long =
+    chartWindowDuration(window)?.let { newest - it } ?: (oldest ?: newest - DAY_MILLIS)
 
 private fun formatBodySyncTime(timestamp: Long): String {
     val zone = ZoneId.systemDefault()

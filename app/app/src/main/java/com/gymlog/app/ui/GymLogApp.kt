@@ -61,6 +61,7 @@ import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.unit.dp
 import com.gymlog.app.BuildConfig
+import com.gymlog.app.data.TrackingMode
 import com.gymlog.app.data.BodyArea
 import com.gymlog.app.data.BackupSyncStatus
 import com.gymlog.app.data.GymRepository

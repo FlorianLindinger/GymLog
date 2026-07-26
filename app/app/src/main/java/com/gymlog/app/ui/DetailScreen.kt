@@ -54,6 +54,8 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.gymlog.app.R
+import com.gymlog.app.data.ChartRange
+import com.gymlog.app.data.TrackingMode
 import com.gymlog.app.data.AreaAssignment
 import com.gymlog.app.data.BodyArea
 import com.gymlog.app.data.GymRepository
@@ -109,8 +111,8 @@ fun DetailScreen(
         Button(onClick = { quickEntry = true }, modifier = Modifier.fillMaxWidth()) {
             Text(
                 when {
-                    machine.trackingMode == "STRENGTH" -> if (currentUnitSets.isEmpty()) "Add level entry" else "Change level entry"
-                    machine.trackingMode == "DURATION" -> if (currentUnitSets.isEmpty()) "Add training" else "Change training"
+                    machine.trackingMode == TrackingMode.STRENGTH -> if (currentUnitSets.isEmpty()) "Add level entry" else "Change level entry"
+                    machine.trackingMode == TrackingMode.DURATION -> if (currentUnitSets.isEmpty()) "Add training" else "Change training"
                     else -> if (currentUnitSets.isEmpty()) "Add sets" else "Change sets"
                 },
             )
@@ -143,17 +145,17 @@ fun DetailScreen(
                 ChartRangeControls(
                     selectedWindow = machine.chartWindow,
                     showTrend = machine.showTrend,
-                    onWindowSelected = { preset -> repository.setChartWindow(machine.id, preset); onChanged() },
+                    onWindowSelected = { range -> repository.setChartWindow(machine.id, range.storageValue); onChanged() },
                     onCustomSelected = { showCustomChartRange = true },
                     onTrendSelected = { repository.setShowTrend(machine.id, !machine.showTrend); onChanged() },
                 )
                 val chartWindow = ChartWindow(
-                    durationMillis = if (machine.chartWindow == "CUSTOM") {
+                    durationMillis = if (machine.chartWindow == ChartRange.CUSTOM) {
                         customChartStart?.let { start -> customChartEnd?.let { end -> (end - start).coerceAtLeast(1L) } }
                     } else chartWindowDuration(machine.chartWindow),
-                    endMillis = if (machine.chartWindow == "CUSTOM") customChartEnd else System.currentTimeMillis(),
-                    startMillis = if (machine.chartWindow == "CUSTOM") customChartStart else null,
-                    key = "${machine.chartWindow}:$customChartStart:$customChartEnd",
+                    endMillis = if (machine.chartWindow == ChartRange.CUSTOM) customChartEnd else System.currentTimeMillis(),
+                    startMillis = if (machine.chartWindow == ChartRange.CUSTOM) customChartStart else null,
+                    key = "${machine.chartWindow.storageValue}:$customChartStart:$customChartEnd",
                 )
                 SessionMetricsChart(summary.recentSets, machine.trackingMode, machine.showTrend, chartWindow)
             }
@@ -285,13 +287,13 @@ fun DetailScreen(
     }
     if (showCustomChartRange) CustomGymRangeDialog(
         maxTimestamp = System.currentTimeMillis(),
-        initialStart = customChartStart ?: chartCutoff("1M") ?: System.currentTimeMillis(),
+        initialStart = customChartStart ?: chartCutoff(ChartRange.ONE_MONTH) ?: System.currentTimeMillis(),
         initialEnd = customChartEnd ?: System.currentTimeMillis(),
         onDismiss = { showCustomChartRange = false },
         onSave = { start, end ->
             customChartStart = start; customChartEnd = end
             chartPreferences.edit().putLong("${machine.id}_start", start).putLong("${machine.id}_end", end).apply()
-            repository.setChartWindow(machine.id, "CUSTOM"); onChanged(); showCustomChartRange = false
+            repository.setChartWindow(machine.id, ChartRange.CUSTOM.storageValue); onChanged(); showCustomChartRange = false
         },
     )
     if (showAreas) AreaDialog(summary.areas, areaUsage, areaColors, onAreaColor, onDismiss = { showAreas = false }) {
@@ -348,7 +350,7 @@ private fun CompactChoice(selected: Boolean, onClick: () -> Unit, label: String,
 @Composable
 private fun SessionMetricsChart(
     sets: List<SetRecord>,
-    trackingMode: String,
+    trackingMode: TrackingMode,
     showTrend: Boolean,
     window: ChartWindow,
 ) {
@@ -359,7 +361,7 @@ private fun SessionMetricsChart(
         }
         return
     }
-    if (trackingMode == "DURATION") {
+    if (trackingMode == TrackingMode.DURATION) {
         AxisMetricPlot(
             orderedSets.map { TimeValue(it.performedAt, it.weight) },
             window,
@@ -367,7 +369,7 @@ private fun SessionMetricsChart(
             showTrend,
         )
     } else {
-        DualAxisSessionPlot(orderedSets, groupSetBatches(sets).asReversed(), window, strength = trackingMode == "STRENGTH", showTrend = showTrend)
+        DualAxisSessionPlot(orderedSets, groupSetBatches(sets).asReversed(), window, strength = trackingMode == TrackingMode.STRENGTH, showTrend = showTrend)
     }
 }
 
@@ -440,7 +442,7 @@ private fun AxisMetricPlot(
 private fun formatAxisValue(value: Double): String = if (value % 1.0 == 0.0) value.toInt().toString()
 else String.format(Locale.US, "%.1f", value)
 
-private fun weightChangeDescription(changes: List<WeightChange>, trackingMode: String): String {
+private fun weightChangeDescription(changes: List<WeightChange>, trackingMode: TrackingMode): String {
     val metric = metricName(trackingMode)
     val latest = changes.firstOrNull() ?: return "No $metric changes yet"
     val previous = changes.getOrNull(1) ?: return "Initial $metric set ${timeSince(latest.changedAt)} ago"
@@ -448,23 +450,15 @@ private fun weightChangeDescription(changes: List<WeightChange>, trackingMode: S
     val amount = if (delta % 1.0 == 0.0) delta.toInt().toString() else String.format(Locale.US, "%.1f", delta)
     val signed = if (delta > 0) "+$amount" else amount
     val unit = when (trackingMode) {
-        "WEIGHT" -> "kg"
-        "DURATION" -> "min"
+        TrackingMode.WEIGHT -> "kg"
+        TrackingMode.DURATION -> "min"
         else -> if (kotlin.math.abs(delta) == 1.0) "level" else "levels"
     }
     return "Changed by $signed $unit ${timeSince(latest.changedAt)} ago"
 }
 
-private fun chartCutoff(window: String): Long? {
-    val now = Instant.now()
-    return when (window) {
-        "1M" -> now.minus(Duration.ofDays(30)).toEpochMilli()
-        "3M" -> now.minus(Duration.ofDays(90)).toEpochMilli()
-        "6M" -> now.minus(Duration.ofDays(182)).toEpochMilli()
-        "1Y" -> now.minus(Duration.ofDays(365)).toEpochMilli()
-        else -> null
-    }
-}
+private fun chartCutoff(window: ChartRange): Long? =
+    chartWindowDuration(window)?.let { duration -> Instant.now().toEpochMilli() - duration }
 
 private enum class GymCustomRangeMode { INTERVAL, DURATION }
 
@@ -530,7 +524,7 @@ private fun CustomGymRangeDialog(
 @Composable
 fun MetricValueDialog(
     current: Double,
-    trackingMode: String,
+    trackingMode: TrackingMode,
     onDismiss: () -> Unit,
     onSave: (Double) -> Unit,
     onSaveCurrentAndNext: ((Double) -> Unit)? = null,
@@ -542,8 +536,8 @@ fun MetricValueDialog(
         title = { Text("Change ${metricName(trackingMode)}") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedTextField(value, { value = it.filter { char -> char.isDigit() || char == '.' || char == ',' } }, label = { Text(when (trackingMode) { "WEIGHT" -> "New Weight (kg)"; "DURATION" -> "New Duration (min)"; else -> "New Level" }) }, singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = if (trackingMode == "WEIGHT") KeyboardType.Decimal else KeyboardType.Number))
-                if (trackingMode == "WEIGHT") {
+                OutlinedTextField(value, { value = it.filter { char -> char.isDigit() || char == '.' || char == ',' } }, label = { Text(when (trackingMode) { TrackingMode.WEIGHT -> "New Weight (kg)"; TrackingMode.DURATION -> "New Duration (min)"; else -> "New Level" }) }, singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = if (trackingMode == TrackingMode.WEIGHT) KeyboardType.Decimal else KeyboardType.Number))
+                if (trackingMode == TrackingMode.WEIGHT) {
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         androidx.compose.material3.FilledTonalButton(onClick = { value = formatMetricDialogValue((parsed ?: current) + 3.0) }) { Text("+3 kg") }
                         androidx.compose.material3.FilledTonalButton(onClick = { value = formatMetricDialogValue((parsed ?: current) + 5.0) }) { Text("+5 kg") }
@@ -736,7 +730,7 @@ private fun timeSince(timestamp: Long): String {
     }
 }
 
-private fun formatRecentEntry(sets: List<SetRecord>, trackingMode: String, timestamp: Long): String {
+private fun formatRecentEntry(sets: List<SetRecord>, trackingMode: TrackingMode, timestamp: Long): String {
     val first = sets.first()
     val metric = if (isDirectMetric(trackingMode)) {
         formatTrainingEntry(first.weight, trackingMode, first.reps)
@@ -746,8 +740,8 @@ private fun formatRecentEntry(sets: List<SetRecord>, trackingMode: String, times
     val date = formatTimestamp(timestamp)
     val volume = sets.sumOf { it.weight * it.reps }
     return when (trackingMode) {
-        "STRENGTH" -> "${metric.padEnd(18)} - ${formatAxisValue(volume).padStart(6)} level·min - $date"
-        "DURATION" -> "${metric.padEnd(12)} - ${formatAxisValue(sets.sumOf { it.weight }).padStart(6)} min - $date"
+        TrackingMode.STRENGTH -> "${metric.padEnd(18)} - ${formatAxisValue(volume).padStart(6)} level·min - $date"
+        TrackingMode.DURATION -> "${metric.padEnd(12)} - ${formatAxisValue(sets.sumOf { it.weight }).padStart(6)} min - $date"
         else -> {
             val repetitions = sets.joinToString(",") { it.reps.toString() }
             "${metric.padEnd(10)} - ${repetitions.padEnd(10)} - ${formatAxisValue(volume).padStart(7)} kg - $date"

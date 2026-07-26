@@ -1,4 +1,4 @@
-﻿package com.gymlog.app.data
+package com.gymlog.app.data
 
 import org.junit.Assert.assertEquals
 import org.junit.Test
@@ -16,6 +16,6 @@ class PersistedValuesTest {
     }
 
     @Test fun `volume is reps times weight`() {
-        assertEquals(180.0, HistorySet(1, 2, "Bench", "WEIGHT", 12, 15.0, 0).volume, 0.0)
+        assertEquals(180.0, HistorySet(1, 2, "Bench", TrackingMode.WEIGHT, 12, 15.0, 0).volume, 0.0)
     }
 }
