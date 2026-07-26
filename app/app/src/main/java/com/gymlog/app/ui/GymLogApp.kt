@@ -92,7 +92,11 @@ internal fun GymRepository.loadUiState(): AppUiState {
     val machines = loadMachines()
     return AppUiState(
         machines = machines,
-        history = loadHistory(),
+        history = machines.flatMap { summary ->
+            summary.recentSets.map { set ->
+                HistorySet(set.id, set.machineId, summary.machine.name, summary.machine.trackingMode, set.reps, set.weight, set.performedAt)
+            }
+        }.sortedWith(compareByDescending<HistorySet> { it.performedAt }.thenByDescending { it.id }),
         areaColors = loadAreaColors(),
         trainingPlans = loadTrainingPlans(),
         activeTrainingPlanId = activeTrainingPlanId(),
