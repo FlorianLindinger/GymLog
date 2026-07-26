@@ -59,7 +59,6 @@ private val bodyMetricDisplayOrder = listOf(
 )
 
 private data class BodyFit(
-    val values: List<Double>,
     val slopePerDay: Double,
     val fittedLast: Double,
 )
@@ -219,9 +218,6 @@ private fun BodyMetricCard(
         sorted.filter { it.measuredAt in range.start..range.end }
     }
     val fit = bodyLinearFit(intervalValues)
-    val fitPoints = fit.values.mapIndexed { index, value ->
-        TimeValue(intervalValues[index].measuredAt, value)
-    }
     val latest = sorted.lastOrNull()
     val targetEta = settings.target?.let { target ->
         ((target - fit.fittedLast) / fit.slopePerDay).takeIf {
@@ -231,6 +227,12 @@ private fun BodyMetricCard(
     val primary = MaterialTheme.colorScheme.primary
     val fitColor = MaterialTheme.colorScheme.tertiary
     val targetColor = Color(0xFF66BB6A)
+    val fitPoints = trendTimeSeries(
+        intervalValues.map { TimeValue(it.measuredAt, it.value) },
+        fitColor,
+        PlotAxis.LEFT,
+        window,
+    ).points
     Card(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(horizontal = 6.dp, vertical = 3.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -250,7 +252,7 @@ private fun BodyMetricCard(
             }
             if (showTrend && intervalValues.size >= 2) {
                 Text(
-                    "Linear fit: ${String.format(Locale.US, "%+.2f", fit.slopePerDay * 30.44)} ${metric.unit} / month",
+                    "Linear fit: ${String.format(Locale.US, "%+.2f", fit.slopePerDay * 30.44)} ${metric.unit}/month",
                     color = fitColor,
                     style = MaterialTheme.typography.bodySmall,
                 )
@@ -405,17 +407,17 @@ private fun BodyChartSettingsDialog(
     )
 }
 private fun bodyLinearFit(values: List<BodyMeasurement>): BodyFit {
-    if (values.size < 2) return BodyFit(values.map { it.value }, 0.0, values.lastOrNull()?.value ?: 0.0)
+    if (values.size < 2) return BodyFit(0.0, values.lastOrNull()?.value ?: 0.0)
     val origin = values.first().measuredAt
     val x = values.map { (it.measuredAt - origin) / DAY_MILLIS.toDouble() }
     val meanX = x.average()
     val meanY = values.map { it.value }.average()
     val denominator = x.sumOf { (it - meanX) * (it - meanX) }
-    if (denominator == 0.0) return BodyFit(values.map { it.value }, 0.0, values.last().value)
+    if (denominator == 0.0) return BodyFit(0.0, values.last().value)
     val slope = values.indices.sumOf { (x[it] - meanX) * (values[it].value - meanY) } / denominator
     val intercept = meanY - slope * meanX
     val fitted = x.map { intercept + slope * it }
-    return BodyFit(fitted, slope, fitted.last())
+    return BodyFit(slope, fitted.last())
 }
 
 private fun formatBodyEta(days: Double): String {
@@ -446,8 +448,21 @@ private fun bodyWindowStart(window: String, newest: Long, oldest: Long?): Long {
     return days?.let { newest - it * DAY_MILLIS } ?: (oldest ?: newest - DAY_MILLIS)
 }
 
-private fun formatBodySyncTime(timestamp: Long): String =
-    Instant.ofEpochMilli(timestamp).atZone(ZoneId.systemDefault()).format(DateTimeFormatter.ofPattern("d MMM yyyy, HH:mm"))
+private fun formatBodySyncTime(timestamp: Long): String {
+    val zone = ZoneId.systemDefault()
+    val synced = Instant.ofEpochMilli(timestamp).atZone(zone)
+    val today = LocalDate.now(zone)
+    val dayLabel = when (synced.toLocalDate()) {
+        today -> "Today"
+        today.minusDays(1) -> "Yesterday"
+        else -> if (synced.toLocalDate().isAfter(today.minusDays(7))) {
+            synced.format(DateTimeFormatter.ofPattern("EEEE", Locale.ENGLISH))
+        } else {
+            synced.format(DateTimeFormatter.ofPattern("d MMM yyyy", Locale.ENGLISH))
+        }
+    }
+    return "$dayLabel, ${synced.format(DateTimeFormatter.ofPattern("HH:mm"))}"
+}
 private fun formatBodyValue(value: Double): String =
     if (value % 1.0 == 0.0) value.toInt().toString() else String.format(Locale.US, "%.1f", value)
 

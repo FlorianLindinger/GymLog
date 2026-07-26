@@ -20,7 +20,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.AlertDialog
@@ -92,7 +92,11 @@ fun OverviewScreen(
     onAdd: () -> Unit,
     onMenu: () -> Unit,
     onStats: () -> Unit,
+    onOrder: () -> Unit,
     onBody: () -> Unit,
+    listState: LazyListState,
+    showHidden: Boolean,
+    onShowHiddenChanged: (Boolean) -> Unit,
     onEditPlanNotes: () -> Unit,
     areaFrequency: Map<BodyArea, Double>,
     onQuickSet: (MachineSummary, List<Int>) -> Unit,
@@ -107,7 +111,6 @@ fun OverviewScreen(
     onHide: (MachineSummary) -> Unit,
     onRankingChange: (MachineSummary, Int) -> Unit,
     onRankingExcluded: (MachineSummary, Boolean) -> Unit,
-    onUnhide: (MachineSummary) -> Unit,
 ) {
     val zone = ZoneId.systemDefault()
     val now = System.currentTimeMillis()
@@ -116,7 +119,6 @@ fun OverviewScreen(
     val hasCurrentTraining = latestTrainingEntry?.let { trainingDate(it, zone) == todayTrainingDate } == true
     val trainingUnitCutoff = if (hasCurrentTraining) trainingDayStart(now, zone) else Long.MAX_VALUE
     val lastExerciseInUnit = mostRecentlyTrainedInUnit(machines, trainingUnitCutoff)
-    val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
     val rankedMachines = remember(machines, orderingMode, hasCurrentTraining) {
         rankOverviewMachines(machines, orderingMode, trainingUnitCutoff, lastExerciseInUnit)
@@ -125,9 +127,8 @@ fun OverviewScreen(
     var draggedId by remember { mutableStateOf<Long?>(null) }
     var dragOffset by remember { mutableFloatStateOf(0f) }
     var reorderMode by remember { mutableStateOf(false) }
-    var showHidden by remember { mutableStateOf(false) }
     Box(modifier.fillMaxSize()) {
-        Column(Modifier.fillMaxSize().padding(bottom = 64.dp)) {
+        Column(Modifier.fillMaxSize().padding(bottom = 50.dp)) {
             if (reorderMode) {
                 Text(
                     if (orderingMode == ExerciseOrderingMode.FIXED) "Reordering Fixed Exercises" else "Reordering Pinned Exercises",
@@ -183,12 +184,23 @@ fun OverviewScreen(
                     )
                 }
                 if (hiddenMachines.isNotEmpty()) {
-                    item { TextButton(onClick = { showHidden = !showHidden }, modifier = Modifier.fillMaxWidth()) { Text(if (showHidden) "Hide Hidden Exercises" else "Show hidden exercises") } }
+                    item {
+                        TextButton(
+                            onClick = {
+                                val reveal = !showHidden
+                                onShowHiddenChanged(reveal)
+                                if (reveal) scope.launch {
+                                    delay(80)
+                                    listState.animateScrollToItem(orderedMachines.size + 1)
+                                }
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                        ) { Text(if (showHidden) "Hide hidden exercises" else "Show hidden exercises") }
+                    }
                     if (showHidden) {
                         val rankedHidden = rankOverviewMachines(hiddenMachines, orderingMode, trainingUnitCutoff, lastExerciseInUnit)
                         items(rankedHidden, key = { "hidden_${it.machine.id}" }) { summary ->
                             MachineCard(summary, lastExerciseInUnit, trainingUnitCutoff, areaFrequency, onMachine, { machine, reps -> onQuickSet(machine, reps) }, onDeleteCurrentExerciseSets, onMetricChange, onMetricChangeForSession, progressionSettings, Modifier, {}, false, false)
-                            TextButton(onClick = { onUnhide(summary) }, modifier = Modifier.fillMaxWidth()) { Text("Unhide exercise") }
                         }
                     }
                 }            }
@@ -196,8 +208,8 @@ fun OverviewScreen(
         }
         Row(
             modifier = Modifier.align(Alignment.BottomCenter)
-                .fillMaxWidth().background(MaterialTheme.colorScheme.surface).padding(8.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                .fillMaxWidth().background(MaterialTheme.colorScheme.surface).padding(horizontal = 4.dp, vertical = 3.dp),
+            horizontalArrangement = Arrangement.spacedBy(3.dp),
         ) {
                 if (reorderMode) {
                     Button(
@@ -208,10 +220,12 @@ fun OverviewScreen(
                         modifier = Modifier.fillMaxWidth(),
                     ) { Text("Done") }
                 } else {
-                    FilledTonalButton(onClick = onBody, modifier = Modifier.weight(1f)) { OverviewButtonLabel("Body") }
-                    FilledTonalButton(onClick = onMenu, modifier = Modifier.weight(1f)) { OverviewButtonLabel("Menu") }
-                    FilledTonalButton(onClick = onStats, modifier = Modifier.weight(1f)) { OverviewButtonLabel("Stats") }
-                    FilledTonalButton(onClick = onAdd, modifier = Modifier.weight(1f)) { OverviewButtonLabel("+ Add") }
+                    val compactPadding = PaddingValues(horizontal = 2.dp, vertical = 2.dp)
+                    FilledTonalButton(onClick = onBody, modifier = Modifier.weight(1f), contentPadding = compactPadding) { OverviewButtonLabel("Body") }
+                    FilledTonalButton(onClick = onMenu, modifier = Modifier.weight(1f), contentPadding = compactPadding) { OverviewButtonLabel("Menu") }
+                    FilledTonalButton(onClick = onStats, modifier = Modifier.weight(1f), contentPadding = compactPadding) { OverviewButtonLabel("Stats") }
+                    FilledTonalButton(onClick = onOrder, modifier = Modifier.weight(1f), contentPadding = compactPadding) { OverviewButtonLabel("Order") }
+                    FilledTonalButton(onClick = onAdd, modifier = Modifier.weight(1f), contentPadding = compactPadding) { OverviewButtonLabel("+ Add") }
                 }
         }
     }
@@ -289,17 +303,18 @@ private fun TrainingDurationCard(machines: List<MachineSummary>, activePlanName:
                     color = MaterialTheme.colorScheme.onPrimaryContainer,
                 )
                 Text(
-                    if (isActive) "● Live" else "✓ Completed",
+                    when {
+                        last == null -> "Not started"
+                        isActive -> "● Live"
+                        else -> "✓ Completed ${completedTrainingDateLabel(trainingDate(last, zone), trainingDate(now, zone))}"
+                    },
                     style = MaterialTheme.typography.labelSmall,
-                    color = if (isActive) MaterialTheme.colorScheme.primary else Color(0xFF2E7D32),
+                    color = when {
+                        last == null -> MaterialTheme.colorScheme.onSurfaceVariant
+                        isActive -> MaterialTheme.colorScheme.primary
+                        else -> Color(0xFF2E7D32)
+                    },
                 )
-                if (!isActive && last != null) {
-                    Text(
-                        "Completed ${completedTrainingDateLabel(trainingDate(last, zone), trainingDate(now, zone))}",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
             }
         }
     }
@@ -400,6 +415,8 @@ private fun MachineCard(
         clash != null -> Color(0xFFFBC02D)
         else -> Color(0xFF43A047)
     }
+    val metricInHeader = summary.machine.titleNote.isBlank() ||
+        summary.machine.name.length + summary.machine.titleNote.length <= 30
     Card(
         modifier = modifier.fillMaxWidth().clickable(enabled = !isReordering) { onMachine(summary.machine.id) },
         elevation = CardDefaults.cardElevation(defaultElevation = if (isDragging) 10.dp else 1.dp),
@@ -432,6 +449,14 @@ private fun MachineCard(
                     if (summary.machine.titleNote.isNotBlank()) {
                         Text(" · ${summary.machine.titleNote}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
+                }
+                if (metricInHeader) {
+                    Text(
+                        formatMetric(summary.machine.currentWeight, summary.machine.trackingMode),
+                        modifier = Modifier.clickable(enabled = !isReordering) { changeMetric = true }.padding(horizontal = 6.dp, vertical = 2.dp),
+                        style = MaterialTheme.typography.titleSmall,
+                        color = sessionTrendColor(summary),
+                    )
                 }
             }
             progressionWarning(summary, progressionSettings)?.let { warning ->
@@ -467,12 +492,14 @@ private fun MachineCard(
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
-                Text(
-                    formatMetric(summary.machine.currentWeight, summary.machine.trackingMode),
-                    modifier = Modifier.clickable(enabled = !isReordering) { changeMetric = true }.padding(horizontal = 6.dp, vertical = 4.dp),
-                    style = MaterialTheme.typography.titleSmall,
-                    color = sessionTrendColor(summary),
-                )
+                if (!metricInHeader) {
+                    Text(
+                        formatMetric(summary.machine.currentWeight, summary.machine.trackingMode),
+                        modifier = Modifier.clickable(enabled = !isReordering) { changeMetric = true }.padding(horizontal = 6.dp, vertical = 2.dp),
+                        style = MaterialTheme.typography.titleSmall,
+                        color = sessionTrendColor(summary),
+                    )
+                }
             }
         }
     }
@@ -547,19 +574,21 @@ private fun rankOverviewMachines(
     val trainingCounts = machines.associate { summary ->
         summary.machine.id to summary.recentSets.map { it.performedDate(zone) }.distinct().size
     }
-    val automatic = machines.sortedWith(
+    val currentFirst = listOfNotNull(current)
+    val automatic = currentFirst + machines.filter {
+        it.machine.id != currentId && !it.machine.excludedFromAutoRanking
+    }.sortedWith(
         compareBy<MachineSummary>(
-            { if (it.machine.id == currentId) 0 else 1 },
-            { it.machine.id != currentId && it.recentSets.any { set -> set.performedAt >= currentTrainingCutoff } },
-            { if (current == null || it.machine.id == currentId) -1.0 else strongestClash(it, current) ?: 0.0 },
+            { it.recentSets.any { set -> set.performedAt >= currentTrainingCutoff } },
+            { if (current == null) -1.0 else strongestClash(it, current) ?: 0.0 },
             { previousTrainingDate != null && it.recentSets.any { set -> set.performedDate(zone) == previousTrainingDate } },
-            { it.machine.excludedFromAutoRanking },
             { it.machine.rankingPriority },
             { trainingCounts[it.machine.id] ?: 0 },
             { it.machine.name.lowercase(Locale.getDefault()) },
         ),
-    )
-    val currentFirst = listOfNotNull(current)
+    ) + machines.filter {
+        it.machine.id != currentId && it.machine.excludedFromAutoRanking
+    }.sortedBy { it.machine.sortOrder }
     return when (mode) {
         ExerciseOrderingMode.AUTOMATIC -> automatic
         ExerciseOrderingMode.FIXED -> currentFirst + machines

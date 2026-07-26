@@ -32,11 +32,8 @@ import androidx.compose.ui.unit.dp
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
+import java.util.Locale
 import kotlin.math.abs
-import kotlin.math.ceil
-import kotlin.math.floor
-import kotlin.math.log10
-import kotlin.math.pow
 
 internal data class TimeValue(val timestamp: Long, val value: Double)
 
@@ -81,20 +78,6 @@ private data class AxisRange(val min: Double, val max: Double, val ticks: List<D
     val span: Double get() = (max - min).coerceAtLeast(1e-9)
 }
 
-private fun niceCeiling(value: Double): Double {
-    if (!value.isFinite() || value <= 0.0) return 1.0
-    val magnitude = 10.0.pow(floor(log10(value)))
-    val normalized = value / magnitude
-    val nice = when {
-        normalized <= 1.0 -> 1.0
-        normalized <= 2.0 -> 2.0
-        normalized <= 2.5 -> 2.5
-        normalized <= 5.0 -> 5.0
-        else -> 10.0
-    }
-    return nice * magnitude
-}
-
 private fun chartAxisRange(values: List<Double>, tickCounts: IntRange): AxisRange {
     val allowedCounts = tickCounts.filter { it >= 3 }.ifEmpty { listOf(3) }
     val finite = values.filter(Double::isFinite)
@@ -102,41 +85,61 @@ private fun chartAxisRange(values: List<Double>, tickCounts: IntRange): AxisRang
         val count = allowedCounts.first()
         return AxisRange(0.0, 1.0, List(count) { it.toDouble() / (count - 1) })
     }
-    var rawMin = finite.min()
-    var rawMax = finite.max()
+    val rawMin = finite.min()
+    val rawMax = finite.max()
     val rawSpan = rawMax - rawMin
-    val padding = if (rawSpan == 0.0) maxOf(abs(rawMax) * 0.015, 0.25) else rawSpan * 0.015
-    rawMin -= padding
-    rawMax += padding
-    val paddedSpan = (rawMax - rawMin).coerceAtLeast(1e-9)
-    return allowedCounts.map { count ->
-        val step = niceCeiling(paddedSpan / (count - 1))
-        var minimum = floor(rawMin / step) * step
-        var maximum = minimum + step * (count - 1)
-        if (maximum < rawMax) {
-            maximum = ceil(rawMax / step) * step
-            minimum = maximum - step * (count - 1)
-        }
-        AxisRange(minimum, maximum, List(count) { minimum + step * it })
-    }.minBy { range ->
-        range.span / paddedSpan + (range.ticks.size - allowedCounts.first()) * 0.01
+    val padding = if (rawSpan == 0.0) maxOf(abs(rawMax) * 0.01, 0.1) else rawSpan * 0.025
+    val minimum = rawMin - padding
+    val maximum = rawMax + padding
+    val desiredCount = when {
+        finite.distinct().size <= 2 -> 3
+        finite.distinct().size <= 5 -> 4
+        else -> 5
     }
+    val count = allowedCounts.minBy { abs(it - desiredCount) }
+    val step = (maximum - minimum) / (count - 1)
+    return AxisRange(minimum, maximum, List(count) { minimum + step * it })
 }
 
-internal fun trendTimeSeries(points: List<TimeValue>, color: Color, axis: PlotAxis): TimeSeries {
-    if (points.size < 2) return TimeSeries(points, color, axis, showPoints = false)
-    val origin = points.first().timestamp
-    val x = points.map { (it.timestamp - origin) / DAY_MILLIS_SHARED.toDouble() }
+private fun pointsInWindow(points: List<TimeValue>, range: VisibleTimeRange): List<TimeValue> {
+    val visible = points.filter { it.timestamp in range.start..range.end }
+    val firstVisible = visible.firstOrNull() ?: return visible
+    if (firstVisible.timestamp == range.start) return visible
+    val previous = points.lastOrNull { it.timestamp < range.start } ?: return visible
+    val elapsed = (firstVisible.timestamp - previous.timestamp).coerceAtLeast(1L)
+    val fraction = (range.start - previous.timestamp).toDouble() / elapsed
+    val boundaryValue = previous.value + (firstVisible.value - previous.value) * fraction
+    return listOf(TimeValue(range.start, boundaryValue)) + visible
+}
+
+internal fun trendTimeSeries(
+    points: List<TimeValue>,
+    color: Color,
+    axis: PlotAxis,
+    window: ChartWindow? = null,
+): TimeSeries {
+    val sorted = points.sortedBy(TimeValue::timestamp)
+    val range = window?.let {
+        sorted.firstOrNull()?.let { first -> calculateVisibleTimeRange(first.timestamp, sorted.last().timestamp, it) }
+    }
+    val fittedPoints = range?.let { selected -> sorted.filter { it.timestamp in selected.start..selected.end } } ?: sorted
+    if (fittedPoints.size < 2) return TimeSeries(emptyList(), color, axis, showPoints = false)
+    val origin = fittedPoints.first().timestamp
+    val x = fittedPoints.map { (it.timestamp - origin) / DAY_MILLIS_SHARED.toDouble() }
     val meanX = x.average()
-    val meanY = points.map(TimeValue::value).average()
+    val meanY = fittedPoints.map(TimeValue::value).average()
     val denominator = x.sumOf { value -> (value - meanX) * (value - meanX) }
-    if (denominator == 0.0) return TimeSeries(points, color, axis, showPoints = false)
-    val slope = points.indices.sumOf { index ->
-        (x[index] - meanX) * (points[index].value - meanY)
+    if (denominator == 0.0) return TimeSeries(emptyList(), color, axis, showPoints = false)
+    val slope = fittedPoints.indices.sumOf { index ->
+        (x[index] - meanX) * (fittedPoints[index].value - meanY)
     } / denominator
     val intercept = meanY - slope * meanX
+    val lineTimes = range?.let { listOf(it.start, it.end) }
+        ?: listOf(fittedPoints.first().timestamp, fittedPoints.last().timestamp)
     return TimeSeries(
-        points = points.indices.map { index -> TimeValue(points[index].timestamp, intercept + slope * x[index]) },
+        points = lineTimes.map { timestamp ->
+            TimeValue(timestamp, intercept + slope * (timestamp - origin) / DAY_MILLIS_SHARED.toDouble())
+        },
         color = color.copy(alpha = 0.62f),
         axis = axis,
         strokeWidth = 2.5f,
@@ -227,13 +230,20 @@ private fun ChartAxisLabels(
     height: Dp,
     endAligned: Boolean,
 ) {
+    val preferred = range.ticks.map(formatter)
+    val labels = if (preferred.distinct().size == preferred.size) preferred else {
+        (2..4).firstNotNullOfOrNull { decimals ->
+            range.ticks.map { String.format(Locale.US, "%.${decimals}f", it) }
+                .takeIf { it.distinct().size == it.size }
+        } ?: range.ticks.map { String.format(Locale.US, "%.4g", it) }
+    }
     Column(
         Modifier.width(width).height(height),
         verticalArrangement = Arrangement.SpaceBetween,
         horizontalAlignment = if (endAligned) Alignment.End else Alignment.Start,
     ) {
-        range.ticks.asReversed().forEach { tick ->
-            Text(formatter(tick), color = color, maxLines = 1, style = MaterialTheme.typography.labelSmall,
+        labels.asReversed().forEach { label ->
+            Text(label, color = color, maxLines = 1, style = MaterialTheme.typography.labelSmall,
                 textAlign = if (endAligned) TextAlign.End else TextAlign.Start)
         }
     }
@@ -276,8 +286,7 @@ internal fun TimeWindowChart(
     val visibleStart = visibleRange.start
     val visibleEnd = visibleRange.end
     fun visibleValues(axis: PlotAxis) = sortedSeries.filter { it.axis == axis }
-        .flatMap(TimeSeries::points)
-        .filter { it.timestamp in visibleStart..visibleEnd }
+        .flatMap { pointsInWindow(it.points, visibleRange) }
         .map(TimeValue::value)
     val bandValues = bands.flatMap { listOf(it.center - it.tolerance, it.center, it.center + it.tolerance) }
     val leftRange = chartAxisRange(visibleValues(PlotAxis.LEFT) + bandValues, yTickCounts)
@@ -347,7 +356,8 @@ internal fun TimeWindowChart(
                                 PlotAxis.RIGHT -> rightRange
                                 PlotAxis.INDEPENDENT -> independentRange
                             }
-                            val points = item.points.filter { it.timestamp in visibleStart..visibleEnd }
+                            val visibleData = item.points.filter { it.timestamp in visibleStart..visibleEnd }
+                            val points = pointsInWindow(item.points, visibleRange)
                                 .map { Offset(x(it.timestamp), y(it.value, axisRange)) }
                             points.zipWithNext().forEach { (start, end) ->
                                 drawLine(
@@ -363,7 +373,9 @@ internal fun TimeWindowChart(
                                     },
                                 )
                             }
-                            if (item.showPoints) points.forEach { drawCircle(item.color, item.pointRadius, it) }
+                            if (item.showPoints) visibleData.forEach {
+                                drawCircle(item.color, item.pointRadius, Offset(x(it.timestamp), y(it.value, axisRange)))
+                            }
                         }
                     }
                 }

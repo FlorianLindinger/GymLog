@@ -25,7 +25,6 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.FilterChip
-import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -51,7 +50,7 @@ import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
-import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.gymlog.app.R
 import com.gymlog.app.data.AreaAssignment
@@ -77,15 +76,18 @@ fun DetailScreen(
     onAreaColor: (BodyArea, Long) -> Unit,
     onChanged: () -> Unit,
     onEditDetails: (ExerciseEditField) -> Unit,
+    isHidden: Boolean,
+    onDeleteSets: (List<SetRecord>) -> Unit,
+    onDeleteExercise: () -> Unit,
     onDeleted: () -> Unit,
 ) {
     var showWeight by remember { mutableStateOf(false) }
     var showAreas by remember { mutableStateOf(false) }
-    var showPriority by remember { mutableStateOf(false) }
     var confirmDelete by remember { mutableStateOf(false) }
     var deletingSets by remember { mutableStateOf<List<SetRecord>?>(null) }
     var editingSet by remember { mutableStateOf<SetRecord?>(null) }
     var expandedBatch by remember { mutableStateOf<Long?>(null) }
+    var quickEntry by remember { mutableStateOf(false) }
     val machine = summary.machine
     val context = LocalContext.current
     val chartPreferences = remember { context.getSharedPreferences("gym_chart_ranges", 0) }
@@ -94,25 +96,44 @@ fun DetailScreen(
     var customChartEnd by remember(machine.id) { mutableStateOf(chartPreferences.getLong("${machine.id}_end", 0L).takeIf { it > 0L }) }
     val currentUnitSets = currentTrainingUnitSets(summary)
     val first = summary.weightChanges.lastOrNull()?.weight ?: machine.currentWeight
+    val trainedDays = summary.recentSets.map { trainingDate(it.performedAt) }.distinct().size
 
     Column(
         modifier = modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(8.dp),
         verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
+        if (machine.notes.isNotBlank()) {
+            ExerciseNoteCard(machine.notes) { onEditDetails(ExerciseEditField.OVERVIEW_NOTE) }
+        }
+        Button(onClick = { quickEntry = true }, modifier = Modifier.fillMaxWidth()) {
+            Text(
+                when {
+                    machine.trackingMode == "STRENGTH" -> if (currentUnitSets.isEmpty()) "Add level entry" else "Change level entry"
+                    machine.trackingMode == "DURATION" -> if (currentUnitSets.isEmpty()) "Add training" else "Change training"
+                    else -> if (currentUnitSets.isEmpty()) "Add sets" else "Change sets"
+                },
+            )
+        }
         Card(modifier = Modifier.fillMaxWidth().clickable { showWeight = true }) {
             Row(
                 Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 6.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Column(Modifier.weight(1f)) {
-                    Text(formatMetric(machine.currentWeight, machine.trackingMode), style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
+                Text(
+                    formatMetric(machine.currentWeight, machine.trackingMode),
+                    modifier = Modifier.weight(1f),
+                    style = MaterialTheme.typography.headlineMedium,
+                    fontWeight = FontWeight.Bold,
+                )
+                Column(horizontalAlignment = Alignment.End) {
                     Text(
-                        "Started ${formatMetric(first, machine.trackingMode)} · Current ${formatMetric(machine.currentWeight, machine.trackingMode)}",
+                        weightChangeDescription(summary.weightChanges, machine.trackingMode),
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        textAlign = TextAlign.End,
                     )
+                    Text("Started ${formatMetric(first, machine.trackingMode)}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
-                Text(weightChangeDescription(summary.weightChanges, machine.trackingMode), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
 
@@ -137,11 +158,8 @@ fun DetailScreen(
             }
         }
 
-        Card(modifier = Modifier.fillMaxWidth().clickable { onEditDetails(ExerciseEditField.OVERVIEW_NOTE) }) {
-            Column(Modifier.padding(horizontal = 10.dp, vertical = 7.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                Text("Note", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
-                Text(if (machine.notes.isBlank()) "Click to add a note" else machine.notes, color = if (machine.notes.isBlank()) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface)
-            }
+        if (machine.notes.isBlank()) {
+            ExerciseNoteCard("") { onEditDetails(ExerciseEditField.OVERVIEW_NOTE) }
         }
         if (summary.areas.isEmpty()) {
             OutlinedButton(onClick = { showAreas = true }, modifier = Modifier.fillMaxWidth()) { Text("Choose Training Areas") }
@@ -158,15 +176,14 @@ fun DetailScreen(
                 }
             }
         }
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            OutlinedButton(onClick = { showPriority = true }, modifier = Modifier.weight(1f)) { Text("Set Priority") }
-            OutlinedButton(onClick = { repository.setMachineHidden(machine.id, true); onChanged(); onDeleted() }, modifier = Modifier.weight(1f)) { Text("Hide exercise") }
+        OutlinedButton(onClick = { repository.setMachineHidden(machine.id, !isHidden); onChanged() }, modifier = Modifier.fillMaxWidth()) {
+            Text(if (isHidden) "Unhide exercise" else "Hide exercise")
         }
         Card(modifier = Modifier.fillMaxWidth()) {
             Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 Text("Recent Entries", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
                 Text(
-                    "${(summary.weightChanges.size - 1).coerceAtLeast(0)} ${metricName(machine.trackingMode)} changes · ${summary.recentSets.size} recorded sets",
+                    "${(summary.weightChanges.size - 1).coerceAtLeast(0)} ${metricName(machine.trackingMode)} changes · $trainedDays day${if (trainedDays == 1) "" else "s"} trained",
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     style = MaterialTheme.typography.labelSmall,
                 )
@@ -182,8 +199,7 @@ fun DetailScreen(
                             style = MaterialTheme.typography.labelSmall,
                             fontWeight = FontWeight.Medium,
                             fontFamily = FontFamily.Monospace,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
+                            maxLines = 3,
                         )
                         Text(if (expandedBatch == batchKey) "Close" else "Edit", Modifier.clickable { expandedBatch = if (expandedBatch == batchKey) null else batchKey }.padding(horizontal = 6.dp, vertical = 3.dp), color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelMedium)
                         Text("Delete", Modifier.clickable { deletingSets = batch }.padding(horizontal = 6.dp, vertical = 3.dp), color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.labelMedium)
@@ -197,8 +213,7 @@ fun DetailScreen(
                                 style = MaterialTheme.typography.labelSmall,
                                 fontFamily = FontFamily.Monospace,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
+                                maxLines = 2,
                             )
                             Text("Edit", Modifier.clickable { editingSet = set }.padding(horizontal = 6.dp, vertical = 2.dp), color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelSmall)
                             Text("Delete", Modifier.clickable { deletingSets = listOf(set) }.padding(horizontal = 6.dp, vertical = 2.dp), color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.labelSmall)
@@ -227,6 +242,38 @@ fun DetailScreen(
             showWeight = false
         } else null,
     )
+    if (quickEntry) {
+        if (isDirectMetric(machine.trackingMode)) {
+            QuickTrainingDialog(
+                initialMinutes = (currentUnitSets.firstOrNull() ?: summary.recentSets.firstOrNull())?.weight?.toInt() ?: 10,
+                isChange = currentUnitSets.isNotEmpty(),
+                onDismiss = { quickEntry = false },
+                onAdd = {
+                    repository.addTrainingMinutes(machine.id, it)
+                    onChanged()
+                    quickEntry = false
+                },
+                onDelete = currentUnitSets.takeIf { it.isNotEmpty() }?.let { sets ->
+                    { onDeleteSets(sets); quickEntry = false }
+                },
+            )
+        } else {
+            QuickRepDialog(
+                initialReps = initialWheelReps(summary, currentUnitSets),
+                lastReps = previousTrainingUnitReps(summary, currentUnitSets),
+                isChange = currentUnitSets.isNotEmpty(),
+                onDismiss = { quickEntry = false },
+                onAdd = {
+                    repository.addSets(machine.id, it, machine.currentWeight)
+                    onChanged()
+                    quickEntry = false
+                },
+                onDelete = currentUnitSets.takeIf { it.isNotEmpty() }?.let { sets ->
+                    { onDeleteSets(sets); quickEntry = false }
+                },
+            )
+        }
+    }
     if (showCustomChartRange) CustomGymRangeDialog(
         maxTimestamp = System.currentTimeMillis(),
         initialStart = customChartStart ?: chartCutoff("1M") ?: System.currentTimeMillis(),
@@ -238,30 +285,19 @@ fun DetailScreen(
             repository.setChartWindow(machine.id, "CUSTOM"); onChanged(); showCustomChartRange = false
         },
     )
-    if (showPriority) AlertDialog(
-        onDismissRequest = { showPriority = false }, title = { Text("Set Priority") },
-        text = { Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text(if (machine.excludedFromAutoRanking) "Excluded from automatic ranking" else "Automatic ranking adjustment: ${machine.rankingPriority}")
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                FilledTonalButton(onClick = { repository.changeRankingPriority(machine.id, -1); onChanged(); showPriority = false }) { Text("Prioritize") }
-                FilledTonalButton(onClick = { repository.changeRankingPriority(machine.id, 1); onChanged(); showPriority = false }) { Text("Deprioritize") }
-            }
-            TextButton(onClick = { repository.setExcludedFromAutoRanking(machine.id, !machine.excludedFromAutoRanking); onChanged(); showPriority = false }) { Text(if (machine.excludedFromAutoRanking) "Use automatic ranking" else "Exclude from automatic ranking") }
-        } }, confirmButton = { TextButton(onClick = { showPriority = false }) { Text("Close") } },
-    )
     if (showAreas) AreaDialog(summary.areas, areaUsage, areaColors, onAreaColor, onDismiss = { showAreas = false }) {
         repository.saveAreas(machine.id, it)
         onChanged()
         showAreas = false
     }
     deletingSets?.let { sets ->
-        AlertDialog(onDismissRequest = { deletingSets = null }, title = { Text("Delete ${sets.size} set${if (sets.size == 1) "" else "s"}?") }, text = { Text("This cannot be undone.") }, confirmButton = { Button(onClick = { sets.forEach { repository.deleteSet(it.id) }; deletingSets = null; onChanged() }) { Text("Delete") } }, dismissButton = { TextButton(onClick = { deletingSets = null }) { Text("Cancel") } })
+        AlertDialog(onDismissRequest = { deletingSets = null }, title = { Text("Delete ${sets.size} set${if (sets.size == 1) "" else "s"}?") }, text = { Text("You can undo this from the message shown afterwards.") }, confirmButton = { Button(onClick = { onDeleteSets(sets); deletingSets = null }) { Text("Delete") } }, dismissButton = { TextButton(onClick = { deletingSets = null }) { Text("Cancel") } })
     }
     if (confirmDelete) AlertDialog(
         onDismissRequest = { confirmDelete = false },
         title = { Text("Delete ${machine.name}?") },
-        text = { Text("Its sets, notes, body areas, and weight history will be permanently removed.") },
-        confirmButton = { Button(onClick = { repository.deleteMachine(machine.id); onDeleted() }) { Text("Delete") } },
+        text = { Text("Its sets, notes, body areas, and weight history will be removed. You can undo it immediately afterwards.") },
+        confirmButton = { Button(onClick = { onDeleteExercise(); onDeleted() }) { Text("Delete") } },
         dismissButton = { TextButton(onClick = { confirmDelete = false }) { Text("Cancel") } },
     )
     editingSet?.let { set ->
@@ -269,6 +305,19 @@ fun DetailScreen(
             repository.updateSet(set.id, reps, weight)
             onChanged()
             editingSet = null
+        }
+    }
+}
+
+@Composable
+private fun ExerciseNoteCard(note: String, onEdit: () -> Unit) {
+    Card(modifier = Modifier.fillMaxWidth().clickable(onClick = onEdit)) {
+        Column(Modifier.padding(horizontal = 10.dp, vertical = 6.dp), verticalArrangement = Arrangement.spacedBy(1.dp)) {
+            Text("Note", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+            Text(
+                note.ifBlank { "Click to add a note" },
+                color = if (note.isBlank()) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface,
+            )
         }
     }
 }
@@ -350,9 +399,9 @@ private fun DualAxisSessionPlot(
     TimeWindowChart(
         series = baseSeries + if (showTrend) {
             listOf(
-                trendTimeSeries(reps, repsColor, PlotAxis.LEFT),
-                trendTimeSeries(weight, weightColor, PlotAxis.RIGHT),
-                trendTimeSeries(volume, Color(0xFF007C91), PlotAxis.INDEPENDENT),
+                trendTimeSeries(reps, repsColor, PlotAxis.LEFT, window),
+                trendTimeSeries(weight, weightColor, PlotAxis.RIGHT, window),
+                trendTimeSeries(volume, Color(0xFF007C91), PlotAxis.INDEPENDENT, window),
             )
         } else emptyList(),
         window = window,
@@ -372,7 +421,7 @@ private fun AxisMetricPlot(
     Text("Minutes", color = color, style = MaterialTheme.typography.labelSmall)
     TimeWindowChart(
         series = listOf(TimeSeries(points, color)) +
-            if (showTrend) listOf(trendTimeSeries(points, color, PlotAxis.LEFT)) else emptyList(),
+            if (showTrend) listOf(trendTimeSeries(points, color, PlotAxis.LEFT, window)) else emptyList(),
         window = window,
         leftColor = color,
         formatLeft = ::formatAxisValue,
@@ -522,16 +571,21 @@ private fun AreaDialog(
         }
     }
     var colorArea by remember { mutableStateOf<BodyArea?>(null) }
-    val sortedAreas = BodyArea.entries.sortedWith(
-        compareByDescending<BodyArea> { usage[it] ?: 0.0 }.thenBy { it.label },
+    val sortedAreas = listOf(
+        BodyArea.TRAPS, BodyArea.SHOULDERS, BodyArea.CHEST, BodyArea.UPPER_BACK,
+        BodyArea.BICEPS, BodyArea.TRICEPS, BodyArea.FOREARMS, BodyArea.CORE,
+        BodyArea.LOWER_BACK, BodyArea.GLUTES, BodyArea.ABDUCTORS, BodyArea.ADDUCTORS,
+        BodyArea.QUADS, BodyArea.HAMSTRINGS, BodyArea.CALVES,
     )
     AlertDialog(
+        modifier = Modifier.fillMaxWidth(0.98f),
         onDismissRequest = onDismiss,
         title = {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
+                TextButton(onClick = onDismiss) { Text("Cancel") }
                 Text("Training Areas", modifier = Modifier.weight(1f))
                 Button(
                     onClick = {
@@ -546,12 +600,18 @@ private fun AreaDialog(
         text = {
             Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 BodyMapPicker(
-                    choices = choices,
-                    colors = colors,
                     modifier = Modifier.fillMaxWidth().aspectRatio(960f / 836f),
                 )
+                Text(
+                    "Front and back reference — choose the matching gym area below.",
+                    modifier = Modifier.fillMaxWidth(),
+                    textAlign = TextAlign.Center,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
                 sortedAreas.forEach { area ->
-                    Row(Modifier.fillMaxWidth().padding(vertical = 1.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.fillMaxWidth().padding(vertical = 3.dp)) {
+                      Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                         Text(
                             buildString {
                                 append(area.label)
@@ -560,10 +620,10 @@ private fun AreaDialog(
                             },
                             Modifier.weight(1f),
                             style = MaterialTheme.typography.bodySmall,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
                         )
                         Box(Modifier.width(18.dp).height(18.dp).background(Color(colors[area] ?: area.color), CircleShape).border(1.dp, MaterialTheme.colorScheme.outline, CircleShape).clickable { colorArea = area })
+                      }
+                      Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                         Spacer(Modifier.width(4.dp))
                         AreaStrengthChoice("½", choices[area] == Strength.HALF) {
                             choices[area] = if (choices[area] == Strength.HALF) null else Strength.HALF
@@ -572,8 +632,10 @@ private fun AreaDialog(
                         AreaStrengthChoice("Full", choices[area] == Strength.FULL) {
                             choices[area] = if (choices[area] == Strength.FULL) null else Strength.FULL
                         }
+                      }
                     }
                 }
+                Text("Diagram: OpenStax; adaptation by Tomáš Kebert / umimeto.org. See third-party notices.", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
 }
         },
         confirmButton = {},
@@ -609,9 +671,9 @@ private fun formatAreaUsage(value: Double): String =
     if (value % 1.0 == 0.0) value.toInt().toString() else String.format(Locale.US, "%.1f", value)
 
 @Composable
-private fun BodyMapPicker(choices: Map<BodyArea, Strength?>, colors: Map<BodyArea, Long>, modifier: Modifier = Modifier) {
+private fun BodyMapPicker(modifier: Modifier = Modifier) {
     Column(modifier, horizontalAlignment = Alignment.CenterHorizontally) {
-        Image(painter = painterResource(R.drawable.muscles_front_back), contentDescription = "Front and back muscle reference", modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Fit)
+        Image(painter = painterResource(R.drawable.muscles_front_back), contentDescription = "Front and back muscle reference", modifier = Modifier.weight(1f).fillMaxWidth(), contentScale = ContentScale.Fit)
         Text("Front (left) · Back (right)", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
@@ -673,7 +735,10 @@ private fun formatRecentEntry(sets: List<SetRecord>, trackingMode: String, times
         formatMetric(first.weight, trackingMode)
     }
     val repetitions = if (isDirectMetric(trackingMode)) "" else sets.joinToString(",") { it.reps.toString() }
-    return "${metric.take(12).padEnd(12)} - ${repetitions.take(18).padEnd(18)} - ${formatTimestamp(timestamp)}"
+    val firstLine = "${metric.padEnd(12)} - ${repetitions.padEnd(12)} - ${formatTimestamp(timestamp)}"
+    if (isDirectMetric(trackingMode)) return firstLine
+    val volume = sets.sumOf { it.weight * it.reps }
+    return "$firstLine\nVolume: ${formatAxisValue(volume)} kg"
 }
 
 private fun formatTimestamp(timestamp: Long): String = DateTimeFormatter.ofPattern("dd.MM.yy")

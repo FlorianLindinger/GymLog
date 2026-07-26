@@ -352,6 +352,12 @@ class GymRepository(context: Context) {
 
     fun setMachineHidden(id: Long, hidden: Boolean) { preferences.edit().putBoolean("hidden_machine_$id", hidden).apply() }
 
+    fun showHiddenExercises(): Boolean = preferences.getBoolean("show_hidden_exercises", false)
+
+    fun setShowHiddenExercises(show: Boolean) {
+        preferences.edit().putBoolean("show_hidden_exercises", show).apply()
+    }
+
     fun setMachinePinned(id: Long, pinned: Boolean) {
         val database = db.writableDatabase
         val planId = activeTrainingPlanId()
@@ -380,6 +386,14 @@ class GymRepository(context: Context) {
 
     fun changeRankingPriority(id: Long, delta: Int) {
         preferences.edit().putInt("ranking_priority_$id", (preferences.getInt("ranking_priority_$id", 0) + delta).coerceIn(-20, 20)).apply()
+    }
+
+    fun resetMachineOrdering(id: Long) {
+        setMachinePinned(id, false)
+        preferences.edit()
+            .putInt("ranking_priority_$id", 0)
+            .putBoolean("ranking_excluded_$id", false)
+            .apply()
     }
 
     fun setExcludedFromAutoRanking(id: Long, excluded: Boolean) {
@@ -672,12 +686,16 @@ class GymRepository(context: Context) {
                     put("currentWeight", summary.machine.currentWeight)
                     put("sortOrder", summary.machine.sortOrder)
                     put("pinned", summary.machine.pinned)
+                    put("rankingPriority", summary.machine.rankingPriority)
+                    put("excludedFromAutoRanking", summary.machine.excludedFromAutoRanking)
+                    put("hidden", isMachineHidden(summary.machine.id))
                     put("areas", JSONArray().apply {
                         summary.areas.forEach { put(JSONObject().put("area", it.area.name).put("strength", it.strength.value)) }
                     })
                     put("sets", JSONArray().apply {
                         loadSets(db.readableDatabase, summary.machine.id, null).forEach {
                             put(JSONObject().apply {
+                                put("id", it.id)
                                 if (summary.machine.trackingMode == "STRENGTH") {
                                     put("recordedLevel", it.reps)
                                     put("trainingMinutes", it.weight)
@@ -701,7 +719,7 @@ class GymRepository(context: Context) {
         return root.toString(2)
     }
 
-    fun importJson(json: String) {
+    fun importJson(json: String, preserveIds: Boolean = false) {
         val root = JSONObject(json)
         val version = root.optInt("version", -1)
         require(version == 5) { "Outdated GymLog backup format $version; this WIP build accepts format 5 only" }
@@ -722,6 +740,7 @@ class GymRepository(context: Context) {
             for (planIndex in 0 until plans.length()) {
                 val plan = plans.getJSONObject(planIndex)
                 val newId = database.insertOrThrow("training_plans", null, ContentValues().apply {
+                    if (preserveIds) put("id", plan.getLong("id"))
                     put("name", plan.getString("name"))
                     put("sort_order", plan.getInt("sortOrder"))
                     put("notes", plan.optString("notes"))
@@ -746,6 +765,7 @@ class GymRepository(context: Context) {
                 val item = machines.getJSONObject(index)
                 val trackingMode = item.getString("trackingMode")
                 val id = database.insertOrThrow("machines", null, ContentValues().apply {
+                    if (preserveIds) put("id", item.getLong("id"))
                     put("plan_id", importedPlanIds[item.getLong("planId")] ?: targetPlanId)
                     put("name", capitalizeName(item.getString("name")))
                     put("title_note", item.optString("titleNote"))
@@ -771,6 +791,7 @@ class GymRepository(context: Context) {
                 for (setIndex in 0 until sets.length()) {
                     val set = sets.getJSONObject(setIndex)
                     database.insertOrThrow("sets", null, ContentValues().apply {
+                        if (preserveIds && set.has("id")) put("id", set.getLong("id"))
                         put("machine_id", id)
                         put("reps", if (trackingMode == "STRENGTH") set.getInt("recordedLevel") else set.getInt("reps"))
                         put("weight", if (trackingMode == "STRENGTH") set.getDouble("trainingMinutes") else set.getDouble("weight"))
@@ -783,6 +804,11 @@ class GymRepository(context: Context) {
                     addWeightHistory(database, id, change.getDouble("weight"), change.getLong("changedAt"))
                 }
                 if (changes.length() == 0) addWeightHistory(database, id, item.getDouble("currentWeight"), System.currentTimeMillis())
+                preferences.edit()
+                    .putInt("ranking_priority_$id", item.optInt("rankingPriority", 0))
+                    .putBoolean("ranking_excluded_$id", item.optBoolean("excludedFromAutoRanking", false))
+                    .putBoolean("hidden_machine_$id", item.optBoolean("hidden", false))
+                    .apply()
             }
         }
         val activePlanId = importedPlanIds[root.getLong("activePlanId")]

@@ -343,7 +343,7 @@ private fun StatsChart(
             val primary = MaterialTheme.colorScheme.primary
             TimeWindowChart(
                 series = listOf(TimeSeries(points, primary, strokeWidth = 4f, pointRadius = 5f)) +
-                    if (showTrend) listOf(trendTimeSeries(points, primary, PlotAxis.LEFT)) else emptyList(),
+                    if (showTrend) listOf(trendTimeSeries(points, primary, PlotAxis.LEFT, window)) else emptyList(),
                 window = window,
                 leftColor = primary,
                 formatLeft = ::formatStatsAxisValue,

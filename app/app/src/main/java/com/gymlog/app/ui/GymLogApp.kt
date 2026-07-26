@@ -1,5 +1,7 @@
 package com.gymlog.app.ui
 
+import android.content.Intent
+import android.provider.Settings
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -16,6 +18,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
@@ -27,6 +30,10 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarDuration
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -37,11 +44,14 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.unit.dp
@@ -54,8 +64,9 @@ import com.gymlog.app.data.ExerciseOrderingMode
 import com.gymlog.app.data.MachineSummary
 import com.gymlog.app.data.ProgressionSettings
 import com.gymlog.app.data.TrainingPlan
+import kotlinx.coroutines.launch
 
-private enum class Screen { OVERVIEW, BODY, STATS, HISTORY, BACKUP, PLANS, DETAIL }
+private enum class Screen { OVERVIEW, BODY, STATS, ORDER, HISTORY, BACKUP, PLANS, DETAIL }
 enum class ExerciseEditField { NAME, TITLE_NOTE, OVERVIEW_NOTE }
 
 private data class AppUiState(
@@ -107,17 +118,42 @@ fun GymLogApp(
     var showMenu by remember { mutableStateOf(false) }
     var confirmImport by remember { mutableStateOf(false) }
     var showProgressionSettings by remember { mutableStateOf(false) }
-    var showExerciseOrdering by remember { mutableStateOf(false) }
     var showAccentColor by remember { mutableStateOf(false) }
     var showPlanNotes by remember { mutableStateOf(false) }
     var showHelp by remember { mutableStateOf(false) }
     var confirmDeleteCurrentTraining by remember { mutableStateOf(false) }
     var editingExerciseField by remember { mutableStateOf<ExerciseEditField?>(null) }
+    var importUndoSnapshot by remember { mutableStateOf<String?>(null) }
+    var showHiddenExercises by rememberSaveable { mutableStateOf(repository.showHiddenExercises()) }
+    val overviewListState = rememberLazyListState()
+    val snackbarHostState = remember { SnackbarHostState() }
+    val scope = rememberCoroutineScope()
 
     fun refresh() {
         uiStateResult = repository.loadUiStateResult()
     }
-    LaunchedEffect(externalDataVersion) { refresh() }
+    fun deleteWithUndo(message: String, action: () -> Unit) {
+        val snapshot = repository.exportJson()
+        action()
+        refresh()
+        scope.launch {
+            snackbarHostState.currentSnackbarData?.dismiss()
+            if (snackbarHostState.showSnackbar(message, "Undo", duration = SnackbarDuration.Long) == SnackbarResult.ActionPerformed) {
+                repository.importJson(snapshot, preserveIds = true)
+                refresh()
+            }
+        }
+    }
+    LaunchedEffect(externalDataVersion) {
+        refresh()
+        importUndoSnapshot?.let { snapshot ->
+            importUndoSnapshot = null
+            if (snackbarHostState.showSnackbar("Backup restored", "Undo", duration = SnackbarDuration.Long) == SnackbarResult.ActionPerformed) {
+                repository.importJson(snapshot, preserveIds = true)
+                refresh()
+            }
+        }
+    }
 
     val loadError = uiStateResult.exceptionOrNull()
     if (loadError != null) {
@@ -168,6 +204,7 @@ fun GymLogApp(
     }
 
     Scaffold(
+        snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             if (screen != Screen.OVERVIEW && screen != Screen.BODY) TopAppBar(
                 title = {
@@ -190,6 +227,7 @@ fun GymLogApp(
                             Screen.OVERVIEW -> ""
                             Screen.BODY -> ""
                             Screen.STATS -> "Stats"
+                            Screen.ORDER -> "Exercise Order"
                             Screen.HISTORY -> "History"
                             Screen.BACKUP -> "Data & Backup"
                             Screen.PLANS -> "Training Plans"
@@ -227,7 +265,14 @@ fun GymLogApp(
                 onAdd = { showAdd = true },
                 onMenu = { showMenu = true },
                 onStats = { screen = Screen.STATS },
+                onOrder = { screen = Screen.ORDER },
                 onBody = { screen = Screen.BODY },
+                listState = overviewListState,
+                showHidden = showHiddenExercises,
+                onShowHiddenChanged = {
+                    showHiddenExercises = it
+                    repository.setShowHiddenExercises(it)
+                },
                 onEditPlanNotes = { showPlanNotes = true },
                 areaFrequency = areaFrequency,
                 onQuickSet = { machine, reps ->
@@ -238,7 +283,7 @@ fun GymLogApp(
                     }
                     refresh()
                 },
-                onDeleteCurrentExerciseSets = { machine -> repository.deleteCurrentExerciseSets(machine.machine.id); refresh() },
+                onDeleteCurrentExerciseSets = { machine -> deleteWithUndo("Current ${machine.machine.name} entries deleted") { repository.deleteCurrentExerciseSets(machine.machine.id) } },
                 onMetricChange = { machine, value ->
                     repository.changeWeight(machine.machine.id, value)
                     refresh()
@@ -258,7 +303,6 @@ fun GymLogApp(
                 onHide = { machine -> repository.setMachineHidden(machine.machine.id, true); refresh() },
                 onRankingChange = { machine, delta -> repository.changeRankingPriority(machine.machine.id, delta); refresh() },
                 onRankingExcluded = { machine, excluded -> repository.setExcludedFromAutoRanking(machine.machine.id, excluded); refresh() },
-                onUnhide = { machine -> repository.setMachineHidden(machine.machine.id, false); refresh() },
             )
             Screen.BODY -> BodyOverviewScreen(
                 snapshot = bodyData,
@@ -275,15 +319,26 @@ fun GymLogApp(
                     repository.addHistoricalSet(machineId, reps, weight, performedAt)
                     refresh()
                 },
-                onDeleteSet = { repository.deleteSet(it); refresh() },
-                onDeleteExerciseDay = { machineId, start, end -> repository.deleteExerciseDay(machineId, start, end); refresh() },
-                onDeleteTrainingDay = { start, end -> repository.deleteTrainingDay(start, end); refresh() },
+                onDeleteSet = { id -> deleteWithUndo("Set deleted") { repository.deleteSet(id) } },
+                onDeleteExerciseDay = { machineId, start, end -> deleteWithUndo("Exercise entries deleted") { repository.deleteExerciseDay(machineId, start, end) } },
+                onDeleteTrainingDay = { start, end -> deleteWithUndo("Training day deleted") { repository.deleteTrainingDay(start, end) } },
             )
             Screen.STATS -> StatsScreen(
                 history = uiState.history,
                 machines = uiState.machines,
                 modifier = Modifier.padding(padding),
                 onHistory = { screen = Screen.HISTORY },
+            )
+            Screen.ORDER -> OrderScreen(
+                machines = uiState.machines,
+                mode = uiState.exerciseOrderingMode,
+                modifier = Modifier.padding(padding),
+                onMode = { repository.setExerciseOrderingMode(it); refresh() },
+                onMove = { id, direction -> repository.moveMachine(id, direction); refresh() },
+                onPinned = { id, pinned -> repository.setMachinePinned(id, pinned); refresh() },
+                onPriority = { id, delta -> repository.changeRankingPriority(id, delta); refresh() },
+                onAutomatic = { id, enabled -> repository.setExcludedFromAutoRanking(id, !enabled); refresh() },
+                onReset = { id -> repository.resetMachineOrdering(id); refresh() },
             )
             Screen.PLANS -> TrainingPlansScreen(
                 plans = uiState.trainingPlans,
@@ -300,7 +355,7 @@ fun GymLogApp(
                     screen = Screen.OVERVIEW
                 },
                 onRename = { id, name -> repository.renameTrainingPlan(id, name); refresh() },
-                onDelete = { repository.deleteTrainingPlan(it); refresh() },
+                onDelete = { id -> deleteWithUndo("Training plan deleted") { repository.deleteTrainingPlan(id) } },
                 onDuplicate = { repository.duplicateTrainingPlan(it); refresh() },
                 onCreateDemo = {
                     repository.createDemoTrainingPlan()
@@ -329,6 +384,9 @@ fun GymLogApp(
                     onAreaColor = { area, color -> repository.setAreaColor(area, color); refresh() },
                     onChanged = ::refresh,
                     onEditDetails = { editingExerciseField = it },
+                    isHidden = repository.isMachineHidden(summary.machine.id),
+                    onDeleteSets = { sets -> deleteWithUndo("${sets.size} set${if (sets.size == 1) "" else "s"} deleted") { sets.forEach { repository.deleteSet(it.id) } } },
+                    onDeleteExercise = { deleteWithUndo("${summary.machine.name} deleted") { repository.deleteMachine(summary.machine.id) } },
                     onDeleted = {
                         refresh()
                         screen = Screen.OVERVIEW
@@ -365,7 +423,7 @@ fun GymLogApp(
                     ),
                 ) {
                     Column(Modifier.padding(10.dp)) {
-                        Text("Plan notes", style = MaterialTheme.typography.labelLarge)
+                        Text("Training Plan Notes", style = MaterialTheme.typography.labelLarge)
                         Text(
                             activePlan?.notes?.ifBlank { "Tap to add a note." } ?: "No active training plan.",
                             color = MaterialTheme.colorScheme.onSecondaryContainer,
@@ -374,7 +432,6 @@ fun GymLogApp(
                 }
                 TextButton(onClick = { showMenu = false; screen = Screen.PLANS }) { Text("Training Plans") }
                 TextButton(onClick = { showMenu = false; showProgressionSettings = true }) { Text("Progress Warnings") }
-                TextButton(onClick = { showMenu = false; showExerciseOrdering = true }) { Text("Exercise Ordering") }
                 TextButton(onClick = { showMenu = false; screen = Screen.BACKUP }) { Text("Data, Backup & Sync") }
                 TextButton(onClick = { showMenu = false; showAccentColor = true }) { Text("UI Color") }
                 TextButton(onClick = { showMenu = false; showHelp = true }) { Text("Help & Explanations") }
@@ -418,8 +475,7 @@ fun GymLogApp(
         text = { Text("This removes all entries in the current six-hour training unit from the active plan.") },
         confirmButton = {
             Button(onClick = {
-                repository.deleteCurrentTraining()
-                refresh()
+                deleteWithUndo("Current training deleted") { repository.deleteCurrentTraining() }
                 confirmDeleteCurrentTraining = false
             }) { Text("Delete Training") }
         },
@@ -449,17 +505,6 @@ fun GymLogApp(
         },
     )
 
-    if (showExerciseOrdering) ExerciseOrderingDialog(
-        current = uiState.exerciseOrderingMode,
-        onDismiss = { showExerciseOrdering = false; showMenu = true },
-        onSave = {
-            repository.setExerciseOrderingMode(it)
-            refresh()
-            showExerciseOrdering = false
-            showMenu = true
-        },
-    )
-
     if (showAccentColor) AccentColorDialog(
         current = repository.accentColor(),
         onDismiss = { showAccentColor = false; showMenu = true },
@@ -476,12 +521,10 @@ fun GymLogApp(
                 machineName = machine.name,
                 titleNote = machine.titleNote,
                 overviewNote = machine.notes,
-                pinned = machine.pinned,
                 initialFocus = focus,
                 onDismiss = { editingExerciseField = null },
-                onSave = { name, titleNote, overviewNote, pinned ->
+                onSave = { name, titleNote, overviewNote ->
                     repository.updateMachine(machine.id, name, titleNote, overviewNote, machine.pauseTime)
-                    if (pinned != machine.pinned) repository.setMachinePinned(machine.id, pinned)
                     refresh()
                     editingExerciseField = null
                 },
@@ -495,6 +538,7 @@ fun GymLogApp(
         text = { Text("Restoring replaces all current GymLog data. Export a backup first if you want to keep it.") },
         confirmButton = {
             Button(onClick = {
+                importUndoSnapshot = repository.exportJson()
                 confirmImport = false
                 onImport()
             }) { Text("Choose Backup") }
@@ -508,15 +552,13 @@ private fun ExerciseDetailsDialog(
     machineName: String,
     titleNote: String,
     overviewNote: String,
-    pinned: Boolean,
     initialFocus: ExerciseEditField,
     onDismiss: () -> Unit,
-    onSave: (String, String, String, Boolean) -> Unit,
+    onSave: (String, String, String) -> Unit,
 ) {
     var name by remember(machineName) { mutableStateOf(machineName) }
     var title by remember(titleNote) { mutableStateOf(titleNote) }
     var note by remember(overviewNote) { mutableStateOf(overviewNote) }
-    var keepAtTop by remember(pinned) { mutableStateOf(pinned) }
     val nameFocus = remember { FocusRequester() }
     val titleFocus = remember { FocusRequester() }
     val noteFocus = remember { FocusRequester() }
@@ -559,56 +601,10 @@ private fun ExerciseDetailsDialog(
             }
         },
         confirmButton = {
-            Button(onClick = { onSave(name.trim(), title.trim(), note.trim(), keepAtTop) }, enabled = name.isNotBlank()) {
+            Button(onClick = { onSave(name.trim(), title.trim(), note.trim()) }, enabled = name.isNotBlank()) {
                 Text("Save")
             }
         },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
-    )
-}
-
-@Composable
-private fun ExerciseOrderingDialog(
-    current: ExerciseOrderingMode,
-    onDismiss: () -> Unit,
-    onSave: (ExerciseOrderingMode) -> Unit,
-) {
-    var selected by remember(current) { mutableStateOf(current) }
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Exercise Ordering") },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                ExerciseOrderingMode.entries.forEach { mode ->
-                    FilterChip(
-                        selected = selected == mode,
-                        onClick = { selected = mode },
-                        label = {
-                            Text(
-                                when (mode) {
-                                    ExerciseOrderingMode.AUTOMATIC -> "Automatic"
-                                    ExerciseOrderingMode.MIXED -> "Mixed"
-                                    ExerciseOrderingMode.FIXED -> "Fixed"
-                                },
-                            )
-                        },
-                    )
-                    Text(
-                        when (mode) {
-                            ExerciseOrderingMode.AUTOMATIC ->
-                                "Smart-rank every exercise by current training, conflicts, previous training, and total use."
-                            ExerciseOrderingMode.MIXED ->
-                                "Keep exercises marked Keep at Top manually ordered first; smart-rank everything else."
-                            ExerciseOrderingMode.FIXED ->
-                                "Keep the complete list in your manual order. The current exercise still appears first."
-                        },
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-            }
-        },
-        confirmButton = { Button(onClick = { onSave(selected) }) { Text("Save") } },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
     )
 }
@@ -641,24 +637,81 @@ private fun DataRecoveryDialog(
 }
 
 @Composable
-private fun ReorderScreen(
+private fun OrderScreen(
     machines: List<MachineSummary>,
+    mode: ExerciseOrderingMode,
     modifier: Modifier = Modifier,
+    onMode: (ExerciseOrderingMode) -> Unit,
     onMove: (Long, Int) -> Unit,
+    onPinned: (Long, Boolean) -> Unit,
+    onPriority: (Long, Int) -> Unit,
+    onAutomatic: (Long, Boolean) -> Unit,
+    onReset: (Long) -> Unit,
 ) {
+    val ordered = machines.sortedBy { it.machine.sortOrder }
     LazyColumn(
         modifier = modifier.fillMaxSize(),
         contentPadding = PaddingValues(16.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
-        item { Text("Use the arrows to arrange your routine. The overview follows this order.", color = MaterialTheme.colorScheme.onSurfaceVariant) }
-        itemsIndexed(machines, key = { _, item -> item.machine.id }) { index, item ->
-            androidx.compose.material3.Card {
-                Row(Modifier.padding(12.dp), horizontalArrangement = Arrangement.SpaceBetween) {
-                    Text("${index + 1}. ${item.machine.name}", Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
-                    TextButton(onClick = { onMove(item.machine.id, -1) }, enabled = index > 0) { Text("▲") }
-                    Spacer(Modifier.width(2.dp))
-                    TextButton(onClick = { onMove(item.machine.id, 1) }, enabled = index < machines.lastIndex) { Text("▼") }
+        item {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("Ordering mode", style = MaterialTheme.typography.titleMedium)
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    ExerciseOrderingMode.entries.forEach { choice ->
+                        FilterChip(
+                            selected = mode == choice,
+                            onClick = { onMode(choice) },
+                            label = { Text(when (choice) {
+                                ExerciseOrderingMode.AUTOMATIC -> "Automatic"
+                                ExerciseOrderingMode.MIXED -> "Mixed"
+                                ExerciseOrderingMode.FIXED -> "Manual"
+                            }) },
+                            modifier = Modifier.weight(1f),
+                        )
+                    }
+                }
+                Text(
+                    when (mode) {
+                        ExerciseOrderingMode.AUTOMATIC -> "GymLog orders the full list from training state, muscle clashes, usage, and your tie-break priority."
+                        ExerciseOrderingMode.MIXED -> "Pinned exercises stay first in manual order. GymLog orders the rest automatically."
+                        ExerciseOrderingMode.FIXED -> "Automatic ordering is off. The arrow order is used, except that the active exercise remains first."
+                    },
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+        itemsIndexed(ordered, key = { _, item -> item.machine.id }) { index, item ->
+            val machine = item.machine
+            Card(Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(7.dp)) {
+                    Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                        Text("${index + 1}. ${machine.name}", Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
+                        val manuallyOrdered = mode == ExerciseOrderingMode.FIXED ||
+                            (mode == ExerciseOrderingMode.MIXED && machine.pinned) ||
+                            machine.excludedFromAutoRanking
+                        TextButton(onClick = { onMove(machine.id, -1) }, enabled = manuallyOrdered && index > 0) { Text("▲") }
+                        TextButton(onClick = { onMove(machine.id, 1) }, enabled = manuallyOrdered && index < ordered.lastIndex) { Text("▼") }
+                    }
+                    Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text("Automatic ranking", style = MaterialTheme.typography.labelLarge)
+                            Text(if (machine.excludedFromAutoRanking) "Uses its manual position after auto-ranked exercises" else "Included in smart ordering", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                        Switch(checked = !machine.excludedFromAutoRanking, onCheckedChange = { onAutomatic(machine.id, it) })
+                    }
+                    if (mode == ExerciseOrderingMode.MIXED) {
+                        Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                            Text("Keep in manual section", Modifier.weight(1f))
+                            Switch(checked = machine.pinned, onCheckedChange = { onPinned(machine.id, it) })
+                        }
+                    }
+                    Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                        Text("Tie-break priority ${-machine.rankingPriority}", Modifier.weight(1f))
+                        TextButton(onClick = { onPriority(machine.id, 1) }) { Text("Lower") }
+                        TextButton(onClick = { onPriority(machine.id, -1) }) { Text("Higher") }
+                    }
+                    TextButton(onClick = { onReset(machine.id) }, modifier = Modifier.fillMaxWidth()) { Text("Clear fixed position and priority") }
                 }
             }
         }
@@ -674,6 +727,7 @@ private fun BackupScreen(
     onExport: () -> Unit,
     onImport: () -> Unit,
 ) {
+    val context = LocalContext.current
     Column(
         modifier = modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(20.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
@@ -715,9 +769,16 @@ private fun BackupScreen(
             Switch(checked = automaticBackupEnabled, onCheckedChange = onAutomaticBackupChanged)
         }
         Text(
-            "This is not live sync. Android decides when an automatic backup runs and may restore it after reinstalling the app or while setting up another phone. Changes do not immediately appear on a second phone.",
+            "This is not live sync. Android does not let apps force a full cloud backup; it decides when one runs. You can open the system backup page to check that device backup is enabled.",
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
+        androidx.compose.material3.OutlinedButton(
+            onClick = {
+                runCatching { context.startActivity(Intent("android.settings.BACKUP_SETTINGS")) }
+                    .getOrElse { context.startActivity(Intent(Settings.ACTION_SETTINGS)) }
+            },
+            modifier = Modifier.fillMaxWidth(),
+        ) { Text("Open Android Backup Settings") }
         Text("Manual File Backup", style = MaterialTheme.typography.titleMedium)
         Text("Export creates a readable JSON copy containing every plan, exercise, note, body area, metric change, and set. Choose Google Drive in the file picker if you want to move it between phones yourself.")
         Button(onClick = onExport, modifier = Modifier.fillMaxWidth()) { Text("Download Backup") }
@@ -782,7 +843,7 @@ private fun TrainingPlanNotesDialog(
     var isPinned by remember(pinned) { mutableStateOf(pinned) }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Training Plan Note") },
+        title = { Text("Training Plan Notes") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 androidx.compose.material3.OutlinedTextField(
@@ -790,7 +851,7 @@ private fun TrainingPlanNotesDialog(
                     onValueChange = { value = it },
                     modifier = Modifier.fillMaxWidth(),
                     minLines = 5,
-                    label = { Text("Training Plan Note") },
+                    label = { Text("Training Plan Notes") },
                 )
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                     Column(Modifier.weight(1f)) {

@@ -86,7 +86,7 @@ fun TrainingPlansScreen(
         AlertDialog(
             onDismissRequest = { deleting = null },
             title = { Text("Delete ${plan.name}?") },
-            text = { Text("This permanently deletes every exercise and recorded set in this plan.") },
+            text = { Text("This deletes every exercise and recorded set in this plan. You can undo it immediately afterwards.") },
             confirmButton = { Button(onClick = { onDelete(plan.id); deleting = null }) { Text("Delete") } },
             dismissButton = { TextButton(onClick = { deleting = null }) { Text("Cancel") } },
         )
