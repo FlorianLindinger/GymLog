@@ -36,7 +36,8 @@ be run directly:
 
 - `helpers\android_env.bat` locates Java, the Android SDK, and ADB, and keeps
   disposable Gradle output outside the repository.
-- `helpers\release.bat` builds, signs, and tags an explicit release version.
+- helpers\release.bat builds, signs, and tags an explicit release version.
+- helpers\release_version.ps1 implements the shared version bump, copy, and push flow.
 - `helpers\google_drive_sync_status.ps1` performs a short, bounded query for a
   Windows per-file sync status.
 
