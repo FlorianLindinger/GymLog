@@ -35,8 +35,8 @@ if ($Bump -ne 'none') {
     if ($LASTEXITCODE -ne 0) { throw 'Could not commit the version bump.' }
 }
 
-git rev-parse "v$version" *> $null
-if ($LASTEXITCODE -eq 0) { throw "Tag v$version already exists." }
+if ((git tag --list "v$version") -eq "v$version") { throw "Tag v$version already exists." }
+
 
 git push origin main
 if ($LASTEXITCODE -ne 0) { throw 'Pushing main failed. No tag was created.' }
