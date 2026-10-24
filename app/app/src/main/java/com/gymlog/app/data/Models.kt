@@ -44,8 +44,17 @@ enum class BodyArea(val label: String, val color: Long) {
 }
 
 enum class Strength(val label: String, val value: Double) {
-    HALF("Half", 0.5),
-    FULL("Full", 1.0),
+    LIGHT("Low", 0.25),
+    HALF("Medium", 0.5),
+    FULL("High", 1.0);
+
+    companion object {
+        fun fromStorage(value: Double): Strength = when {
+            value >= 0.75 -> FULL
+            value >= 0.375 -> HALF
+            else -> LIGHT
+        }
+    }
 }
 
 data class AreaAssignment(

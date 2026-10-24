@@ -6,12 +6,17 @@ Notable changes to GymLog are recorded here. Planned work belongs in `TODO.md`.
 
 ### Changed
 
+- Automatic exercise ordering compares weighted body-region overlap with the current and previous distinct exercises, then prefers fewer lifetime training days when overlap ties. Manual ordering stays available.
+- Body-region intensity now has Low, Medium, and High levels, with separate statistics and preserved legacy profile weights.
 - Show hours per recorded training in the last 30 days, omitting rest-day zeroes and preserving fractional hours in the latest duration.
 - Use roughly four to six evenly spaced, round Y-axis ticks across all charts. Axis limits stay nonnegative, and trends and target bands are clipped at the plot edges.
 - Windows build helpers also find Android Studio and the Android SDK in their configured locations on drive D.
 
 ### Added
 
+- An offline catalogue of 177 exercises with English/German names, aliases, equipment filters, and editable suggested muscle profiles.
+- Body-region editing directly from the overview, profile selection during exercise creation, and visible estimated overlap and training counts.
+- Regression tests and [profile/ranking documentation](docs/exercise-profiles.md).
 - Renamed primary installer commands/window titles to include USB, Wi-Fi and Bluetooth, with automatic Bluetooth fallback after USB/Wi-Fi detection, compatibility shortcuts, and `-NoBluetoothFallback` for ADB-only automation.
 - Bluetooth APK transfer via `-Bluetooth` on both Windows installers, plus dedicated Bluetooth shortcuts. Installation is confirmed manually on the phone; install-only transfer needs no Android SDK or USB debugging.
 - Bluetooth helper tests with a mocked wizard launch; no phone or radio is contacted.

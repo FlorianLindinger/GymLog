@@ -294,22 +294,37 @@ class GymRepository(context: Context, private val gymClock: GymClock = GymClock(
         }
         check(preferences.edit().putBoolean("machine_state_in_sqlite", true).commit()) { "Could not migrate exercise settings" }
     }
-    fun addMachine(name: String, weight: Double, trackingMode: TrackingMode, titleNote: String = ""): Long {
+    fun addMachine(
+        name: String,
+        weight: Double,
+        trackingMode: TrackingMode,
+        titleNote: String = "",
+        assignments: List<AreaAssignment> = emptyList(),
+    ): Long {
         val database = db.writableDatabase
         val planId = ensureTrainingPlan(database)
-        val nextOrder = database.rawQuery("SELECT COALESCE(MAX(sort_order),-1)+1 FROM machines WHERE plan_id=?", arrayOf(planId.toString()))
-            .use { it.moveToFirst(); it.getInt(0) }
-        val id = database.insertOrThrow("machines", null, ContentValues().apply {
-            put("name", capitalizeName(name))
-            put("plan_id", planId)
-            put("notes", "")
-            put("title_note", titleNote.trim())
-            put("tracking_mode", trackingMode.name)
-            put("current_weight", weight)
-            put("sort_order", nextOrder)
-        })
-        addWeightHistory(database, id, weight, gymClock.now())
-        return id
+        return database.transaction {
+            val nextOrder = database.rawQuery("SELECT COALESCE(MAX(sort_order),-1)+1 FROM machines WHERE plan_id=?", arrayOf(planId.toString()))
+                .use { it.moveToFirst(); it.getInt(0) }
+            val id = database.insertOrThrow("machines", null, ContentValues().apply {
+                put("name", capitalizeName(name))
+                put("plan_id", planId)
+                put("notes", "")
+                put("title_note", titleNote.trim())
+                put("tracking_mode", trackingMode.name)
+                put("current_weight", weight)
+                put("sort_order", nextOrder)
+            })
+            addWeightHistory(database, id, weight, gymClock.now())
+            assignments.forEach { assignment ->
+                database.insertOrThrow("machine_areas", null, ContentValues().apply {
+                    put("machine_id", id)
+                    put("area", assignment.area.name)
+                    put("strength", assignment.strength.value)
+                })
+            }
+            id
+        }
     }
 
     fun updateMachine(id: Long, name: String, titleNote: String, notes: String, pauseTime: String) {
@@ -906,7 +921,7 @@ class GymRepository(context: Context, private val gymClock: GymClock = GymClock(
                 val stored = runCatching { BodyArea.valueOf(cursor.getString(0)) }.getOrNull() ?: continue
                 result += AreaAssignment(
                     stored,
-                    if (cursor.getDouble(1) >= 0.75) Strength.FULL else Strength.HALF,
+                    Strength.fromStorage(cursor.getDouble(1)),
                     areaColor(database, stored),
                 )
             }

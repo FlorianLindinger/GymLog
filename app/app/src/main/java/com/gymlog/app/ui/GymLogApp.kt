@@ -135,6 +135,7 @@ fun GymLogApp(
     var screen by remember { mutableStateOf(Screen.OVERVIEW) }
     var selectedId by remember { mutableStateOf<Long?>(null) }
     var showAdd by remember { mutableStateOf(false) }
+    var editingAreas by remember { mutableStateOf<MachineSummary?>(null) }
     var showMenu by remember { mutableStateOf(false) }
     var confirmImport by remember { mutableStateOf(false) }
     var showProgressionSettings by remember { mutableStateOf(false) }
@@ -295,6 +296,7 @@ fun GymLogApp(
                 onTrainingHeader = { showTrainingHeader = true },
                 onEditPlanNotes = { showPlanNotes = true },
                 areaFrequency = areaFrequency,
+                onEditAreas = { editingAreas = it },
                 onQuickSet = { machine, reps ->
                     if (isDirectMetric(machine.machine.trackingMode)) {
                         reps.firstOrNull()?.let { repository.addTrainingMinutes(machine.machine.id, it) }
@@ -405,14 +407,29 @@ fun GymLogApp(
 
     if (showAdd) AddMachineDialog(
         onDismiss = { showAdd = false },
-        onAdd = { name, weight, trackingMode, note ->
-            val id = repository.addMachine(name, weight, trackingMode, note)
+        onAdd = { name, weight, trackingMode, note, areas ->
+            val id = repository.addMachine(name, weight, trackingMode, note, areas)
             refresh()
             showAdd = false
             selectedId = id
             screen = Screen.DETAIL
         },
     )
+
+    editingAreas?.let { exercise ->
+        MuscleProfileDialog(
+            exerciseName = exercise.machine.name,
+            current = exercise.areas,
+            colors = uiState.areaColors,
+            onColorChange = { area, color -> repository.setAreaColor(area, color); refresh() },
+            onDismiss = { editingAreas = null },
+            onSave = { areas ->
+                repository.saveAreas(exercise.machine.id, areas)
+                editingAreas = null
+                refresh()
+            },
+        )
+    }
 
     if (showMenu) AlertDialog(
         onDismissRequest = { showMenu = false },
@@ -463,13 +480,13 @@ fun GymLogApp(
                 Text("Outlines", style = MaterialTheme.typography.titleSmall)
                 Text("A colored outline marks interactive or emphasized cards. Tap cards with notes, metrics, or training areas to edit them.")
                 Text("Body-Area Colors", style = MaterialTheme.typography.titleSmall)
-                Text("Each color identifies a body area throughout the overview, exercise details, and statistics. A full-width marker means primary involvement; a half-width marker means secondary involvement.")
+                Text("Edit Regions on an exercise card to choose Off, Low, Medium, or High involvement. Marker widths follow that intensity. Exercise suggestions in English and German provide editable starting profiles; pick one before applying it.")
                 Text("Training Time", style = MaterialTheme.typography.titleSmall)
                 Text("Live means the timer is still counting from the first entry. It becomes completed after ten minutes without a new entry.")
                 Text("Progress Warnings", style = MaterialTheme.typography.titleSmall)
                 Text("Warnings appear when an exercise has not increased after your configured number of weeks or training sessions.")
                 Text("Exercise Ordering", style = MaterialTheme.typography.titleSmall)
-                Text("Each exercise belongs to Manual top, Auto sorted, or Manual bottom. The active exercise stays first. Auto prioritizes exercises not yet done, low-conflict areas, exercises missed last training, and then your tie-break priority and usage.")
+                Text("The current exercise stays first. Auto sorts unfinished exercises by estimated overlap with the current and previous distinct exercises in this training. The previous exercise has half the weight. Equal overlap prefers fewer recorded training days overall, then tie priority. Unconfigured profiles show unknown overlap. Manual top and bottom follow your arrow order.")
             }
         },
         confirmButton = { TextButton(onClick = { showHelp = false; showMenu = true }) { Text("Close") } },
@@ -679,7 +696,7 @@ private fun OrderScreen(
     ) {
         item {
             Text(
-                "The active exercise is always first. Manual top follows in your arrow order. Auto then ranks not-yet-trained exercises first, avoids muscle clashes, prefers exercises missed last session, and uses priority and usage as tie-breakers. Manual bottom is last in your arrow order.",
+                "The current exercise stays first, then Manual top in your arrow order. Auto ranks unfinished exercises by least estimated overlap with the current and previous distinct exercises (the previous one has half the weight). Equal overlap prefers fewer training days overall, then tie priority. Unknown profiles follow known profiles. Manual bottom keeps your arrow order.",
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -700,7 +717,7 @@ private fun OrderScreen(
                                 TextButton(onClick = { onMove(machine.id, -1) }, enabled = index > 0, contentPadding = PaddingValues(horizontal = 7.dp, vertical = 0.dp)) { Text("▲") }
                                 TextButton(onClick = { onMove(machine.id, 1) }, enabled = index < entries.lastIndex, contentPadding = PaddingValues(horizontal = 7.dp, vertical = 0.dp)) { Text("▼") }
                             } else {
-                                Text("Priority ${-machine.rankingPriority}", style = MaterialTheme.typography.labelSmall)
+                                Text("Tie priority ${-machine.rankingPriority}", style = MaterialTheme.typography.labelSmall)
                                 TextButton(onClick = { onPriority(machine.id, 1) }, contentPadding = PaddingValues(horizontal = 7.dp, vertical = 0.dp)) { Text("−") }
                                 TextButton(onClick = { onPriority(machine.id, -1) }, contentPadding = PaddingValues(horizontal = 7.dp, vertical = 0.dp)) { Text("+") }
                             }

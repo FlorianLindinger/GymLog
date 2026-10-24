@@ -34,7 +34,7 @@ internal class ExerciseReadRepository(
         db.rawQuery("SELECT ma.machine_id,ma.area,ma.strength,ac.color FROM machine_areas ma LEFT JOIN area_colors ac ON ac.area=ma.area WHERE ma.machine_id IN ($placeholders) ORDER BY ma.area", args).use { cursor ->
             while (cursor.moveToNext()) {
                 val area = runCatching { BodyArea.valueOf(cursor.getString(1)) }.getOrNull() ?: continue
-                areas.getOrPut(cursor.getLong(0)) { mutableListOf() } += AreaAssignment(area, if (cursor.getDouble(2) >= 0.75) Strength.FULL else Strength.HALF, if (cursor.isNull(3)) area.color else cursor.getLong(3))
+                areas.getOrPut(cursor.getLong(0)) { mutableListOf() } += AreaAssignment(area, Strength.fromStorage(cursor.getDouble(2)), if (cursor.isNull(3)) area.color else cursor.getLong(3))
             }
         }
         val sets = mutableMapOf<Long, MutableList<SetRecord>>()

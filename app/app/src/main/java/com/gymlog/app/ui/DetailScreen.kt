@@ -34,7 +34,6 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -61,7 +60,6 @@ import com.gymlog.app.data.BodyArea
 import com.gymlog.app.data.GymRepository
 import com.gymlog.app.data.MachineSummary
 import com.gymlog.app.data.SetRecord
-import com.gymlog.app.data.Strength
 import com.gymlog.app.data.WeightChange
 import java.time.Duration
 import java.time.Instant
@@ -165,14 +163,14 @@ fun DetailScreen(
             ExerciseNoteCard("") { onEditDetails(ExerciseEditField.OVERVIEW_NOTE) }
         }
         if (summary.areas.isEmpty()) {
-            OutlinedButton(onClick = { showAreas = true }, modifier = Modifier.fillMaxWidth()) { Text("Choose Training Areas") }
+            OutlinedButton(onClick = { showAreas = true }, modifier = Modifier.fillMaxWidth()) { Text("Choose Body Regions & Intensity") }
         } else {
             Card(modifier = Modifier.fillMaxWidth().clickable { showAreas = true }) {
                 Column(Modifier.padding(8.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                    Text("Training Areas", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+                    Text("Body Regions & Intensity · Edit", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
                     summary.areas.sortedByDescending { areaUsage[it.area] ?: 0.0 }.forEach { assignment ->
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Box(Modifier.width(if (assignment.strength == Strength.FULL) 34.dp else 17.dp).height(8.dp).background(Color(assignment.displayColor), RoundedCornerShape(8.dp)))
+                            Box(Modifier.width((34 * assignment.strength.value).dp).height(8.dp).background(Color(assignment.displayColor), RoundedCornerShape(8.dp)))
                             Spacer(Modifier.width(6.dp)); Text(assignment.area.label, Modifier.weight(1f)); Text(assignment.strength.label, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                     }
@@ -296,7 +294,7 @@ fun DetailScreen(
             repository.setChartWindow(machine.id, ChartRange.CUSTOM.storageValue); onChanged(); showCustomChartRange = false
         },
     )
-    if (showAreas) AreaDialog(summary.areas, areaUsage, areaColors, onAreaColor, onDismiss = { showAreas = false }) {
+    if (showAreas) MuscleProfileDialog(machine.name, summary.areas, areaColors, onAreaColor, onDismiss = { showAreas = false }) {
         repository.saveAreas(machine.id, it)
         onChanged()
         showAreas = false
@@ -557,128 +555,14 @@ fun MetricValueDialog(
 private fun formatMetricDialogValue(value: Double): String = if (value % 1.0 == 0.0) value.toInt().toString() else String.format(Locale.US, "%.1f", value)
 
 @Composable
-private fun AreaDialog(
-    current: List<AreaAssignment>,
-    usage: Map<BodyArea, Double>,
-    colors: Map<BodyArea, Long>,
-    onColorChange: (BodyArea, Long) -> Unit,
-    onDismiss: () -> Unit,
-    onSave: (List<AreaAssignment>) -> Unit,
-) {
-    val choices = remember(current) {
-        mutableStateMapOf<BodyArea, Strength?>().apply {
-            BodyArea.entries.forEach { area -> put(area, current.firstOrNull { it.area == area }?.strength) }
-        }
-    }
-    var colorArea by remember { mutableStateOf<BodyArea?>(null) }
-    val sortedAreas = listOf(
-        BodyArea.TRAPS, BodyArea.SHOULDERS, BodyArea.CHEST, BodyArea.UPPER_BACK,
-        BodyArea.BICEPS, BodyArea.TRICEPS, BodyArea.FOREARMS, BodyArea.CORE,
-        BodyArea.LOWER_BACK, BodyArea.GLUTES, BodyArea.ABDUCTORS, BodyArea.ADDUCTORS,
-        BodyArea.QUADS, BodyArea.HAMSTRINGS, BodyArea.CALVES,
-    )
-    AlertDialog(
-        modifier = Modifier.fillMaxWidth(0.98f),
-        onDismissRequest = onDismiss,
-        title = {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                TextButton(onClick = onDismiss) { Text("Cancel") }
-                Text("Training Areas", modifier = Modifier.weight(1f))
-                Button(
-                    onClick = {
-                        onSave(choices.mapNotNull { (area, strength) ->
-                            strength?.let { AreaAssignment(area, it) }
-                        })
-                    },
-                    contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp),
-                ) { Text("Save") }
-            }
-        },
-        text = {
-            Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                BodyMapPicker(
-                    modifier = Modifier.fillMaxWidth().aspectRatio(960f / 836f),
-                )
-                Text(
-                    "Front and back reference — choose the matching gym area below.",
-                    modifier = Modifier.fillMaxWidth(),
-                    textAlign = TextAlign.Center,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                sortedAreas.forEach { area ->
-                    Column(Modifier.fillMaxWidth().padding(vertical = 3.dp)) {
-                      Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                        Text(
-                            buildString {
-                                append(area.label)
-                                val count = usage[area] ?: 0.0
-                                if (count > 0) append(" · exists ${formatAreaUsage(count)}×")
-                            },
-                            Modifier.weight(1f),
-                            style = MaterialTheme.typography.bodySmall,
-                        )
-                        Box(Modifier.width(18.dp).height(18.dp).background(Color(colors[area] ?: area.color), CircleShape).border(1.dp, MaterialTheme.colorScheme.outline, CircleShape).clickable { colorArea = area })
-                      }
-                      Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                        Spacer(Modifier.width(4.dp))
-                        AreaStrengthChoice("½", choices[area] == Strength.HALF) {
-                            choices[area] = if (choices[area] == Strength.HALF) null else Strength.HALF
-                        }
-                        Spacer(Modifier.width(3.dp))
-                        AreaStrengthChoice("Full", choices[area] == Strength.FULL) {
-                            choices[area] = if (choices[area] == Strength.FULL) null else Strength.FULL
-                        }
-                      }
-                    }
-                }
-                Text("Diagram: OpenStax; adaptation by Tomáš Kebert / umimeto.org. See third-party notices.", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-}
-        },
-        confirmButton = {},
-    )
-    colorArea?.let { area ->
-        ColorPaletteDialog(
-            area = area,
-            selected = colors[area] ?: area.color,
-            onDismiss = { colorArea = null },
-            onSelect = { onColorChange(area, it); colorArea = null },
-        )
-    }
-}
-
-@Composable
-private fun AreaStrengthChoice(label: String, selected: Boolean, onClick: () -> Unit) {
-    Text(
-        label,
-        modifier = Modifier
-            .background(
-                if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
-                RoundedCornerShape(7.dp),
-            )
-            .border(1.dp, if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline, RoundedCornerShape(7.dp))
-            .clickable(onClick = onClick)
-            .padding(horizontal = 10.dp, vertical = 6.dp),
-        color = if (selected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
-        fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
-        style = MaterialTheme.typography.labelMedium,
-    )
-}
-private fun formatAreaUsage(value: Double): String =
-    if (value % 1.0 == 0.0) value.toInt().toString() else String.format(Locale.US, "%.1f", value)
-
-@Composable
-private fun BodyMapPicker(modifier: Modifier = Modifier) {
+internal fun BodyMapPicker(modifier: Modifier = Modifier) {
     Column(modifier, horizontalAlignment = Alignment.CenterHorizontally) {
         Image(painter = painterResource(R.drawable.muscles_front_back), contentDescription = "Front and back muscle reference", modifier = Modifier.weight(1f).fillMaxWidth(), contentScale = ContentScale.Fit)
         Text("Front (left) · Back (right)", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
 @Composable
-private fun ColorPaletteDialog(area: BodyArea, selected: Long, onDismiss: () -> Unit, onSelect: (Long) -> Unit) {
+internal fun ColorPaletteDialog(area: BodyArea, selected: Long, onDismiss: () -> Unit, onSelect: (Long) -> Unit) {
     val palette = listOf(
         0xFFE6194B, 0xFFB00020, 0xFF800000, 0xFFF58231, 0xFFE64A19, 0xFFFF7F00,
         0xFFFFD700, 0xFFBFEF45, 0xFF3CB44B, 0xFF008000, 0xFF008080, 0xFF00A6D6,

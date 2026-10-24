@@ -11,12 +11,15 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.AlertDialog
@@ -56,11 +59,16 @@ import androidx.compose.ui.viewinterop.AndroidView
 import android.widget.NumberPicker
 import com.gymlog.app.data.TrackingMode
 import com.gymlog.app.data.MachineSummary
-import com.gymlog.app.data.ExerciseOrderGroup
 import com.gymlog.app.data.BodyArea
+import com.gymlog.app.data.AreaAssignment
+import com.gymlog.app.data.ExerciseCatalog
+import com.gymlog.app.data.ExerciseTemplate
+import com.gymlog.app.data.exerciseOverlap
+import com.gymlog.app.data.exerciseTrainingCount
+import com.gymlog.app.data.rankOverviewMachines
+import com.gymlog.app.data.recentTrainingExercises
 import com.gymlog.app.data.ProgressionSettings
 import com.gymlog.app.data.SetRecord
-import com.gymlog.app.data.Strength
 import com.gymlog.app.data.weightIncreases
 import java.time.Instant
 import java.time.LocalDate
@@ -94,6 +102,7 @@ fun OverviewScreen(
     onTrainingHeader: () -> Unit,
     onEditPlanNotes: () -> Unit,
     areaFrequency: Map<BodyArea, Double>,
+    onEditAreas: (MachineSummary) -> Unit,
     onQuickSet: (MachineSummary, List<Int>) -> Unit,
     onDeleteCurrentExerciseSets: (MachineSummary) -> Unit,
     onMetricChange: (MachineSummary, Double) -> Unit,
@@ -102,14 +111,16 @@ fun OverviewScreen(
 ) {
     val zone = ZoneId.systemDefault()
     val now = System.currentTimeMillis()
-    val latestTrainingEntry = machines.flatMap { it.recentSets }.maxOfOrNull { it.performedAt }
+    val latestTrainingEntry = (machines + hiddenMachines).flatMap { it.recentSets }.maxOfOrNull { it.performedAt }
     val todayTrainingDate = trainingDate(now, zone)
     val hasCurrentTraining = latestTrainingEntry?.let { trainingDate(it, zone) == todayTrainingDate } == true
     val trainingUnitCutoff = if (hasCurrentTraining) trainingDayStart(now, zone) else Long.MAX_VALUE
-    val lastExerciseInUnit = mostRecentlyTrainedInUnit(machines, trainingUnitCutoff)
+    val recentExercises = remember(machines, hiddenMachines, trainingUnitCutoff) {
+        recentTrainingExercises(machines + hiddenMachines, trainingUnitCutoff)
+    }
     val scope = rememberCoroutineScope()
-    val rankedMachines = remember(machines, hasCurrentTraining) {
-        rankOverviewMachines(machines, trainingUnitCutoff, lastExerciseInUnit)
+    val rankedMachines = remember(machines, trainingUnitCutoff, recentExercises) {
+        rankOverviewMachines(machines, trainingUnitCutoff, recentExercises)
     }
     Box(modifier.fillMaxSize()) {
         Column(Modifier.fillMaxSize().padding(bottom = 50.dp)) {
@@ -142,9 +153,16 @@ fun OverviewScreen(
                 contentPadding = PaddingValues(horizontal = 8.dp, vertical = 6.dp),
                 verticalArrangement = Arrangement.spacedBy(6.dp),
             ) {
+                if (recentExercises.isNotEmpty()) {
+                    item {
+                        Text("Overlap: " + recentExercises.mapIndexed { index, exercise ->
+                            exercise.machine.name + if (index == 1) " (half weight)" else ""
+                        }.joinToString(" + "), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
                 items(rankedMachines, key = { it.machine.id }, contentType = { "machine" }) { summary ->
                     MachineCard(
-                        summary, lastExerciseInUnit, trainingUnitCutoff, areaFrequency, onMachine, { machine, reps ->
+                        summary, recentExercises, trainingUnitCutoff, areaFrequency, onMachine, { machine, reps ->
                             val firstEntry = !hasCurrentTraining
                             onQuickSet(machine, reps)
                             if (firstEntry) scope.launch { listState.animateScrollToItem(0) }
@@ -154,6 +172,7 @@ fun OverviewScreen(
                         onLongPress = {},
                         isDragging = false,
                         isReordering = false,
+                        onEditAreas = onEditAreas,
                     )
                 }
                 if (hiddenMachines.isNotEmpty()) {
@@ -164,16 +183,16 @@ fun OverviewScreen(
                                 onShowHiddenChanged(reveal)
                                 if (reveal) scope.launch {
                                     delay(80)
-                                    listState.animateScrollToItem(rankedMachines.size + 1)
+                                    listState.animateScrollToItem(rankedMachines.size + 1 + if (recentExercises.isEmpty()) 0 else 1)
                                 }
                             },
                             modifier = Modifier.fillMaxWidth(),
                         ) { Text(if (showHidden) "Hide hidden exercises" else "Show hidden exercises") }
                     }
                     if (showHidden) {
-                        val rankedHidden = rankOverviewMachines(hiddenMachines, trainingUnitCutoff, lastExerciseInUnit)
+                        val rankedHidden = rankOverviewMachines(hiddenMachines, trainingUnitCutoff, recentExercises)
                         items(rankedHidden, key = { "hidden_${it.machine.id}" }) { summary ->
-                            MachineCard(summary, lastExerciseInUnit, trainingUnitCutoff, areaFrequency, onMachine, { machine, reps -> onQuickSet(machine, reps) }, onDeleteCurrentExerciseSets, onMetricChange, onMetricChangeForSession, progressionSettings, Modifier, {}, false, false)
+                            MachineCard(summary, recentExercises, trainingUnitCutoff, areaFrequency, onMachine, { machine, reps -> onQuickSet(machine, reps) }, onDeleteCurrentExerciseSets, onMetricChange, onMetricChangeForSession, progressionSettings, Modifier, {}, false, false, onEditAreas)
                         }
                     }
                 }            }
@@ -348,7 +367,7 @@ private fun progressionWarning(summary: MachineSummary, settings: ProgressionSet
 @Composable
 private fun MachineCard(
     summary: MachineSummary,
-    lastExerciseInUnit: MachineSummary?,
+    recentExercises: List<MachineSummary>,
     trainingUnitCutoff: Long,
     areaFrequency: Map<BodyArea, Double>,
     onMachine: (Long) -> Unit,
@@ -361,6 +380,7 @@ private fun MachineCard(
     onLongPress: () -> Unit = {},
     isDragging: Boolean = false,
     isReordering: Boolean = false,
+    onEditAreas: (MachineSummary) -> Unit,
 ) {
     var quickReps by remember(summary.machine.id) { mutableStateOf(false) }
     var changeMetric by remember(summary.machine.id) { mutableStateOf(false) }
@@ -368,15 +388,18 @@ private fun MachineCard(
     val trainedInUnit = summary.recentSets.any { it.performedAt >= trainingUnitCutoff }
     val currentUnitSets = remember(summary.recentSets) { currentTrainingUnitSets(summary) }
     val isChangingTrainingUnit = currentUnitSets.isNotEmpty()
-    val isLastDone = lastExerciseInUnit?.machine?.id == summary.machine.id
+    val isLastDone = recentExercises.firstOrNull()?.machine?.id == summary.machine.id
     val sessionPattern = remember(summary.recentSets, summary.machine.trackingMode) { sessionPatternText(summary) }
-    val clash = if (!trainedInUnit && lastExerciseInUnit != null) strongestClash(summary, lastExerciseInUnit) else null
-    val clashAreas = if (!trainedInUnit && lastExerciseInUnit != null) clashingAreas(summary, lastExerciseInUnit) else emptySet()
+    val overlap = exerciseOverlap(summary, recentExercises)
+    val clash = if (!trainedInUnit) overlap.percent else null
+    val clashAreas = if (!trainedInUnit) overlap.sharedAreas else emptySet()
+    val trainingCount = remember(summary.recentSets) { exerciseTrainingCount(summary) }
     val outlineColor = when {
         isLastDone -> Color(0xFF1976D2)
-        clash != null && clash >= 1.0 -> Color(0xFFE53935)
-        clash != null && clash >= .5 -> Color(0xFFFB8C00)
-        clash != null -> Color(0xFFFBC02D)
+        !trainedInUnit && clash == null -> MaterialTheme.colorScheme.outline
+        clash != null && clash >= 60 -> Color(0xFFE53935)
+        clash != null && clash >= 25 -> Color(0xFFFB8C00)
+        clash != null && clash > 0 -> Color(0xFFFBC02D)
         else -> Color(0xFF43A047)
     }
     val metricInHeader = summary.machine.titleNote.isBlank() ||
@@ -397,7 +420,7 @@ private fun MachineCard(
                     summary.areas.sortedByDescending { areaFrequency[it.area] ?: 0.0 }.forEach { assignment ->
                         Box(
                             Modifier
-                                .width(if (assignment.strength == Strength.FULL) 38.dp else 19.dp)
+                                .width((38 * assignment.strength.value).dp)
                                 .height(if (assignment.area in clashAreas) 7.dp else 3.dp)
                                 .background(
                                     Color(assignment.displayColor).copy(alpha = if (clashAreas.isEmpty() || assignment.area in clashAreas) 1f else .25f),
@@ -426,16 +449,21 @@ private fun MachineCard(
             progressionWarning(summary, progressionSettings)?.let { warning ->
                 Text(warning, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error)
             }
-            if (!trainedInUnit && clash != null) {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    when {
-                        clash >= 1.0 -> "Conflict: full / full"
-                        clash >= .5 -> "Conflict: full / half"
-                        else -> "Conflict: half / half"
-                    },
+                    (when {
+                        isLastDone -> "Current exercise"
+                        trainedInUnit -> "Done this training"
+                        clash == null -> "Overlap unknown"
+                        else -> "Est. overlap $clash%" + if (overlap.incomplete) " (partial)" else ""
+                    }) + " · Trained $trainingCount times",
+                    modifier = Modifier.weight(1f),
                     style = MaterialTheme.typography.labelSmall,
                     color = outlineColor,
                 )
+                TextButton(onClick = { onEditAreas(summary) }, contentPadding = PaddingValues(horizontal = 4.dp, vertical = 0.dp)) {
+                    Text(if (summary.areas.isEmpty()) "Set regions" else "Regions", style = MaterialTheme.typography.labelSmall)
+                }
             }
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
@@ -507,68 +535,6 @@ private fun MachineCard(
             changeMetric = false
         } else null,
     )
-}
-
-private fun mostRecentlyTrainedInUnit(
-    machines: List<MachineSummary>,
-    cutoff: Long,
-): MachineSummary? = machines
-    .mapNotNull { summary ->
-        summary.recentSets
-            .filter { it.performedAt >= cutoff }
-            .maxOfOrNull { it.performedAt }
-            ?.let { latest -> summary to latest }
-    }
-    .maxByOrNull { (_, latest) -> latest }
-    ?.first
-
-private fun rankOverviewMachines(
-    machines: List<MachineSummary>,
-    currentTrainingCutoff: Long,
-    current: MachineSummary?,
-): List<MachineSummary> {
-    val currentId = current?.machine?.id
-    val zone = ZoneId.systemDefault()
-    val previousTrainingDate = machines
-        .flatMap { summary -> summary.recentSets }
-        .asSequence()
-        .filter { it.performedAt < currentTrainingCutoff }
-        .maxOfOrNull { it.performedDate(zone) }
-    val trainingCounts = machines.associate { summary ->
-        summary.machine.id to summary.recentSets.map { it.performedDate(zone) }.distinct().size
-    }
-    val currentFirst = listOfNotNull(current)
-    val manualTop = machines.filter {
-        it.machine.id != currentId && it.machine.orderGroup == ExerciseOrderGroup.MANUAL_TOP
-    }.sortedBy { it.machine.sortOrder }
-    val automatic = machines.filter {
-        it.machine.id != currentId && it.machine.orderGroup == ExerciseOrderGroup.AUTOMATIC
-    }.sortedWith(
-        compareBy<MachineSummary>(
-            { it.recentSets.any { set -> set.performedAt >= currentTrainingCutoff } },
-            { if (current == null) -1.0 else strongestClash(it, current) ?: 0.0 },
-            { previousTrainingDate != null && it.recentSets.any { set -> set.performedDate(zone) == previousTrainingDate } },
-            { it.machine.rankingPriority },
-            { trainingCounts[it.machine.id] ?: 0 },
-            { it.machine.name.lowercase(Locale.getDefault()) },
-        ),
-    )
-    val manualBottom = machines.filter {
-        it.machine.id != currentId && it.machine.orderGroup == ExerciseOrderGroup.MANUAL_BOTTOM
-    }.sortedBy { it.machine.sortOrder }
-    return currentFirst + manualTop + automatic + manualBottom
-}
-
-private fun strongestClash(current: MachineSummary, previous: MachineSummary): Double? {
-    val previousStrengths = previous.areas.associate { it.area to it.strength.value }
-    return current.areas.mapNotNull { area ->
-        previousStrengths[area.area]?.let { area.strength.value * it }
-    }.maxOrNull()
-}
-
-private fun clashingAreas(current: MachineSummary, previous: MachineSummary): Set<BodyArea> {
-    val previousAreas = previous.areas.mapTo(mutableSetOf()) { it.area }
-    return current.areas.mapNotNullTo(mutableSetOf()) { it.area.takeIf(previousAreas::contains) }
 }
 
 fun trainingDate(timestamp: Long, zone: ZoneId = ZoneId.systemDefault()): LocalDate {
@@ -751,17 +717,30 @@ fun QuickRepDialog(
 }
 
 @Composable
-fun AddMachineDialog(onDismiss: () -> Unit, onAdd: (String, Double, TrackingMode, String) -> Unit) {
+fun AddMachineDialog(onDismiss: () -> Unit, onAdd: (String, Double, TrackingMode, String, List<AreaAssignment>) -> Unit) {
     var name by remember { mutableStateOf("") }
     var weight by remember { mutableStateOf("") }
     var trackingMode by remember { mutableStateOf(TrackingMode.WEIGHT) }
     var note by remember { mutableStateOf("") }
+    var areas by remember { mutableStateOf<List<AreaAssignment>>(emptyList()) }
+    var selectedProfile by remember { mutableStateOf<String?>(null) }
+    var showCatalog by remember { mutableStateOf(false) }
+    var showProfile by remember { mutableStateOf(false) }
+    fun chooseTemplate(template: ExerciseTemplate) {
+        if (name.isBlank()) name = template.englishName
+        areas = template.areas
+        selectedProfile = template.title
+        trackingMode = template.trackingMode
+        if (weight.isBlank()) weight = "0"
+        showCatalog = false
+    }
+    val suggestions = remember(name) { if (name.length >= 2) ExerciseCatalog.search(name, limit = 3) else emptyList() }
     val parsedWeight = weight.replace(',', '.').toDoubleOrNull()
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Add Exercise") },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Column(Modifier.heightIn(max = 480.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedTextField(
                     value = name,
                     onValueChange = { value -> name = value.replaceFirstChar { if (it.isLowerCase()) it.titlecase() else it.toString() } },
@@ -769,6 +748,16 @@ fun AddMachineDialog(onDismiss: () -> Unit, onAdd: (String, Double, TrackingMode
                     keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences),
                     singleLine = true,
                 )
+                if (selectedProfile == null && suggestions.isNotEmpty()) {
+                    Text("Suggested exercises", style = MaterialTheme.typography.labelMedium)
+                    suggestions.forEach { suggestion ->
+                        TextButton(onClick = { chooseTemplate(suggestion) }) { Text(suggestion.title) }
+                    }
+                }
+                OutlinedButton(onClick = { showCatalog = true }, modifier = Modifier.fillMaxWidth()) { Text("Browse exercise suggestions") }
+                selectedProfile?.let { Text("Starting profile: $it", style = MaterialTheme.typography.bodySmall) }
+                Text(muscleProfileSummary(areas), style = MaterialTheme.typography.bodySmall)
+                TextButton(onClick = { showProfile = true }) { Text("Choose / edit body regions & intensity") }
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     FilterChip(selected = trackingMode == TrackingMode.WEIGHT, onClick = { trackingMode = TrackingMode.WEIGHT }, label = { Text("kg") })
                     FilterChip(selected = trackingMode == TrackingMode.STRENGTH, onClick = { trackingMode = TrackingMode.STRENGTH }, label = { Text("Level") })
@@ -791,12 +780,17 @@ fun AddMachineDialog(onDismiss: () -> Unit, onAdd: (String, Double, TrackingMode
         },
         confirmButton = {
             Button(
-                onClick = { onAdd(name.trim(), parsedWeight ?: 0.0, trackingMode, note.trim()) },
+                onClick = { onAdd(name.trim(), parsedWeight ?: 0.0, trackingMode, note.trim(), areas) },
                 enabled = name.isNotBlank() && parsedWeight != null && parsedWeight >= 0,
             ) { Text("Add") }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
     )
+    if (showCatalog) ExerciseCatalogDialog(name, onDismiss = { showCatalog = false }, onPick = ::chooseTemplate)
+    if (showProfile) MuscleProfileDialog(name.ifBlank { "New exercise" }, areas, onDismiss = { showProfile = false }) {
+        areas = it
+        showProfile = false
+    }
 }
 
 fun formatWeight(weight: Double): String = if (weight % 1.0 == 0.0) "${weight.toInt()} kg" else String.format(Locale.US, "%.1f kg", weight)

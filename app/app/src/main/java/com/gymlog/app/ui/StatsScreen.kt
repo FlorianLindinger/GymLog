@@ -119,24 +119,21 @@ fun StatsScreen(
         (increasesByMonth[month] ?: 0).toDouble()
     }
     val machinesById = machines.associateBy { it.machine.id }
-    val bodyCounts = mutableMapOf<BodyArea, Pair<Int, Int>>()
+    val bodyCounts = mutableMapOf<BodyArea, MutableMap<Strength, Int>>()
     sessions.values.forEach { dayEntries ->
         dayEntries.map { it.machineId }.distinct().forEach { machineId ->
             machinesById[machineId]?.areas?.forEach { assignment ->
-                val current = bodyCounts[assignment.area] ?: (0 to 0)
-                bodyCounts[assignment.area] = if (assignment.strength == Strength.FULL) {
-                    current.copy(first = current.first + 1)
-                } else {
-                    current.copy(second = current.second + 1)
-                }
+                val counts = bodyCounts.getOrPut(assignment.area) { mutableMapOf() }
+                counts[assignment.strength] = (counts[assignment.strength] ?: 0) + 1
             }
         }
     }
     val bodyAreaStats = bodyCounts.map { (area, counts) ->
         BodyAreaTrainingStat(
             area = area,
-            full = counts.first,
-            half = counts.second,
+            full = counts[Strength.FULL] ?: 0,
+            half = counts[Strength.HALF] ?: 0,
+            low = counts[Strength.LIGHT] ?: 0,
             color = machines.asSequence().flatMap { it.areas.asSequence() }.firstOrNull { it.area == area }?.displayColor ?: area.color,
         )
     }.sortedByDescending { it.weighted }
@@ -256,9 +253,10 @@ private data class BodyAreaTrainingStat(
     val area: BodyArea,
     val full: Int,
     val half: Int,
+    val low: Int,
     val color: Long,
 ) {
-    val weighted: Double get() = full + half * 0.5
+    val weighted: Double get() = full + half * 0.5 + low * 0.25
 }
 
 @Composable
@@ -268,8 +266,9 @@ private fun BodyAreaStatsCard(stats: List<BodyAreaTrainingStat>) {
             Text("Body Area Training", fontWeight = FontWeight.SemiBold)
             Row(Modifier.fillMaxWidth()) {
                 Text("Area", Modifier.weight(1f), style = MaterialTheme.typography.labelSmall)
-                Text("Full", Modifier.width(42.dp), style = MaterialTheme.typography.labelSmall, textAlign = TextAlign.End)
-                Text("Half", Modifier.width(42.dp), style = MaterialTheme.typography.labelSmall, textAlign = TextAlign.End)
+                Text("High", Modifier.width(34.dp), style = MaterialTheme.typography.labelSmall, textAlign = TextAlign.End)
+                Text("Med", Modifier.width(34.dp), style = MaterialTheme.typography.labelSmall, textAlign = TextAlign.End)
+                Text("Low", Modifier.width(34.dp), style = MaterialTheme.typography.labelSmall, textAlign = TextAlign.End)
                 Text("Total", Modifier.width(48.dp), style = MaterialTheme.typography.labelSmall, textAlign = TextAlign.End)
             }
             if (stats.isEmpty()) Text("No body-area training in this period.", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
@@ -277,8 +276,9 @@ private fun BodyAreaStatsCard(stats: List<BodyAreaTrainingStat>) {
                 Row(Modifier.fillMaxWidth(), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
                     Box(Modifier.width(12.dp).height(12.dp).background(Color(stat.color), CircleShape))
                     Text(stat.area.label, Modifier.weight(1f).padding(start = 5.dp), style = MaterialTheme.typography.bodySmall, maxLines = 1)
-                    Text(stat.full.toString(), Modifier.width(42.dp), style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.End)
-                    Text(stat.half.toString(), Modifier.width(42.dp), style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.End)
+                    Text(stat.full.toString(), Modifier.width(34.dp), style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.End)
+                    Text(stat.half.toString(), Modifier.width(34.dp), style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.End)
+                    Text(stat.low.toString(), Modifier.width(34.dp), style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.End)
                     Text(formatWeighted(stat.weighted), Modifier.width(48.dp), style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.End)
                 }
             }
@@ -287,7 +287,7 @@ private fun BodyAreaStatsCard(stats: List<BodyAreaTrainingStat>) {
 }
 
 private fun formatWeighted(value: Double): String =
-    if (value % 1.0 == 0.0) value.toInt().toString() else String.format(Locale.US, "%.1f", value)
+    if (value % 1.0 == 0.0) value.toInt().toString() else String.format(Locale.US, "%.2f", value).trimEnd('0')
 
 @Composable
 private fun ProgressionByExerciseCard(machines: List<MachineSummary>, cutoff: Long?, periodWeeks: Double) {
