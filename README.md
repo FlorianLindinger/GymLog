@@ -48,6 +48,10 @@ Release downloads include `SHA256SUMS.txt` so you can verify the APK before
 installing it. The `.aab` file is intended for app-store distribution and
 cannot be installed directly.
 
+For a local Bluetooth transfer, run `scripts\windows\install_via_usb_wifi_or_bluetooth.bat -Bluetooth` (or the build-and-install helper with the same flag). Accept the APK and complete installation on the phone. See the [Windows Bluetooth instructions](scripts/windows/README.md#bluetooth-transfer-and-phone-installation).
+
+The renamed installers automatically try USB, then connected Wi-Fi, then Bluetooth transfer. Old USB/Wi-Fi filenames remain compatible shortcuts. Use `-NoBluetoothFallback` to require an ADB connection.
+
 > [!NOTE]
 > GymLog is currently distributed outside Google Play. Android may show a
 > standard warning when you install the APK.
@@ -103,6 +107,10 @@ a debug APK for every push to `main` and every pull request.
 Windows build, device, debugging, and maintainer release commands are documented
 in [`scripts/windows`](scripts/windows/README.md). Tagged releases are verified,
 signed, checksummed, and published automatically by GitHub Actions.
+
+## Changelog
+
+See [CHANGELOG.md](CHANGELOG.md) for notable changes and the current feature baseline.
 
 ## License
 

@@ -1,12 +1,4 @@
 @echo off
 setlocal
-set "SCRIPT_DIR=%~dp0"
-for %%I in ("%SCRIPT_DIR%..\..") do set "REPO_ROOT=%%~fI"
-cd /d "%REPO_ROOT%"
-
-echo Building, installing, and launching GymLog...
-call "%SCRIPT_DIR%build.bat"
-if errorlevel 1 exit /b 1
-
-call "%SCRIPT_DIR%install_via_usb_or_wifi.bat" %1
+call "%~dp0build_and_install_via_usb_wifi_or_bluetooth.bat" %*
 exit /b %errorlevel%
