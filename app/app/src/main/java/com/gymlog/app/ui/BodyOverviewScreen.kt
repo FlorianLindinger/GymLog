@@ -313,8 +313,6 @@ private fun BodyGraph(
         bands = settings.target?.let { target ->
             listOf(TimeBand(target, settings.acceptance ?: 0.0, targetColor))
         }.orEmpty(),
-        formatLeft = ::formatBodyValue,
-        yTickCounts = 3..5,
     )
 }
 

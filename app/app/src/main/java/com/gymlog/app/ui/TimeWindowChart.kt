@@ -26,6 +26,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
@@ -33,8 +34,6 @@ import androidx.compose.ui.unit.dp
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
-import java.util.Locale
-import kotlin.math.abs
 
 internal data class TimeValue(val timestamp: Long, val value: Double)
 
@@ -73,33 +72,6 @@ internal fun calculateVisibleTimeRange(dataStart: Long, dataEnd: Long, window: C
     if (window.durationMillis == null) return VisibleTimeRange(dataStart, maxOf(dataStart + 1L, dataEnd))
     val end = window.endMillis ?: dataEnd
     return VisibleTimeRange(end - window.durationMillis.coerceAtLeast(1L), end)
-}
-
-private data class AxisRange(val min: Double, val max: Double, val ticks: List<Double>) {
-    val span: Double get() = (max - min).coerceAtLeast(1e-9)
-}
-
-private fun chartAxisRange(values: List<Double>, tickCounts: IntRange): AxisRange {
-    val allowedCounts = tickCounts.filter { it >= 3 }.ifEmpty { listOf(3) }
-    val finite = values.filter(Double::isFinite)
-    if (finite.isEmpty()) {
-        val count = allowedCounts.first()
-        return AxisRange(0.0, 1.0, List(count) { it.toDouble() / (count - 1) })
-    }
-    val rawMin = finite.min()
-    val rawMax = finite.max()
-    val rawSpan = rawMax - rawMin
-    val padding = if (rawSpan == 0.0) maxOf(abs(rawMax) * 0.01, 0.1) else rawSpan * 0.025
-    val minimum = rawMin - padding
-    val maximum = rawMax + padding
-    val desiredCount = when {
-        finite.distinct().size <= 2 -> 3
-        finite.distinct().size <= 5 -> 4
-        else -> 5
-    }
-    val count = allowedCounts.minBy { abs(it - desiredCount) }
-    val step = (maximum - minimum) / (count - 1)
-    return AxisRange(minimum, maximum, List(count) { minimum + step * it })
 }
 
 private fun pointsInWindow(points: List<TimeValue>, range: VisibleTimeRange): List<TimeValue> {
@@ -225,18 +197,11 @@ internal fun ChartRangeControls(
 private fun ChartAxisLabels(
     range: AxisRange,
     color: Color,
-    formatter: (Double) -> String,
     width: Dp,
     height: Dp,
     endAligned: Boolean,
 ) {
-    val preferred = range.ticks.map(formatter)
-    val labels = if (preferred.distinct().size == preferred.size) preferred else {
-        (2..4).firstNotNullOfOrNull { decimals ->
-            range.ticks.map { String.format(Locale.US, "%.${decimals}f", it) }
-                .takeIf { it.distinct().size == it.size }
-        } ?: range.ticks.map { String.format(Locale.US, "%.4g", it) }
-    }
+    val labels = range.ticks.map(::formatChartAxisValue)
     Column(
         Modifier.width(width).height(height),
         verticalArrangement = Arrangement.SpaceBetween,
@@ -272,10 +237,7 @@ internal fun TimeWindowChart(
     bands: List<TimeBand> = emptyList(),
     leftColor: Color = MaterialTheme.colorScheme.onSurfaceVariant,
     rightColor: Color? = null,
-    formatLeft: (Double) -> String,
-    formatRight: (Double) -> String = formatLeft,
     height: Dp = 132.dp,
-    yTickCounts: IntRange = 5..5,
 ) {
     val sortedSeries = series.map { item -> item.copy(points = item.points.sortedBy(TimeValue::timestamp)) }
     val allPoints = sortedSeries.flatMap(TimeSeries::points)
@@ -289,9 +251,9 @@ internal fun TimeWindowChart(
         .flatMap { pointsInWindow(it.points, visibleRange) }
         .map(TimeValue::value)
     val bandValues = bands.flatMap { listOf(it.center - it.tolerance, it.center, it.center + it.tolerance) }
-    val leftRange = chartAxisRange(visibleValues(PlotAxis.LEFT) + bandValues, yTickCounts)
-    val rightRange = chartAxisRange(visibleValues(PlotAxis.RIGHT), yTickCounts)
-    val independentRange = chartAxisRange(visibleValues(PlotAxis.INDEPENDENT), yTickCounts)
+    val leftRange = chartAxisRange(visibleValues(PlotAxis.LEFT) + bandValues)
+    val rightRange = chartAxisRange(visibleValues(PlotAxis.RIGHT))
+    val independentRange = chartAxisRange(visibleValues(PlotAxis.INDEPENDENT))
     val hasRightAxis = rightColor != null && sortedSeries.any { it.axis == PlotAxis.RIGHT }
     val gridColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.72f)
     val xAxisColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.95f)
@@ -310,7 +272,7 @@ internal fun TimeWindowChart(
         ).coerceAtLeast(1.dp)
         Column {
             Row {
-                ChartAxisLabels(leftRange, leftColor, formatLeft, labelWidth, height, true)
+                ChartAxisLabels(leftRange, leftColor, labelWidth, height, true)
                 Box(Modifier.width(labelGap))
                 Canvas(Modifier.width(tickWidth).height(height)) {
                     repeat(leftRange.ticks.size) { index ->
@@ -335,46 +297,48 @@ internal fun TimeWindowChart(
                             ((timestamp - visibleStart).toDouble() / visibleRange.duration * size.width).toFloat()
                         fun y(value: Double, range: AxisRange) = size.height - CHART_INSET -
                             ((value - range.min) / range.span).toFloat() * (size.height - CHART_INSET * 2f)
-                        bands.forEach { band ->
-                            val top = y(band.center + band.tolerance, leftRange)
-                            val bottom = y(band.center - band.tolerance, leftRange)
-                            drawRect(
-                                band.color.copy(alpha = 0.16f),
-                                Offset(0f, top),
-                                Size(size.width, (bottom - top).coerceAtLeast(1f)),
-                            )
-                            drawLine(
-                                band.color,
-                                Offset(0f, y(band.center, leftRange)),
-                                Offset(size.width, y(band.center, leftRange)),
-                                strokeWidth = 3.2f,
-                            )
-                        }
-                        sortedSeries.forEach { item ->
-                            val axisRange = when (item.axis) {
-                                PlotAxis.LEFT -> leftRange
-                                PlotAxis.RIGHT -> rightRange
-                                PlotAxis.INDEPENDENT -> independentRange
-                            }
-                            val visibleData = item.points.filter { it.timestamp in visibleStart..visibleEnd }
-                            val points = pointsInWindow(item.points, visibleRange)
-                                .map { Offset(x(it.timestamp), y(it.value, axisRange)) }
-                            points.zipWithNext().forEach { (start, end) ->
+                        clipRect(top = CHART_INSET, bottom = size.height - CHART_INSET) {
+                            bands.forEach { band ->
+                                val top = y(band.center + band.tolerance, leftRange)
+                                val bottom = y(band.center - band.tolerance, leftRange)
+                                drawRect(
+                                    band.color.copy(alpha = 0.16f),
+                                    Offset(0f, top),
+                                    Size(size.width, (bottom - top).coerceAtLeast(1f)),
+                                )
                                 drawLine(
-                                    item.color,
-                                    start,
-                                    end,
-                                    strokeWidth = item.strokeWidth,
-                                    cap = StrokeCap.Round,
-                                    pathEffect = if (item.dashed) {
-                                        PathEffect.dashPathEffect(floatArrayOf(9f, 7f))
-                                    } else {
-                                        null
-                                    },
+                                    band.color,
+                                    Offset(0f, y(band.center, leftRange)),
+                                    Offset(size.width, y(band.center, leftRange)),
+                                    strokeWidth = 3.2f,
                                 )
                             }
-                            if (item.showPoints) visibleData.forEach {
-                                drawCircle(item.color, item.pointRadius, Offset(x(it.timestamp), y(it.value, axisRange)))
+                            sortedSeries.forEach { item ->
+                                val axisRange = when (item.axis) {
+                                    PlotAxis.LEFT -> leftRange
+                                    PlotAxis.RIGHT -> rightRange
+                                    PlotAxis.INDEPENDENT -> independentRange
+                                }
+                                val visibleData = item.points.filter { it.timestamp in visibleStart..visibleEnd }
+                                val points = pointsInWindow(item.points, visibleRange)
+                                    .map { Offset(x(it.timestamp), y(it.value, axisRange)) }
+                                points.zipWithNext().forEach { (start, end) ->
+                                    drawLine(
+                                        item.color,
+                                        start,
+                                        end,
+                                        strokeWidth = item.strokeWidth,
+                                        cap = StrokeCap.Round,
+                                        pathEffect = if (item.dashed) {
+                                            PathEffect.dashPathEffect(floatArrayOf(9f, 7f))
+                                        } else {
+                                            null
+                                        },
+                                    )
+                                }
+                                if (item.showPoints) visibleData.forEach {
+                                    drawCircle(item.color, item.pointRadius, Offset(x(it.timestamp), y(it.value, axisRange)))
+                                }
                             }
                         }
                     }
@@ -387,7 +351,7 @@ internal fun TimeWindowChart(
                         }
                     }
                     Box(Modifier.width(rightLabelGap))
-                    ChartAxisLabels(rightRange, rightColor!!, formatRight, rightLabelWidth, height, false)
+                    ChartAxisLabels(rightRange, rightColor!!, rightLabelWidth, height, false)
                 }
             }
             Row {

@@ -418,8 +418,6 @@ private fun DualAxisSessionPlot(
         window = window,
         leftColor = repsColor,
         rightColor = weightColor,
-        formatLeft = ::formatAxisValue,
-        formatRight = ::formatAxisValue,
     )
 }
 @Composable
@@ -435,7 +433,6 @@ private fun AxisMetricPlot(
             if (showTrend) listOf(trendTimeSeries(points, color, PlotAxis.LEFT, window)) else emptyList(),
         window = window,
         leftColor = color,
-        formatLeft = ::formatAxisValue,
     )
 }
 

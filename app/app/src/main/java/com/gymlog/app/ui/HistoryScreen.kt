@@ -193,7 +193,6 @@ private fun WeeklyVolumeCard(history: List<HistorySet>) {
                     key = "HISTORY_8_WEEKS",
                 ),
                 leftColor = primary,
-                formatLeft = { value -> if (value % 1.0 == 0.0) value.toInt().toString() else String.format(Locale.US, "%.1f", value) },
             )
         }
     }

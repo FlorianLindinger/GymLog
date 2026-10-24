@@ -43,6 +43,7 @@ import java.time.LocalDate
 import java.time.YearMonth
 import java.time.ZoneId
 import java.util.Locale
+import kotlin.math.roundToLong
 
 @Composable
 fun StatsScreen(
@@ -70,14 +71,9 @@ fun StatsScreen(
     val allDurations = allSessions.toSortedMap().mapValues { (_, sets) ->
         if (sets.size < 2) 0.0 else Duration.ofMillis(sets.maxOf { it.performedAt } - sets.minOf { it.performedAt }).toMinutes().toDouble()
     }
-    val last30Days = (29 downTo 0).map { daysAgo ->
-        trainingDate(System.currentTimeMillis(), zone).minusDays(daysAgo.toLong())
-    }
-    val last30Durations = last30Days.map { day ->
-        val entries = allSessions[day].orEmpty()
-        if (entries.size < 2) 0.0 else Duration.ofMillis(entries.maxOf { it.performedAt } - entries.minOf { it.performedAt }).toMinutes().toDouble()
-    }
-    val hoursLast30Days = last30Durations.sum() / 60.0
+    val todayTrainingDate = trainingDate(System.currentTimeMillis(), zone)
+    val last30TrainingHours = trainingHoursPerTraining(history, todayTrainingDate.minusDays(29), todayTrainingDate, zone)
+    val hoursLast30Days = last30TrainingHours.sumOf(TimeValue::value)
     val thisMonday = LocalDate.now().minusDays((LocalDate.now().dayOfWeek.value - 1).toLong())
     val sessionsByWeek = allSessions.keys.groupingBy { date ->
         date.minusDays((date.dayOfWeek.value - 1).toLong())
@@ -205,8 +201,8 @@ fun StatsScreen(
         item { StatsChart("Gym Sessions by Week", datedPoints(weeks.keys.toList(), weeks.values.toList()), "sessions", statsChartWindow, showTrend) }
         item {
             StatsChart(
-                "Training Hours by Day (last 30 days)",
-                datedPoints(last30Days, last30Durations.map { it / 60.0 }),
+                "Hours per Training (last 30 days)",
+                last30TrainingHours,
                 "hours",
                 ChartWindow(
                     durationMillis = 30L * 86_400_000L,
@@ -216,7 +212,7 @@ fun StatsScreen(
                 showTrend,
             )
         }
-        item { StatsChart("Gym Duration by Day", datedPoints(allDurations.keys.toList(), allDurations.values.toList()), "minutes", statsChartWindow, showTrend) }
+        item { StatsChart("Gym Duration per Training", datedPoints(allDurations.keys.toList(), allDurations.values.toList()), "minutes", statsChartWindow, showTrend) }
         item { StatsChart("Weight Increases by Week", datedPoints(increaseWeekDates, increasesByWeek), "increases", statsChartWindow, showTrend) }
         item { StatsChart("Weight Upgrades per Gym Day", datedPoints(allSessions.keys.sorted(), upgradesPerGymDay), "upgrades", statsChartWindow, showTrend) }
         item {
@@ -234,7 +230,7 @@ fun StatsScreen(
         item { ProgressionByExerciseCard(weightMachines, cutoff, periodWeeks) }
         item {
             Text(
-                "Duration runs from the first recorded set to the last recorded set of each day. A day with one set has a duration of 0 minutes.",
+                "A training groups sets from 06:00 to 05:59 the next day. Duration runs from its first recorded set to its last. A training with one set has a duration of 0 minutes. Days without training are omitted from Hours per Training.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -339,7 +335,11 @@ private fun StatsChart(
             }
             val latest = points.last().value
             Text(
-                if (unit == "minutes") "Latest: ${formatHoursMinutes(latest.toLong())}" else "Latest: ${latest.toInt()} $unit",
+                when (unit) {
+                    "minutes" -> "Latest: ${formatHoursMinutes(latest.toLong())}"
+                    "hours" -> "Latest: ${formatHoursMinutes((latest * 60.0).roundToLong())}"
+                    else -> "Latest: ${latest.toInt()} $unit"
+                },
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             val primary = MaterialTheme.colorScheme.primary
@@ -348,14 +348,25 @@ private fun StatsChart(
                     if (showTrend) listOf(trendTimeSeries(points, primary, PlotAxis.LEFT, window)) else emptyList(),
                 window = window,
                 leftColor = primary,
-                formatLeft = ::formatStatsAxisValue,
                 height = 110.dp,
             )
         }
     }
 }
 
-private fun formatStatsAxisValue(value: Double): String = if (value % 1.0 == 0.0) value.toInt().toString() else String.format(Locale.US, "%.1f", value)
+internal fun trainingHoursPerTraining(
+    history: List<HistorySet>,
+    firstDate: LocalDate,
+    lastDate: LocalDate,
+    zone: ZoneId = ZoneId.systemDefault(),
+): List<TimeValue> = history.groupBy { trainingDate(it.performedAt, zone) }
+    .toSortedMap()
+    .filterKeys { !it.isBefore(firstDate) && !it.isAfter(lastDate) }
+    .map { (_, sets) ->
+        val start = sets.minOf { it.performedAt }
+        val end = sets.maxOf { it.performedAt }
+        TimeValue(end, Duration.ofMillis(end - start).toMinutes() / 60.0)
+    }
 
 private fun statsCutoff(window: ChartRange): Long? =
     chartWindowDuration(window)?.let { duration -> System.currentTimeMillis() - duration }

@@ -4,6 +4,12 @@ Notable changes to GymLog are recorded here. Planned work belongs in `TODO.md`.
 
 ## Unreleased
 
+### Changed
+
+- Show hours per recorded training in the last 30 days, omitting rest-day zeroes and preserving fractional hours in the latest duration.
+- Use roughly four to six evenly spaced, round Y-axis ticks across all charts. Axis limits stay nonnegative, and trends and target bands are clipped at the plot edges.
+- Windows build helpers also find Android Studio and the Android SDK in their configured locations on drive D.
+
 ### Added
 
 - Renamed primary installer commands/window titles to include USB, Wi-Fi and Bluetooth, with automatic Bluetooth fallback after USB/Wi-Fi detection, compatibility shortcuts, and `-NoBluetoothFallback` for ADB-only automation.

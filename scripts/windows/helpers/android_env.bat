@@ -6,11 +6,17 @@ if not defined JAVA_HOME (
         set "JAVA_HOME=C:\Program Files\Java\jdk-21.0.10"
     ) else if exist "C:\Program Files\Android\Android Studio\jbr\bin\java.exe" (
         set "JAVA_HOME=C:\Program Files\Android\Android Studio\jbr"
+    ) else if exist "D:\Program Files\Android\Android Studio\jbr\bin\java.exe" (
+        set "JAVA_HOME=D:\Program Files\Android\Android Studio\jbr"
     )
 )
 
 if not defined ANDROID_HOME (
-    if exist "%LOCALAPPDATA%\Android\Sdk" set "ANDROID_HOME=%LOCALAPPDATA%\Android\Sdk"
+    if exist "%LOCALAPPDATA%\Android\Sdk" (
+        set "ANDROID_HOME=%LOCALAPPDATA%\Android\Sdk"
+    ) else if exist "D:\Android\Sdk\platforms" (
+        set "ANDROID_HOME=D:\Android\Sdk"
+    )
 )
 
 if not exist "%JAVA_HOME%\bin\java.exe" (

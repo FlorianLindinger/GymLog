@@ -2,9 +2,28 @@ package com.gymlog.app.ui
 
 import androidx.compose.ui.graphics.Color
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class TimeWindowChartTest {
+    @Test
+    fun negativeTrendIsPreservedForClippingButCannotLowerAxisBelowZero() {
+        val day = 86_400_000L
+        val values = listOf(TimeValue(0L, 2.0), TimeValue(day, 1.0))
+        val trend = trendTimeSeries(
+            points = values,
+            color = Color.Black,
+            axis = PlotAxis.LEFT,
+            window = ChartWindow(4L * day, endMillis = 4L * day, key = "custom"),
+        )
+        val range = chartAxisRange((values + trend.points).map(TimeValue::value))
+
+        assertEquals(2.0, trend.points.first().value, 0.0001)
+        assertEquals(-2.0, trend.points.last().value, 0.0001)
+        assertEquals(0.0, range.min, 0.0)
+        assertTrue(range.ticks.all { it >= 0.0 })
+    }
+
     @Test
     fun threeWeekWindowUsesExactlyThreeWeeks() {
         val day = 86_400_000L
