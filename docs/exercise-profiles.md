@@ -1,12 +1,12 @@
 # Exercise profiles and automatic ordering
 
-In the overview, tap an exercise card to open its details, then choose **Body Regions & Intensity**. The metric and **+ Sets** controls remain separate tap targets. Overview history stays on one line and truncates when space runs out. Set each body region to **Off**, **Low**, **Medium**, or **High**, then tap **Save**. The region guide and area colors remain available in the editor.
+In the overview, tap an exercise card to open its details, then choose **Body Regions & Intensity**. The metric and **+ Sets** controls remain separate tap targets. Overview titles, overlap summaries, and history stay on one line and shrink to fit when space runs out. The current metric stays at the top right; level is abbreviated to **Lv.**. Set each body region to **Off**, **Low**, **Medium**, or **High**, then tap **Save**. The region guide and area colors remain available in the editor.
 
-The selector opens with a front/back body-region guide. Its numbered color key names all 15 regions and uses the same current colors as the intensity controls, including custom colors. **Hide** collapses the guide when you want more room for editing. The old bottom **Show muscle reference** control has been removed.
+The selector opens with a front/back body-region guide. Its numbered color key names all 15 regions and uses the same current colors as the intensity controls, including custom colors. **Hide** collapses the guide when you want more room for editing. Show/Hide is remembered globally across all exercises and app restarts, including when you cancel profile edits. The default is shown. The old bottom **Show muscle reference** control has been removed.
 
 The region editor immediately offers up to three matching profiles from the exercise name. **Browse exercise list** opens the full offline catalogue of machine, cable, free-weight, bodyweight, and cardio exercises. Search English or German names, including common aliases, umlaut spellings, prefixes, joined or separated words, swapped letters, and small spelling mistakes (up to two edits in long words). Station numbers and known gym/manufacturer prefixes are ignored: **Bauchmaschine 2**, **Bauchmaschine2**, and **FitX Technogym Bauchmaschine 2** all find **Bauchmaschine**. Equipment filters help distinguish similarly named exercises. Selecting an entry fills the draft profile; review or adjust it before saving. Saved regions are retained until you choose a suggestion or edit them. Cancel leaves the exercise's saved profile intact. A custom exercise can have any name and a fully manual profile.
 
-The Add Exercise dialog also suggests matches while typing, offers the complete catalogue, and lets you edit the profile before adding the exercise. The exercise and its initial profile are saved together. Choosing a suggestion preserves a name you already entered. Cardio templates default to level/minute tracking; other templates default to weight tracking, including zero additional weight for bodyweight work.
+The Add Exercise dialog also suggests matches while typing, offers the complete catalogue, and lets you edit the profile before adding the exercise. The exercise and its initial profile are saved together. Choosing a suggestion preserves a name you already entered. Cardio templates default to level/minute tracking; other templates default to weight tracking, including zero additional weight for bodyweight work. Once you explicitly choose a tracking mode (such as Watts), selecting another template preserves that choice.
 
 ## Intensity values
 
@@ -39,7 +39,7 @@ Ordering follows these rules:
 1. Keep the current exercise first.
 2. Keep Manual top exercises in their chosen arrow order.
 3. Auto sorted exercises put unfinished exercises before those already done. Within each group, lower overlap comes first; unknown overlap is treated as zero, alongside known zero-overlap exercises.
-4. Equal displayed overlap prefers the exercise with fewer recorded training days across the active plan's full history. Multiple sets on one training day count once. Tie priority, saved order, and stable name/ID ordering resolve remaining ties.
+4. Equal displayed overlap prefers higher tie priority, then fewer recorded training days across the active plan's full history. Multiple sets on one training day count once. Saved order and stable name/ID ordering resolve remaining ties. The Auto sorted section in Exercise Order previews this ranking; + raises priority and - lowers it.
 5. Keep Manual bottom exercises in their chosen arrow order.
 
 Manual top/bottom provide an explicit override of automatic ranking. The overview shows the comparison exercises, estimated overlap, and the lifetime training count used for the tie-break.

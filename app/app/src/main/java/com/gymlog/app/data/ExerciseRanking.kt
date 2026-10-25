@@ -63,8 +63,8 @@ internal fun rankOverviewMachines(
         .sortedWith(compareBy<MachineSummary>(
             { it.recentSets.any { set -> set.performedAt >= currentTrainingCutoff } },
             { overlaps[it.machine.id] ?: 0 },
-            { counts[it.machine.id] ?: 0 },
             { it.machine.rankingPriority },
+            { counts[it.machine.id] ?: 0 },
             { it.machine.sortOrder },
             { it.machine.name.lowercase(Locale.ROOT) },
         ).thenBy { it.machine.id })

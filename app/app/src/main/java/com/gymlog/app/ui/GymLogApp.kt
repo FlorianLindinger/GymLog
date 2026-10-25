@@ -66,6 +66,8 @@ import com.gymlog.app.data.BodyArea
 import com.gymlog.app.data.BackupSyncStatus
 import com.gymlog.app.data.GymRepository
 import com.gymlog.app.data.HistorySet
+import com.gymlog.app.data.rankOverviewMachines
+import com.gymlog.app.data.recentTrainingExercises
 import com.gymlog.app.data.ExerciseOrderGroup
 import com.gymlog.app.data.MachineSummary
 import com.gymlog.app.data.ProgressionSettings
@@ -471,7 +473,7 @@ fun GymLogApp(
                 Text("Progress Warnings", style = MaterialTheme.typography.titleSmall)
                 Text("Warnings appear when an exercise has not increased after your configured number of weeks or training sessions.")
                 Text("Exercise Ordering", style = MaterialTheme.typography.titleSmall)
-                Text("The current exercise stays first. Auto sorts unfinished exercises by estimated overlap with the current and previous distinct exercises in this training. The previous exercise has half the weight. Equal overlap prefers fewer recorded training days overall, then tie priority. Unconfigured profiles show unknown overlap. Manual top and bottom follow your arrow order.")
+                Text("The current exercise stays first. Auto sorts unfinished exercises by estimated overlap with the current and previous distinct exercises in this training. The previous exercise has half the weight. Equal overlap prefers higher tie priority, then fewer recorded training days overall. Unconfigured profiles show unknown overlap. Manual top and bottom follow your arrow order.")
             }
         },
         confirmButton = { TextButton(onClick = { showHelp = false; showMenu = true }) { Text("Close") } },
@@ -669,6 +671,8 @@ private fun OrderScreen(
     onGroup: (Long, ExerciseOrderGroup) -> Unit,
     onPriority: (Long, Int) -> Unit,
 ) {
+    val cutoff = com.gymlog.app.data.GymClock().trainingDayStart(System.currentTimeMillis())
+    val ranked = rankOverviewMachines(machines, cutoff, recentTrainingExercises(machines, cutoff))
     val groups = listOf(
         ExerciseOrderGroup.MANUAL_TOP to "Manual top",
         ExerciseOrderGroup.AUTOMATIC to "Auto sorted",
@@ -681,14 +685,18 @@ private fun OrderScreen(
     ) {
         item {
             Text(
-                "The current exercise stays first, then Manual top in your arrow order. Auto ranks unfinished exercises by least estimated overlap with the current and previous distinct exercises (the previous one has half the weight). Equal overlap prefers fewer training days overall, then tie priority. Unknown profiles follow known profiles. Manual bottom keeps your arrow order.",
+                "The current exercise stays first, then Manual top in your arrow order. Auto ranks unfinished exercises by least estimated overlap with the current and previous distinct exercises (the previous one has half the weight). Equal overlap prefers higher tie priority, then fewer training days overall. Unknown overlap counts as zero. Manual bottom keeps your arrow order.",
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
         groups.forEach { (group, title) ->
-            val entries = machines.filter { it.machine.orderGroup == group }
-                .sortedWith(compareBy<MachineSummary> { it.machine.sortOrder }.thenBy { it.machine.name })
+            val entries = if (group == ExerciseOrderGroup.AUTOMATIC) {
+                ranked.filter { it.machine.orderGroup == group }
+            } else {
+                machines.filter { it.machine.orderGroup == group }
+                    .sortedWith(compareBy<MachineSummary> { it.machine.sortOrder }.thenBy { it.machine.id })
+            }
             item(key = "header-$group") {
                 Text("$title (${entries.size})", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(top = 4.dp, start = 2.dp))
             }

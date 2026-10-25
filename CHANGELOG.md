@@ -6,6 +6,11 @@ Notable changes to GymLog are recorded here. Planned work belongs in `TODO.md`.
 
 ### Changed
 
+- Equal-overlap automatic exercise ordering now applies tie priority before lifetime training counts, and Exercise Order previews the automatic ranking.
+- Body-region guide visibility is remembered globally, with the guide shown by default.
+- Exercise overview titles, status, and history shrink to fit, with the metric always at the top right and Level abbreviated to `Lv.`.
+- Choosing an exercise profile preserves an explicitly selected tracking mode, including Watts.
+
 - Windows batch launchers now share the PowerShell helper structure used by `sleep_was_never_an_option`, with portable JDK/SDK discovery and device tools that do not require a build environment. Logging retains existing logs and does not force-stop GymLog.
 - Windows release launchers prepare and verify versions locally by default; publication requires `-Publish` and atomically pushes main and its version tag. Existing installer aliases remain available.
 - Body plots open their settings when tapped, with compact headers and fit rates at the top right. Interval count, total count, mean, and range each have a visibility switch, with global defaults and per-plot overrides.
@@ -20,7 +25,7 @@ Notable changes to GymLog are recorded here. Planned work belongs in `TODO.md`.
 - Body fit rates use `/mon.`. Target estimates include remaining weeks alongside months until over a year, then show years/months and omit months from 10 years onward.
 - Exercise charts place `Volume/training [a.u.]` between the left and right axis labels, with monthly trends rounded to two significant digits.
 - Show more training history in the overview and up to 30 entries in exercise and training history.
-- Automatic exercise ordering compares weighted body-region overlap with the current and previous distinct exercises, then prefers fewer lifetime training days when overlap ties. Manual ordering stays available.
+- Automatic exercise ordering compares weighted body-region overlap with the current and previous distinct exercises, then uses tie priority and fewer lifetime training days when overlap ties. Manual ordering stays available.
 - Body-region intensity now has Low, Medium, and High levels, with separate statistics and preserved legacy profile weights.
 - Show hours per recorded training in the last 30 days, omitting rest-day zeroes and preserving fractional hours in the latest duration.
 - Body plots use compact automatic Y-axis limits with round ticks inside the frame, including 10, 12.5, 15, 17.5, and 20 for data around 10–20. Each plot can independently fix either Y limit or leave it automatic. Other charts retain round ticks and nonnegative limits; trends and target bands are clipped at plot edges.

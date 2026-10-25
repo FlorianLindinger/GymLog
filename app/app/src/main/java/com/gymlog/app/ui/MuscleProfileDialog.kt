@@ -20,10 +20,13 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.gymlog.app.data.AreaAssignment
 import com.gymlog.app.data.BodyArea
 import com.gymlog.app.data.ExerciseCatalog
+import com.gymlog.app.data.GYMLOG_PREFERENCES
+import android.content.Context
 
 @Composable
 internal fun MuscleProfileDialog(
@@ -40,7 +43,9 @@ internal fun MuscleProfileDialog(
     }
     var showSuggestions by remember { mutableStateOf(false) }
     var chosenProfile by remember { mutableStateOf<String?>(null) }
-    var showRegionGuide by remember { mutableStateOf(true) }
+    val context = LocalContext.current
+    val preferences = remember(context) { context.getSharedPreferences(GYMLOG_PREFERENCES, Context.MODE_PRIVATE) }
+    var showRegionGuide by remember { mutableStateOf(preferences.getBoolean("show_body_region_guide", true)) }
     var colorArea by remember { mutableStateOf<BodyArea?>(null) }
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -50,7 +55,10 @@ internal fun MuscleProfileDialog(
                 Text(exerciseName, style = MaterialTheme.typography.titleSmall)
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                     Text("Body region guide", Modifier.weight(1f), style = MaterialTheme.typography.titleSmall)
-                    TextButton(onClick = { showRegionGuide = !showRegionGuide }) { Text(if (showRegionGuide) "Hide" else "Show") }
+                    TextButton(onClick = {
+                        showRegionGuide = !showRegionGuide
+                        preferences.edit().putBoolean("show_body_region_guide", showRegionGuide).apply()
+                    }) { Text(if (showRegionGuide) "Hide" else "Show") }
                 }
                 if (showRegionGuide) BodyRegionGuide(colors)
                 if (suggestions.isNotEmpty()) {

@@ -60,18 +60,20 @@ class ExerciseRankingTest {
     }
 
     @Test
-    fun equalOverlapPrefersFewerLifetimeTrainingDaysBeforePriority() {
+    fun equalOverlapUsesPriorityBeforeLifetimeTrainingDays() {
         val often = exercise(1, BodyArea.QUADS, times = listOf(day, 2L * day, 3L * day)).copy(
             machine = exercise(1, BodyArea.QUADS).machine.copy(rankingPriority = -20),
         )
         val rare = exercise(2, BodyArea.CALVES, times = listOf(day))
-        assertEquals(listOf(2L, 1L), rankOverviewMachines(listOf(often, rare), cutoff, emptyList(), zone).map { it.machine.id })
+        assertEquals(listOf(1L, 2L), rankOverviewMachines(listOf(often, rare), cutoff, emptyList(), zone).map { it.machine.id })
+        val equalPriority = often.copy(machine = often.machine.copy(rankingPriority = 0))
+        assertEquals(listOf(2L, 1L), rankOverviewMachines(listOf(equalPriority, rare), cutoff, emptyList(), zone).map { it.machine.id })
     }
 
     @Test
     fun lowerOverlapWinsEvenIfItHasMoreLifetimeTrainings() {
         val current = exercise(1, BodyArea.CHEST)
-        val rareConflict = exercise(2, BodyArea.CHEST)
+        val rareConflict = exercise(2, BodyArea.CHEST).let { it.copy(machine = it.machine.copy(rankingPriority = -20)) }
         val frequentLegs = exercise(3, BodyArea.QUADS, times = listOf(day, 2L * day, 3L * day))
         assertEquals(listOf(3L, 2L), rankOverviewMachines(listOf(rareConflict, frequentLegs), cutoff, listOf(current), zone).map { it.machine.id })
     }

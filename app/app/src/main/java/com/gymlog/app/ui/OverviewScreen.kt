@@ -52,7 +52,6 @@ import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.KeyboardCapitalization
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -403,8 +402,6 @@ private fun MachineCard(
         clash != null && clash > 0 -> Color(0xFFFBC02D)
         else -> Color(0xFF43A047)
     }
-    val metricInHeader = summary.machine.titleNote.isBlank() ||
-        summary.machine.name.length + summary.machine.titleNote.length <= 30
     Card(
         modifier = modifier.fillMaxWidth().clickable(enabled = !isReordering) { onMachine(summary.machine.id) },
         elevation = CardDefaults.cardElevation(defaultElevation = if (isDragging) 10.dp else 1.dp),
@@ -431,27 +428,33 @@ private fun MachineCard(
                     }
                 }
             }
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
-                    Text(summary.machine.name, maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-                    if (summary.machine.titleNote.isNotBlank()) {
-                        Text(" · ${summary.machine.titleNote}", maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                }
-                if (metricInHeader) {
-                    Text(
-                        formatMetric(summary.machine.currentWeight, summary.machine.trackingMode),
-                        modifier = Modifier.clickable(enabled = !isReordering) { changeMetric = true }.padding(horizontal = 6.dp, vertical = 2.dp),
-                        style = MaterialTheme.typography.titleSmall,
-                        color = sessionTrendColor(summary),
-                    )
-                }
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
+                AutoFitText(
+                    buildAnnotatedString {
+                        append(summary.machine.name)
+                        if (summary.machine.titleNote.isNotBlank()) {
+                            withStyle(SpanStyle(color = MaterialTheme.colorScheme.onSurfaceVariant, fontWeight = FontWeight.Normal)) {
+                                append(" · ${summary.machine.titleNote}")
+                            }
+                        }
+                    },
+                    modifier = Modifier.weight(1f),
+                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
+                )
+                Text(
+                    formatMetric(summary.machine.currentWeight, summary.machine.trackingMode),
+                    modifier = Modifier.clickable(enabled = !isReordering) { changeMetric = true }.padding(horizontal = 6.dp, vertical = 2.dp),
+                    style = MaterialTheme.typography.titleSmall,
+                    color = sessionTrendColor(summary),
+                    maxLines = 1,
+                    softWrap = false,
+                )
             }
             progressionWarning(summary, progressionSettings)?.let { warning ->
                 Text(warning, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error)
             }
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Text(
+                AutoFitText(
                     (when {
                         isLastDone -> "Current exercise"
                         trainedInUnit -> "Done this training"
@@ -461,9 +464,6 @@ private fun MachineCard(
                     modifier = Modifier.weight(1f),
                     style = MaterialTheme.typography.labelSmall,
                     color = outlineColor,
-                    maxLines = 1,
-                    softWrap = false,
-                    overflow = TextOverflow.Ellipsis,
                 )
             }
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -477,23 +477,12 @@ private fun MachineCard(
                     style = MaterialTheme.typography.labelLarge,
                     color = MaterialTheme.colorScheme.primary,
                 )
-                Text(
+                AutoFitText(
                     sessionPattern,
                     modifier = Modifier.weight(1f),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    softWrap = false,
-                    overflow = TextOverflow.Ellipsis,
                 )
-                if (!metricInHeader) {
-                    Text(
-                        formatMetric(summary.machine.currentWeight, summary.machine.trackingMode),
-                        modifier = Modifier.clickable(enabled = !isReordering) { changeMetric = true }.padding(horizontal = 6.dp, vertical = 2.dp),
-                        style = MaterialTheme.typography.titleSmall,
-                        color = sessionTrendColor(summary),
-                    )
-                }
             }
         }
     }
@@ -703,6 +692,7 @@ fun AddMachineDialog(onDismiss: () -> Unit, onAdd: (String, Double, TrackingMode
     var name by remember { mutableStateOf("") }
     var weight by remember { mutableStateOf("") }
     var trackingMode by remember { mutableStateOf(TrackingMode.WEIGHT) }
+    var trackingModeChosen by remember { mutableStateOf(false) }
     var note by remember { mutableStateOf("") }
     var areas by remember { mutableStateOf<List<AreaAssignment>>(emptyList()) }
     var selectedProfile by remember { mutableStateOf<String?>(null) }
@@ -712,7 +702,7 @@ fun AddMachineDialog(onDismiss: () -> Unit, onAdd: (String, Double, TrackingMode
         if (name.isBlank()) name = template.englishName
         areas = template.areas
         selectedProfile = template.title
-        trackingMode = template.trackingMode
+        if (!trackingModeChosen) trackingMode = template.trackingMode
         if (weight.isBlank()) weight = "0"
         showCatalog = false
     }
@@ -741,11 +731,11 @@ fun AddMachineDialog(onDismiss: () -> Unit, onAdd: (String, Double, TrackingMode
                 Text(muscleProfileSummary(areas), style = MaterialTheme.typography.bodySmall)
                 TextButton(onClick = { showProfile = true }) { Text("Choose / edit body regions & intensity") }
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    FilterChip(selected = trackingMode == TrackingMode.WEIGHT, onClick = { trackingMode = TrackingMode.WEIGHT }, label = { Text("kg") })
-                    FilterChip(selected = trackingMode == TrackingMode.WATTS, onClick = { trackingMode = TrackingMode.WATTS }, label = { Text("Watts") })
-                    FilterChip(selected = trackingMode == TrackingMode.STRENGTH, onClick = { trackingMode = TrackingMode.STRENGTH }, label = { Text("Level") })
+                    FilterChip(selected = trackingMode == TrackingMode.WEIGHT, onClick = { trackingMode = TrackingMode.WEIGHT; trackingModeChosen = true }, label = { Text("kg") })
+                    FilterChip(selected = trackingMode == TrackingMode.WATTS, onClick = { trackingMode = TrackingMode.WATTS; trackingModeChosen = true }, label = { Text("Watts") })
+                    FilterChip(selected = trackingMode == TrackingMode.STRENGTH, onClick = { trackingMode = TrackingMode.STRENGTH; trackingModeChosen = true }, label = { Text("Level") })
                 }
-                FilterChip(selected = trackingMode == TrackingMode.DURATION, onClick = { trackingMode = TrackingMode.DURATION }, label = { Text("Minutes") })
+                FilterChip(selected = trackingMode == TrackingMode.DURATION, onClick = { trackingMode = TrackingMode.DURATION; trackingModeChosen = true }, label = { Text("Minutes") })
                 if (trackingMode.usesResistanceLevel()) {
                     Text(
                         "Level and Watts exercises record training duration in minutes.",
@@ -816,12 +806,12 @@ fun formatMetric(value: Double, trackingMode: TrackingMode): String = when (trac
     TrackingMode.WATTS -> "${formatNumber(value)} W"
     TrackingMode.WEIGHT -> formatWeight(value)
     TrackingMode.DURATION -> "${formatNumber(value)} min"
-    else -> "Level ${formatNumber(value)}"
+    else -> "Lv. ${formatNumber(value)}"
 }
 
 fun formatTrainingEntry(value: Double, trackingMode: TrackingMode, level: Int? = null): String = when (trackingMode) {
     TrackingMode.WATTS -> "${level ?: 0} W | ${formatNumber(value)} min"
-    TrackingMode.STRENGTH -> "Level ${(level ?: 0).toString().padStart(2)} · ${formatNumber(value).padStart(3)} min"
+    TrackingMode.STRENGTH -> "Lv. ${(level ?: 0).toString().padStart(2)} · ${formatNumber(value).padStart(3)} min"
     TrackingMode.DURATION -> "${formatNumber(value)} min"
     else -> formatMetric(value, trackingMode)
 }

@@ -1,5 +1,5 @@
 
-
+i guess i want global settings for warning and waring windwo for volume and increases. do i want overridavble per exercise?. it also has option for how many trainings wihtount increase. is that per done excersiy or per gym day? do i want that? allow for empty to disable aswell.
 
 data not best. eg. total abdominal doest have glutes i guess. but also not in catalogue somehow
 
