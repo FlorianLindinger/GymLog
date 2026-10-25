@@ -7,6 +7,8 @@ ask AI for more ideas
 
 do i want more body plot settings? more lines
 
+scrolling exercises overciew should be more smooth
+
 ===================================
 Explicit workout start/pause/finish — more accurate duration tracking, while keeping automatic detection as an option.
 
