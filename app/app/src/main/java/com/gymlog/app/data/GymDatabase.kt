@@ -4,11 +4,11 @@ import android.content.Context
 import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteOpenHelper
 
-internal class GymDatabase(context: Context) : SQLiteOpenHelper(context, GYMLOG_DATABASE, null, 10) {
+internal class GymDatabase(context: Context) : SQLiteOpenHelper(context, GYMLOG_DATABASE, null, 11) {
     override fun onCreate(db: SQLiteDatabase) {
         db.execSQL("CREATE TABLE training_plans(id INTEGER PRIMARY KEY AUTOINCREMENT,name TEXT NOT NULL UNIQUE,sort_order INTEGER NOT NULL,notes TEXT NOT NULL DEFAULT '',notes_pinned INTEGER NOT NULL DEFAULT 0)")
         db.execSQL("INSERT INTO training_plans(name,sort_order) VALUES('Default',0)")
-        db.execSQL("CREATE TABLE machines(id INTEGER PRIMARY KEY AUTOINCREMENT,plan_id INTEGER NOT NULL DEFAULT 1,name TEXT NOT NULL,title_note TEXT NOT NULL DEFAULT '',notes TEXT NOT NULL DEFAULT '',pause_time TEXT NOT NULL DEFAULT '',chart_window TEXT NOT NULL DEFAULT '3M',trailing_average INTEGER NOT NULL DEFAULT 0,tracking_mode TEXT NOT NULL DEFAULT 'WEIGHT',current_weight REAL NOT NULL DEFAULT 0,sort_order INTEGER NOT NULL,pinned INTEGER NOT NULL DEFAULT 0,order_group TEXT NOT NULL DEFAULT 'AUTOMATIC',ranking_priority INTEGER NOT NULL DEFAULT 0,show_trend INTEGER NOT NULL DEFAULT 1,hidden INTEGER NOT NULL DEFAULT 0,FOREIGN KEY(plan_id) REFERENCES training_plans(id) ON DELETE CASCADE)")
+        db.execSQL("CREATE TABLE machines(id INTEGER PRIMARY KEY AUTOINCREMENT,plan_id INTEGER NOT NULL DEFAULT 1,name TEXT NOT NULL,title_note TEXT NOT NULL DEFAULT '',notes TEXT NOT NULL DEFAULT '',pause_time TEXT NOT NULL DEFAULT '',chart_window TEXT NOT NULL DEFAULT '3M',trailing_average INTEGER NOT NULL DEFAULT 0,tracking_mode TEXT NOT NULL DEFAULT 'WEIGHT',current_weight REAL NOT NULL DEFAULT 0,sort_order INTEGER NOT NULL,pinned INTEGER NOT NULL DEFAULT 0,order_group TEXT NOT NULL DEFAULT 'AUTOMATIC',ranking_priority INTEGER NOT NULL DEFAULT 0,show_trend INTEGER NOT NULL DEFAULT 1,hidden INTEGER NOT NULL DEFAULT 0,progression_settings TEXT,FOREIGN KEY(plan_id) REFERENCES training_plans(id) ON DELETE CASCADE)")
         db.execSQL("CREATE TABLE machine_areas(machine_id INTEGER NOT NULL,area TEXT NOT NULL,strength REAL NOT NULL,PRIMARY KEY(machine_id,area),FOREIGN KEY(machine_id) REFERENCES machines(id) ON DELETE CASCADE)")
         db.execSQL("CREATE TABLE sets(id INTEGER PRIMARY KEY AUTOINCREMENT,machine_id INTEGER NOT NULL,reps INTEGER NOT NULL,weight REAL NOT NULL,performed_at INTEGER NOT NULL,FOREIGN KEY(machine_id) REFERENCES machines(id) ON DELETE CASCADE)")
         db.execSQL("CREATE TABLE weight_history(id INTEGER PRIMARY KEY AUTOINCREMENT,machine_id INTEGER NOT NULL,weight REAL NOT NULL,changed_at INTEGER NOT NULL,FOREIGN KEY(machine_id) REFERENCES machines(id) ON DELETE CASCADE)")
@@ -33,6 +33,9 @@ internal class GymDatabase(context: Context) : SQLiteOpenHelper(context, GYMLOG_
             db.execSQL("ALTER TABLE machines ADD COLUMN show_trend INTEGER NOT NULL DEFAULT 1")
             db.execSQL("ALTER TABLE machines ADD COLUMN hidden INTEGER NOT NULL DEFAULT 0")
             db.execSQL("UPDATE machines SET order_group=CASE WHEN pinned=1 THEN 'MANUAL_TOP' ELSE 'AUTOMATIC' END")
+        }
+        if (oldVersion < 11) {
+            db.execSQL("ALTER TABLE machines ADD COLUMN progression_settings TEXT")
         }
     }
 

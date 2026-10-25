@@ -1,13 +1,41 @@
 
-i guess i want global settings for warning and waring windwo for volume and increases. do i want overridavble per exercise?. it also has option for how many trainings wihtount increase. is that per done excersiy or per gym day? do i want that? allow for empty to disable aswell.
+fix stats
 
-data not best. eg. total abdominal doest have glutes i guess. but also not in catalogue somehow
+test deletes training hisroy and add way to change or add specifc one on specifc date...
+
+ask AI for more ideas
+
+do i want more body plot settings? more lines
 
 ===================================
+Explicit workout start/pause/finish — more accurate duration tracking, while keeping automatic detection as an option.
 
-add color codes to installer of both apps. i guess make them gernally nice and sharable between apps. ask AI for good ideas and ebst practives
+Rep targets and progression suggestions — set a range such as 8–12 reps. When every working set reaches 12, suggest the next weight increase.
 
-in body. color code green red the plot field title if alltime high low. maybe also if in or out of target region. will be hard with colors. maybe wirte down allteim high or smoemthing ...
+Warm-up and working-set labels — keep warm-ups in history while excluding them from selected progress and workload statistics.
+
+Effort tracking — optional “reps in reserve” per set. This would give more context to 1RM estimates and explain why identical sets can feel different.
+
+Repeat last training — prefill the previous weights, reps, and exercise order, then confirm each exercise as you complete it.
+
+Configurable logging wheels — customize maximum reps, default set count, and weight increments per exercise. Useful for exercises exceeding the current 15-rep wheel.
+
+Supersets and circuits — link exercises, alternate between them, and optionally run a rest timer after each round.
+
+Training notes on timelines — mark things like a technique change, different machine, illness, or holiday so changes in charts have context.
+
+Customizable overview — choose card density, visible information, and preferred controls. A larger “gym mode” could make logging easier during training.
+
+Historical profile snapshots — retain which body regions and intensities applied when a training was recorded, so later profile edits don’t rewrite historical workload estimates.
+
+Backup history and CSV export — keep several dated backups and export raw sets or chart data for independent analysis.
+
+Exercise substitutions — define alternatives for occupied equipment and quickly swap them into the current workout.
+===================================
+
+ask for cleanup and removeal of backwards compatriblity
+
+add color text to installer of both apps. genarlly ask for improvemtns and fancy ways. i guess make them gernally nice and sharable between apps. ask AI for good ideas and ebst practives
 
 Cleanuo code of unused stuff and backwards comparabilitry.
 
@@ -16,14 +44,7 @@ Improvised stats tab a lot. Ask for ideas by ai
 Not sure if scaling of voleme with something is worth it. Kind of would be nice to know if actual increase or decrease after level change 
 Maybe some kind of correction factor or exponent such that after switch it is not less "volume"
 
-Does percentage increase requirements even make sense
-
-Ask AI for cooking ideas 
-
-
 Can I delete a training and not just set later in history? It is weird looking in history. Maybe redo that
-
-Maybe 2 months without increase and 2 months volume¿ Reps¿ trend warning
 
 Can I sync faster from scale
 

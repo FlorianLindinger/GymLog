@@ -17,6 +17,7 @@ data class Machine(
     val rankingPriority: Int = 0,
     val excludedFromAutoRanking: Boolean = false,
     val showTrend: Boolean = true,
+    val progressionSettings: ProgressionSettings? = null,
 ) {
     val orderGroup: ExerciseOrderGroup get() = when {
         pinned -> ExerciseOrderGroup.MANUAL_TOP
@@ -75,8 +76,9 @@ data class WeightChange(val weight: Double, val changedAt: Long)
 
 data class ProgressionSettings(
     val staleWeeks: Int = 4,
-    val staleTrainings: Int = 5,
+    val volumeWindowTrainings: Int = 5,
     val volumeMinimumIncreasePercent: Int = 5,
+    val useOneRepMax: Boolean = true,
 )
 
 data class BackupSyncStatus(

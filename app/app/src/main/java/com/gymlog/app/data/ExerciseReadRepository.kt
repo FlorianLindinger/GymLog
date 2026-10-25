@@ -12,7 +12,7 @@ internal class ExerciseReadRepository(
         val db = database()
         val machines = mutableListOf<Machine>()
         db.rawQuery(
-            "SELECT id,name,title_note,notes,pause_time,chart_window,trailing_average,tracking_mode,current_weight,sort_order,order_group,ranking_priority,show_trend FROM machines WHERE plan_id=? ORDER BY sort_order,id",
+            "SELECT id,name,title_note,notes,pause_time,chart_window,trailing_average,tracking_mode,current_weight,sort_order,order_group,ranking_priority,show_trend,progression_settings FROM machines WHERE plan_id=? ORDER BY sort_order,id",
             arrayOf(planId.toString()),
         ).use { cursor ->
             while (cursor.moveToNext()) {
@@ -24,6 +24,7 @@ internal class ExerciseReadRepository(
                     currentWeight = cursor.getDouble(8), sortOrder = cursor.getInt(9),
                     pinned = group == ExerciseOrderGroup.MANUAL_TOP, rankingPriority = cursor.getInt(11),
                     excludedFromAutoRanking = group == ExerciseOrderGroup.MANUAL_BOTTOM, showTrend = cursor.getInt(12) != 0,
+                    progressionSettings = progressionSettingsFromStorage(cursor.getString(13)),
                 )
             }
         }

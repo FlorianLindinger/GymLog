@@ -26,6 +26,8 @@ class GymRepository(context: Context, private val gymClock: GymClock = GymClock(
                 .remove("progress_stale_weeks")
                 .remove("progress_stale_trainings")
                 .remove("progress_volume_minimum_percent")
+                .remove("progress_volume_window_trainings")
+                .remove("progress_use_one_rep_max")
                 .commit(),
         ) { "GymLog settings could not be reset" }
         db = GymDatabase(appContext)
@@ -62,16 +64,25 @@ class GymRepository(context: Context, private val gymClock: GymClock = GymClock(
 
     fun loadProgressionSettings(): ProgressionSettings = ProgressionSettings(
         staleWeeks = preferences.getInt("progress_stale_weeks", 4),
-        staleTrainings = preferences.getInt("progress_stale_trainings", 5),
+        volumeWindowTrainings = preferences.getInt("progress_volume_window_trainings", 5).coerceAtLeast(0),
         volumeMinimumIncreasePercent = preferences.getInt("progress_volume_minimum_percent", 5),
+        useOneRepMax = preferences.getBoolean("progress_use_one_rep_max", true),
     )
 
     fun saveProgressionSettings(settings: ProgressionSettings) {
         preferences.edit()
             .putInt("progress_stale_weeks", settings.staleWeeks.coerceAtLeast(0))
-            .putInt("progress_stale_trainings", settings.staleTrainings.coerceAtLeast(0))
+            .remove("progress_stale_trainings")
+            .putInt("progress_volume_window_trainings", settings.volumeWindowTrainings.coerceAtLeast(0))
             .putInt("progress_volume_minimum_percent", settings.volumeMinimumIncreasePercent.coerceAtLeast(0))
+            .putBoolean("progress_use_one_rep_max", settings.useOneRepMax)
             .apply()
+    }
+
+    fun saveExerciseProgressionSettings(id: Long, settings: ProgressionSettings?) {
+        db.writableDatabase.update("machines", ContentValues().apply {
+            put("progression_settings", settings?.toJson()?.toString())
+        }, "id=?", arrayOf(id.toString()))
     }
 
     fun loadTrainingPlans(): List<TrainingPlan> {
@@ -219,6 +230,7 @@ class GymRepository(context: Context, private val gymClock: GymClock = GymClock(
                     put("pinned", if (machine.pinned) 1 else 0)
                     put("order_group", machine.orderGroup.name)
                     put("ranking_priority", machine.rankingPriority)
+                    put("progression_settings", machine.progressionSettings?.toJson()?.toString())
                     put("show_trend", if (machine.showTrend) 1 else 0)
                 })
                 summary.areas.forEach { assignment ->
@@ -636,9 +648,9 @@ class GymRepository(context: Context, private val gymClock: GymClock = GymClock(
     private fun planJournalObject(plan: TrainingPlan): JSONObject = JSONObject().put("id", plan.id).put("name", plan.name).put("sortOrder", plan.sortOrder).put("notes", plan.notes).put("notesPinned", plan.notesPinned)
 
     private fun machineJournalObject(database: SQLiteDatabase, id: Long): JSONObject? {
-        val machine = database.rawQuery("SELECT id,plan_id,name,title_note,notes,pause_time,chart_window,trailing_average,tracking_mode,current_weight,sort_order,pinned,order_group,ranking_priority,show_trend,hidden FROM machines WHERE id=?", arrayOf(id.toString())).use { cursor ->
+        val machine = database.rawQuery("SELECT id,plan_id,name,title_note,notes,pause_time,chart_window,trailing_average,tracking_mode,current_weight,sort_order,pinned,order_group,ranking_priority,show_trend,hidden,progression_settings FROM machines WHERE id=?", arrayOf(id.toString())).use { cursor ->
             if (!cursor.moveToFirst()) return@use null
-            JSONObject().put("id", cursor.getLong(0)).put("planId", cursor.getLong(1)).put("name", cursor.getString(2)).put("titleNote", cursor.getString(3)).put("notes", cursor.getString(4)).put("pauseTime", cursor.getString(5)).put("chartWindow", cursor.getString(6)).put("trailingAverage", cursor.getInt(7)).put("trackingMode", cursor.getString(8)).put("currentWeight", cursor.getDouble(9)).put("sortOrder", cursor.getInt(10)).put("pinned", cursor.getInt(11)).put("orderGroup", cursor.getString(12)).put("rankingPriority", cursor.getInt(13)).put("showTrend", cursor.getInt(14)).put("hidden", cursor.getInt(15))
+            JSONObject().put("id", cursor.getLong(0)).put("planId", cursor.getLong(1)).put("name", cursor.getString(2)).put("titleNote", cursor.getString(3)).put("notes", cursor.getString(4)).put("pauseTime", cursor.getString(5)).put("chartWindow", cursor.getString(6)).put("trailingAverage", cursor.getInt(7)).put("trackingMode", cursor.getString(8)).put("currentWeight", cursor.getDouble(9)).put("sortOrder", cursor.getInt(10)).put("pinned", cursor.getInt(11)).put("orderGroup", cursor.getString(12)).put("rankingPriority", cursor.getInt(13)).put("showTrend", cursor.getInt(14)).put("hidden", cursor.getInt(15)).put("progressionSettings", cursor.getString(16)?.let(::JSONObject))
         } ?: return null
         machine.put("areas", JSONArray()).put("sets", JSONArray()).put("weights", JSONArray())
         database.rawQuery("SELECT area,strength FROM machine_areas WHERE machine_id=?", arrayOf(id.toString())).use { cursor -> while (cursor.moveToNext()) machine.getJSONArray("areas").put(JSONObject().put("area", cursor.getString(0)).put("strength", cursor.getDouble(1))) }
@@ -649,7 +661,7 @@ class GymRepository(context: Context, private val gymClock: GymClock = GymClock(
 
     private fun restoreMachine(database: SQLiteDatabase, machine: JSONObject) {
         database.insertOrThrow("machines", null, ContentValues().apply {
-            put("id", machine.getLong("id")); put("plan_id", machine.getLong("planId")); put("name", machine.getString("name")); put("title_note", machine.getString("titleNote")); put("notes", machine.getString("notes")); put("pause_time", machine.getString("pauseTime")); put("chart_window", machine.getString("chartWindow")); put("trailing_average", machine.getInt("trailingAverage")); put("tracking_mode", machine.getString("trackingMode")); put("current_weight", machine.getDouble("currentWeight")); put("sort_order", machine.getInt("sortOrder")); put("pinned", machine.getInt("pinned")); put("order_group", machine.getString("orderGroup")); put("ranking_priority", machine.getInt("rankingPriority")); put("show_trend", machine.getInt("showTrend")); put("hidden", machine.getInt("hidden"))
+            put("id", machine.getLong("id")); put("plan_id", machine.getLong("planId")); put("name", machine.getString("name")); put("title_note", machine.getString("titleNote")); put("notes", machine.getString("notes")); put("pause_time", machine.getString("pauseTime")); put("chart_window", machine.getString("chartWindow")); put("trailing_average", machine.getInt("trailingAverage")); put("tracking_mode", machine.getString("trackingMode")); put("current_weight", machine.getDouble("currentWeight")); put("sort_order", machine.getInt("sortOrder")); put("pinned", machine.getInt("pinned")); put("order_group", machine.getString("orderGroup")); put("ranking_priority", machine.getInt("rankingPriority")); put("show_trend", machine.getInt("showTrend")); put("hidden", machine.getInt("hidden")); put("progression_settings", machine.optJSONObject("progressionSettings")?.toString())
         })
         val areas = machine.getJSONArray("areas"); for (index in 0 until areas.length()) { val area = areas.getJSONObject(index); database.insertOrThrow("machine_areas", null, ContentValues().apply { put("machine_id", machine.getLong("id")); put("area", area.getString("area")); put("strength", area.getDouble("strength")) }) }
         val sets = machine.getJSONArray("sets"); for (index in 0 until sets.length()) { val set = sets.getJSONObject(index); database.insertOrThrow("sets", null, ContentValues().apply { put("id", set.getLong("id")); put("machine_id", machine.getLong("id")); put("reps", set.getInt("reps")); put("weight", set.getDouble("weight")); put("performed_at", set.getLong("performedAt")) }) }
@@ -741,8 +753,9 @@ class GymRepository(context: Context, private val gymClock: GymClock = GymClock(
             put("weightUnit", "kg")
             loadProgressionSettings().let {
                 put("progressStaleWeeks", it.staleWeeks)
-                put("progressStaleTrainings", it.staleTrainings)
+                put("progressVolumeWindowTrainings", it.volumeWindowTrainings)
                 put("progressVolumeMinimumPercent", it.volumeMinimumIncreasePercent)
+                put("progressUseOneRepMax", it.useOneRepMax)
             }
             put("areaColors", JSONObject().apply {
                 BodyArea.entries.forEach { area -> put(area.name, areaColor(db.readableDatabase, area)) }
@@ -779,6 +792,7 @@ class GymRepository(context: Context, private val gymClock: GymClock = GymClock(
                     put("sortOrder", summary.machine.sortOrder)
                     put("pinned", summary.machine.pinned)
                     put("rankingPriority", summary.machine.rankingPriority)
+                    put("progressionSettings", summary.machine.progressionSettings?.toJson())
                     put("excludedFromAutoRanking", summary.machine.excludedFromAutoRanking)
                     put("hidden", isMachineHidden(summary.machine.id))
                     put("areas", JSONArray().apply {
@@ -819,8 +833,9 @@ class GymRepository(context: Context, private val gymClock: GymClock = GymClock(
         root.optJSONObject("settings")?.let { settings ->
             saveProgressionSettings(ProgressionSettings(
                 staleWeeks = settings.optInt("progressStaleWeeks", 4),
-                staleTrainings = settings.optInt("progressStaleTrainings", 5),
+                volumeWindowTrainings = settings.optInt("progressVolumeWindowTrainings", 5),
                 volumeMinimumIncreasePercent = settings.optInt("progressVolumeMinimumPercent", 5),
+                useOneRepMax = settings.optBoolean("progressUseOneRepMax", true),
             ))
         }
         val database = db.writableDatabase
@@ -876,6 +891,7 @@ class GymRepository(context: Context, private val gymClock: GymClock = GymClock(
                     put("pinned", if (orderGroup == ExerciseOrderGroup.MANUAL_TOP) 1 else 0)
                     put("order_group", orderGroup.name)
                     put("ranking_priority", item.optInt("rankingPriority", 0))
+                    put("progression_settings", item.optJSONObject("progressionSettings")?.let(::progressionSettingsFromJson)?.toJson()?.toString())
                     put("show_trend", if (item.optBoolean("showTrend", true)) 1 else 0)
                     put("hidden", if (item.optBoolean("hidden")) 1 else 0)
                 })

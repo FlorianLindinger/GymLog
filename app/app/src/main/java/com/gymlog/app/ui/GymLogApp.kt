@@ -57,6 +57,8 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.unit.dp
@@ -76,7 +78,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-private enum class Screen { OVERVIEW, BODY, STATS, ORDER, HISTORY, BACKUP, PLANS, DETAIL }
+private enum class Screen { OVERVIEW, BODY, STATS, WIP_STATS, ORDER, HISTORY, BACKUP, PLANS, DETAIL }
 enum class ExerciseEditField { NAME, TITLE_NOTE, OVERVIEW_NOTE }
 
 internal data class AppUiState(
@@ -137,6 +139,8 @@ fun GymLogApp(
     }
     var screen by remember { mutableStateOf(Screen.OVERVIEW) }
     var selectedId by remember { mutableStateOf<Long?>(null) }
+    var detailOrigin by remember { mutableStateOf(Screen.OVERVIEW) }
+    var historyOrigin by remember { mutableStateOf(Screen.STATS) }
     var showAdd by remember { mutableStateOf(false) }
     var showMenu by remember { mutableStateOf(false) }
     var confirmImport by remember { mutableStateOf(false) }
@@ -145,6 +149,7 @@ fun GymLogApp(
     var showPlanNotes by remember { mutableStateOf(false) }
     var showTrainingHeader by remember { mutableStateOf(false) }
     var showHelp by remember { mutableStateOf(false) }
+    var showTrainingMetricHelp by remember { mutableStateOf(false) }
     var confirmDeleteCurrentTraining by remember { mutableStateOf(false) }
     var editingExerciseField by remember { mutableStateOf<ExerciseEditField?>(null) }
     var importUndoSnapshot by remember { mutableStateOf<String?>(null) }
@@ -211,8 +216,9 @@ fun GymLogApp(
 
     fun navigateBack() {
         when (screen) {
-            Screen.HISTORY -> screen = Screen.STATS
-            Screen.PLANS, Screen.BACKUP -> {
+            Screen.HISTORY -> screen = historyOrigin
+            Screen.DETAIL -> screen = detailOrigin
+            Screen.PLANS, Screen.BACKUP, Screen.ORDER -> {
                 screen = Screen.OVERVIEW
                 showMenu = true
             }
@@ -249,6 +255,7 @@ fun GymLogApp(
                             Screen.OVERVIEW -> ""
                             Screen.BODY -> ""
                             Screen.STATS -> "Stats"
+                            Screen.WIP_STATS -> "WIP stats"
                             Screen.ORDER -> "Exercise Order"
                             Screen.HISTORY -> "History"
                             Screen.BACKUP -> "Data & Backup"
@@ -281,13 +288,14 @@ fun GymLogApp(
                 activePlanNotesPinned = activePlan?.notesPinned == true,
                 modifier = Modifier.padding(padding),
                 onMachine = {
+                    detailOrigin = Screen.OVERVIEW
                     selectedId = it
                     screen = Screen.DETAIL
                 },
                 onAdd = { showAdd = true },
                 onMenu = { showMenu = true },
                 onStats = { screen = Screen.STATS },
-                onOrder = { screen = Screen.ORDER },
+                onWipStats = { screen = Screen.WIP_STATS },
                 onBody = { screen = Screen.BODY },
                 listState = overviewListState,
                 showHidden = showHiddenExercises,
@@ -341,7 +349,20 @@ fun GymLogApp(
                 history = uiState.history,
                 machines = uiState.machines,
                 modifier = Modifier.padding(padding),
-                onHistory = { screen = Screen.HISTORY },
+                onHistory = { historyOrigin = Screen.STATS; screen = Screen.HISTORY },
+            )
+            Screen.WIP_STATS -> WipStatsScreen(
+                machines = uiState.machines,
+                hiddenIds = uiState.hiddenMachineIds,
+                planName = activePlan?.name ?: "Training plan",
+                progressionSettings = uiState.progressionSettings,
+                modifier = Modifier.padding(padding),
+                onHistory = { historyOrigin = Screen.WIP_STATS; screen = Screen.HISTORY },
+                onMachine = { id ->
+                    detailOrigin = Screen.WIP_STATS
+                    selectedId = id
+                    screen = Screen.DETAIL
+                },
             )
             Screen.ORDER -> OrderScreen(
                 machines = uiState.machines,
@@ -399,7 +420,7 @@ fun GymLogApp(
                     onDeleteExercise = { deleteWithUndo("${summary.machine.name} deleted") { repository.deleteMachineWithJournal(summary.machine.id) } },
                     onDeleted = {
                         refresh()
-                        screen = Screen.OVERVIEW
+                        screen = detailOrigin
                         selectedId = null
                     },
                 )
@@ -422,7 +443,7 @@ fun GymLogApp(
         onDismissRequest = { showMenu = false },
         title = { Text("Menu") },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Card(
                     Modifier.fillMaxWidth().clickable {
                         showMenu = false
@@ -441,6 +462,18 @@ fun GymLogApp(
                     }
                 }
                 TextButton(onClick = { showMenu = false; screen = Screen.PLANS }) { Text("Training Plans") }
+                TextButton(onClick = { showMenu = false; screen = Screen.ORDER }) { Text("Exercise Order") }
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Text("Use 1RM instead of volume", Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
+                    Switch(checked = uiState.progressionSettings.useOneRepMax, onCheckedChange = { enabled ->
+                        val updated = uiState.progressionSettings.copy(useOneRepMax = enabled)
+                        repository.saveProgressionSettings(updated)
+                        viewModel.replace(Result.success(uiState.copy(progressionSettings = updated)))
+                    })
+                    TextButton(onClick = { showMenu = false; showTrainingMetricHelp = true },
+                        modifier = Modifier.semantics { contentDescription = "Explain volume and 1RM" },
+                        contentPadding = PaddingValues(horizontal = 8.dp)) { Text("?") }
+                }
                 TextButton(onClick = { showMenu = false; showProgressionSettings = true }) { Text("Progress Warnings") }
                 TextButton(onClick = { showMenu = false; screen = Screen.BACKUP }) { Text("Data, Backup & Sync") }
                 TextButton(onClick = { showMenu = false; showAccentColor = true }) { Text("UI Color") }
@@ -459,21 +492,43 @@ fun GymLogApp(
         confirmButton = { TextButton(onClick = { showMenu = false }) { Text("Close") } },
     )
 
+    if (showTrainingMetricHelp) TrainingMetricExplanationDialog {
+        showTrainingMetricHelp = false
+        showMenu = true
+    }
+
     if (showHelp) AlertDialog(
         onDismissRequest = { showHelp = false; showMenu = true },
         title = { Text("Help & Explanations") },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text("Outlines", style = MaterialTheme.typography.titleSmall)
-                Text("A colored outline marks interactive or emphasized cards. Tap cards with notes, metrics, or training areas to edit them.")
-                Text("Body-Area Colors", style = MaterialTheme.typography.titleSmall)
-                Text("Edit Regions on an exercise card to choose Off, Low, Medium, or High involvement. Marker widths follow that intensity. Exercise suggestions in English and German provide editable starting profiles; pick one before applying it.")
-                Text("Training Time", style = MaterialTheme.typography.titleSmall)
-                Text("Live means the timer is still counting from the first entry. It becomes completed after ten minutes without a new entry.")
-                Text("Progress Warnings", style = MaterialTheme.typography.titleSmall)
-                Text("Warnings appear when an exercise has not increased after your configured number of weeks or training sessions.")
-                Text("Exercise Ordering", style = MaterialTheme.typography.titleSmall)
-                Text("The current exercise stays first. Auto sorts unfinished exercises by estimated overlap with the current and previous distinct exercises in this training. The previous exercise has half the weight. Equal overlap prefers higher tie priority, then fewer recorded training days overall. Unconfigured profiles show unknown overlap. Manual top and bottom follow your arrow order.")
+            Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text("Volume or 1RM", style = MaterialTheme.typography.titleSmall)
+                Text("Choose Use 1RM instead of volume directly in Menu. Tap ? beside it for details. " + TRAINING_METRIC_EXPLANATION)
+                Text("Progress Warnings & Overrides", style = MaterialTheme.typography.titleSmall)
+                Text("Warnings show weeks without a kg increase and growth in the selected metric (Volume or 1RM). The trend window compares the first and last training once the window is full. Blank or 0 disables the corresponding warning; either a blank/0 window or minimum percentage disables the trend warning. Active windows need at least 2 trainings.")
+                Text("Every exercise has Progress Warnings in its details. Follow global warning settings uses future global changes. Turn it off for custom thresholds and a custom Volume/1RM choice. Blank custom fields disable warnings rather than inheriting global values. Warnings apply to weight exercises.")
+                Text("Exercise Ordering & Outlines", style = MaterialTheme.typography.titleSmall)
+                Text("Open Exercise Order from Menu. The current exercise stays first with a blue outline. Auto ranks unfinished exercises by least body-region overlap with the current and previous distinct exercises; the previous one has half the weight. Green blends through yellow and orange to red as overlap increases. Completed exercises have no overlap outline. Missing profiles count as zero overlap, so green can also mean an unconfigured profile.")
+                Text("Equal overlap prefers higher tie priority (+ raises it), then fewer recorded training days overall. Manual top and bottom use your arrow order. Hidden exercises still contribute recent training context.")
+                Text("Body Regions & Colors", style = MaterialTheme.typography.titleSmall)
+                Text("Choose Off, Low, Medium or High involvement in exercise details. Marker widths follow intensity. English/German exercise suggestions provide editable starting profiles. These are planning estimates, not recovery measurements. The body-region guide's Show/Hide choice is remembered for every exercise, even when profile edits are cancelled.")
+                Text("Training Days & Time", style = MaterialTheme.typography.titleSmall)
+                Text("A training day runs from 06:00 to 05:59 the next day. The overview timer estimates your training duration and becomes completed after 10 minutes without an entry. Stats duration uses the first and last recorded entry; a single entry has 0 minutes between them. Overview history abbreviates minutes as m; Lv. means level, and W means watts.")
+                Text("Stats", style = MaterialTheme.typography.titleSmall)
+                Text("Weight-increase counters compare recorded training loads; editing the next weight alone does not count. Body Area Training counts each exercise once per training day, weighted High = 1, Medium = 0.5 and Low = 0.25. Cards marked last 30 days keep that fixed window.")
+                Text("WIP stats", style = MaterialTheme.typography.titleSmall)
+                Text("WIP stats is a separate dashboard beside Stats. It compares equal calendar periods, tracks weekly goals, and offers a tappable training calendar, exercise charts and records. Its totals follow the selected interval and hidden-exercise switch. Tap How measured for the calculation rules.")
+                Text("The strength explorer uses best-set 1RM, while level and watts use peak intensity. Level changes are level steps, not percentages. Work/load for those entries is intensity x recorded minutes; the 1RM formula does not apply because they do not record repetitions. Tap the exercise chart's 1RM legend for details. New settings default to 1RM; saved choices are preserved.")
+                Text("Body Plot Settings", style = MaterialTheme.typography.titleSmall)
+                Text("Body Settings controls global plot defaults. Tap an individual plot for overrides; Follow global switches choose which settings inherit future global changes. Averaging groups displayed measurements into time bins; fits use original measurements. Blank Y-axis limits use automatic scaling. Targets and acceptance ranges belong to each plot; the global target switch controls visibility.")
+                Text("Body Reference Lines", style = MaterialTheme.typography.titleSmall)
+                Text("Blue marks measurements, yellow the fit, green the target, purple all-time low/mean/high and orange history-window low/mean/high. Each has its own visibility switch; means are dashed. Low/Mean/High values appear above the plot. History can follow the plot interval, including Custom and All, or use a separate window ending at the plot's end date. Mean calculations use original measurements rather than averaged display bins.")
+                Text("Health Connect", style = MaterialTheme.typography.titleSmall)
+                Text("Sync Health Connect is at the top of Body Settings, with status and last sync time. It reads permitted body measurements. Automatic refresh on resume reuses a successful sync for 15 minutes; the Settings button requests a fresh sync. Body data and plot settings are independent of training plans.")
+                Text("History, Hidden Exercises & Undo", style = MaterialTheme.typography.titleSmall)
+                Text("Calendar & History lets you edit or delete individual entries, an exercise's day or a whole training day. Hiding an exercise retains its records; use Show hidden exercises to find it again. When an Undo message appears after a deletion, tap Undo while it is visible to restore the data.")
+                Text("Backups", style = MaterialTheme.typography.titleSmall)
+                Text("Data, Backup & Sync provides JSON export and restore. Restoring replaces the current workout data. Backups preserve exercise warning overrides and the Volume/1RM choice. Export a backup before moving devices or replacing data.")
             }
         },
         confirmButton = { TextButton(onClick = { showHelp = false; showMenu = true }) { Text("Close") } },

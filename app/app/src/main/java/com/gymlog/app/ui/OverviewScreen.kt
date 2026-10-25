@@ -1,5 +1,7 @@
 package com.gymlog.app.ui
 
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -22,6 +24,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material3.Switch
 import androidx.compose.material3.AlertDialog
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.material3.Button
@@ -66,12 +69,12 @@ import com.gymlog.app.data.AreaAssignment
 import com.gymlog.app.data.ExerciseCatalog
 import com.gymlog.app.data.ExerciseTemplate
 import com.gymlog.app.data.exerciseOverlap
-import com.gymlog.app.data.exerciseTrainingCount
 import com.gymlog.app.data.rankOverviewMachines
 import com.gymlog.app.data.recentTrainingExercises
 import com.gymlog.app.data.ProgressionSettings
 import com.gymlog.app.data.SetRecord
-import com.gymlog.app.data.weightIncreases
+import com.gymlog.app.data.parseWarningSetting
+import com.gymlog.app.data.progressionWarning
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
@@ -96,7 +99,7 @@ fun OverviewScreen(
     onAdd: () -> Unit,
     onMenu: () -> Unit,
     onStats: () -> Unit,
-    onOrder: () -> Unit,
+    onWipStats: () -> Unit,
     onBody: () -> Unit,
     listState: LazyListState,
     showHidden: Boolean,
@@ -207,7 +210,7 @@ fun OverviewScreen(
                 FilledTonalButton(onClick = onBody, modifier = Modifier.weight(1f), contentPadding = compactPadding) { OverviewButtonLabel("Body") }
                 FilledTonalButton(onClick = onMenu, modifier = Modifier.weight(1f), contentPadding = compactPadding) { OverviewButtonLabel("Menu") }
                 FilledTonalButton(onClick = onStats, modifier = Modifier.weight(1f), contentPadding = compactPadding) { OverviewButtonLabel("Stats") }
-                FilledTonalButton(onClick = onOrder, modifier = Modifier.weight(1f), contentPadding = compactPadding) { OverviewButtonLabel("Order") }
+                FilledTonalButton(onClick = onWipStats, modifier = Modifier.weight(1f), contentPadding = compactPadding) { OverviewButtonLabel("WIP stats") }
                 FilledTonalButton(onClick = onAdd, modifier = Modifier.weight(1f), contentPadding = compactPadding) { OverviewButtonLabel("+ Add") }
         }
     }
@@ -217,7 +220,7 @@ fun OverviewScreen(
 }
 @Composable
 private fun OverviewButtonLabel(text: String) {
-    Text(text, maxLines = 1, softWrap = false, style = MaterialTheme.typography.labelMedium)
+    Text(text, maxLines = 1, softWrap = false, style = if (text == "WIP stats") MaterialTheme.typography.labelSmall else MaterialTheme.typography.labelMedium)
 }
 
 @Composable
@@ -306,65 +309,76 @@ private fun TrainingDurationCard(machines: List<MachineSummary>, activePlanName:
 }
 
 @Composable
-private fun ProgressionSettingsCard(settings: ProgressionSettings, onEdit: () -> Unit) {
-    Card(Modifier.fillMaxWidth()) {
-        Row(
-            Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 6.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Column(Modifier.weight(1f)) {
-                Text("Progress Warnings", style = MaterialTheme.typography.labelLarge)
-                Text(
-                    "${settingSummary(settings.staleWeeks, "weeks")} · ${settingSummary(settings.staleTrainings, "trainings")}",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            TextButton(onClick = onEdit) { Text("Settings") }
-        }
-    }
-}
-
-private fun settingSummary(value: Int, unit: String): String = if (value <= 0) "$unit off" else "$value $unit"
-
-@Composable
-fun ProgressionSettingsDialog(current: ProgressionSettings, onDismiss: () -> Unit, onSave: (ProgressionSettings) -> Unit) {
-    var weeks by remember(current) { mutableStateOf(current.staleWeeks.toString()) }
-    var trainings by remember(current) { mutableStateOf(current.staleTrainings.toString()) }
-    var volumePercent by remember(current) { mutableStateOf(current.volumeMinimumIncreasePercent.toString()) }
-    val parsedWeeks = weeks.toIntOrNull()
-    val parsedTrainings = trainings.toIntOrNull()
-    val parsedVolumePercent = volumePercent.toIntOrNull()
+fun ProgressionSettingsDialog(
+    current: ProgressionSettings,
+    onDismiss: () -> Unit,
+    title: String = "Progress Warnings",
+    initiallyFollowGlobal: Boolean = false,
+    onFollowGlobal: (() -> Unit)? = null,
+    globalUseOneRepMax: Boolean = current.useOneRepMax,
+    onSave: (ProgressionSettings) -> Unit,
+) {
+    var followGlobal by remember { mutableStateOf(initiallyFollowGlobal) }
+    var weeks by remember(current) { mutableStateOf(current.staleWeeks.takeIf { it > 0 }?.toString().orEmpty()) }
+    var volumeWindow by remember(current) { mutableStateOf(current.volumeWindowTrainings.takeIf { it > 0 }?.toString().orEmpty()) }
+    var volumePercent by remember(current) { mutableStateOf(current.volumeMinimumIncreasePercent.takeIf { it > 0 }?.toString().orEmpty()) }
+    var useOneRepMax by remember(current) { mutableStateOf(current.useOneRepMax) }
+    val metricLabel = if (if (followGlobal) globalUseOneRepMax else useOneRepMax) "1RM" else "Volume"
+    var showMetricHelp by remember { mutableStateOf(false) }
+    val parsedWeeks = parseWarningSetting(weeks)
+    val parsedVolumeWindow = parseWarningSetting(volumeWindow)
+    val parsedVolumePercent = parseWarningSetting(volumePercent)
+    val fieldsValid = parsedWeeks != null && parsedVolumeWindow != null && parsedVolumeWindow != 1 && parsedVolumePercent != null
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Progress Warnings") },
-        text = { Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Text("Volume checks the latest five training sessions. Set any limit to 0 to disable it.")
-            OutlinedTextField(weeks, { weeks = it.filter(Char::isDigit) }, label = { Text("Weeks Without Weight Increase") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), singleLine = true)
-            OutlinedTextField(trainings, { trainings = it.filter(Char::isDigit) }, label = { Text("Trainings Without Weight Increase") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), singleLine = true)
-            OutlinedTextField(volumePercent, { volumePercent = it.filter(Char::isDigit) }, label = { Text("Minimum Volume Trend Increase (%)") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), singleLine = true)
+        title = { Text(title) },
+        text = { Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            if (onFollowGlobal != null) {
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Text("Follow global warning settings", Modifier.weight(1f))
+                    Switch(checked = followGlobal, onCheckedChange = { followGlobal = it })
+                }
+            }
+            Text("Trend warnings currently use $metricLabel.", style = MaterialTheme.typography.titleSmall)
+            Text("Blank or 0 disables that warning. Trend warnings are disabled if either the window or minimum increase is blank or 0. Otherwise the window needs at least 2 trainings and compares the first and last once full.")
+            if (!followGlobal) {
+                if (onFollowGlobal != null) {
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        Text("Use 1RM instead of volume", Modifier.weight(1f))
+                        Switch(checked = useOneRepMax, onCheckedChange = { useOneRepMax = it })
+                        TextButton(onClick = { showMetricHelp = true }) { Text("?") }
+                    }
+                } else Text("Change the metric directly in Menu. Exercises with custom settings use their own choice.", style = MaterialTheme.typography.bodySmall)
+                OutlinedTextField(weeks, { weeks = it.filter(Char::isDigit) },
+                    label = { Text("Weeks Without Weight Increase") }, isError = parsedWeeks == null,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), singleLine = true)
+                OutlinedTextField(volumeWindow, { volumeWindow = it.filter(Char::isDigit) },
+                    label = { Text("$metricLabel Trend Window (trainings)") }, isError = parsedVolumeWindow == null || parsedVolumeWindow == 1,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), singleLine = true)
+                OutlinedTextField(volumePercent, { volumePercent = it.filter(Char::isDigit) },
+                    label = { Text("Minimum $metricLabel Trend Increase (%)") }, isError = parsedVolumePercent == null,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), singleLine = true)
+            }
         } },
-        confirmButton = { Button(onClick = { onSave(ProgressionSettings(parsedWeeks ?: 0, parsedTrainings ?: 0, parsedVolumePercent ?: 0)) }, enabled = parsedWeeks != null && parsedTrainings != null && parsedVolumePercent != null) { Text("Save") } },
+        confirmButton = { Button(onClick = {
+            if (followGlobal) onFollowGlobal?.invoke() else onSave(ProgressionSettings(
+                staleWeeks = parsedWeeks ?: 0,
+                volumeWindowTrainings = parsedVolumeWindow ?: 0,
+                volumeMinimumIncreasePercent = parsedVolumePercent ?: 0,
+                useOneRepMax = useOneRepMax,
+            ))
+        }, enabled = followGlobal || fieldsValid) { Text("Save") } },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
     )
+    if (showMetricHelp) TrainingMetricExplanationDialog { showMetricHelp = false }
 }
-private fun progressionWarning(summary: MachineSummary, settings: ProgressionSettings): String? {
-    if (summary.machine.trackingMode != TrackingMode.WEIGHT || summary.recentSets.isEmpty()) return null
-    val reference = summary.weightIncreases().maxOfOrNull { it.changedAt } ?: summary.weightChanges.minOfOrNull { it.changedAt }
-    val weeksWithoutIncrease = reference?.let { ((System.currentTimeMillis() - it).coerceAtLeast(0L) / 604_800_000L).toInt() } ?: 0
-    val zone = ZoneId.systemDefault()
-    val trainingsWithoutIncrease = reference?.let { threshold -> summary.recentSets.filter { it.performedAt > threshold }.map { Instant.ofEpochMilli(it.performedAt).atZone(zone).toLocalDate() }.distinct().count() } ?: 0
-    val reasons = buildList {
-        if (reference != null && settings.staleWeeks > 0 && weeksWithoutIncrease >= settings.staleWeeks) add("$weeksWithoutIncrease weeks without weight increase")
-        if (reference != null && settings.staleTrainings > 0 && trainingsWithoutIncrease >= settings.staleTrainings) add("$trainingsWithoutIncrease trainings without weight increase")
-        val volumes = groupSetBatches(summary.recentSets).asReversed().takeLast(5).map { batch -> batch.sumOf { it.weight * it.reps } }
-        if (settings.volumeMinimumIncreasePercent > 0 && volumes.size >= 3 && volumes.first() > 0.0) {
-            val growth = (volumes.last() - volumes.first()) / volumes.first() * 100.0
-            if (growth < settings.volumeMinimumIncreasePercent) add("volume trend ${formatNumber(growth)}% (needs +${settings.volumeMinimumIncreasePercent}%)")
-        }
-    }
-    return reasons.takeIf { it.isNotEmpty() }?.joinToString(" · ", prefix = "Progress warning: ")
+internal fun overlapOutlineColor(percent: Int?): Color {
+    val colors = listOf(Color(0xFF43A047), Color(0xFFFBC02D), Color(0xFFFB8C00), Color(0xFFE53935))
+    val position = (percent ?: 0).coerceIn(0, 100) / 100f * colors.lastIndex
+    val index = position.toInt().coerceAtMost(colors.lastIndex - 1)
+    return lerp(colors[index], colors[index + 1], position - index)
 }
+
 @OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
 private fun MachineCard(
@@ -394,14 +408,10 @@ private fun MachineCard(
     val overlap = exerciseOverlap(summary, recentExercises)
     val clash = if (!trainedInUnit) overlap.percent else null
     val clashAreas = if (!trainedInUnit) overlap.sharedAreas else emptySet()
-    val trainingCount = remember(summary.recentSets) { exerciseTrainingCount(summary) }
-    val outlineColor = when {
-        isLastDone -> Color(0xFF1976D2)
-        clash != null && clash >= 60 -> Color(0xFFE53935)
-        clash != null && clash >= 25 -> Color(0xFFFB8C00)
-        clash != null && clash > 0 -> Color(0xFFFBC02D)
-        else -> Color(0xFF43A047)
-    }
+    val outlineColor by animateColorAsState(
+        targetValue = if (isLastDone) Color(0xFF1976D2) else overlapOutlineColor(clash),
+        label = "Exercise overlap outline",
+    )
     Card(
         modifier = modifier.fillMaxWidth().clickable(enabled = !isReordering) { onMachine(summary.machine.id) },
         elevation = CardDefaults.cardElevation(defaultElevation = if (isDragging) 10.dp else 1.dp),
@@ -451,20 +461,7 @@ private fun MachineCard(
                 )
             }
             progressionWarning(summary, progressionSettings)?.let { warning ->
-                Text(warning, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error)
-            }
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                AutoFitText(
-                    (when {
-                        isLastDone -> "Current exercise"
-                        trainedInUnit -> "Done this training"
-                        clash == null -> "Overlap unknown"
-                        else -> "Est. overlap $clash%" + if (overlap.incomplete) " (partial)" else ""
-                    }) + " · Trained $trainingCount times",
-                    modifier = Modifier.weight(1f),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = outlineColor,
-                )
+                AutoFitText(warning, modifier = Modifier.fillMaxWidth(), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error)
             }
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
@@ -550,7 +547,7 @@ private fun sessionPatternText(summary: MachineSummary): AnnotatedString {
     val batches = groupSetBatches(summary.recentSets).take(8)
     val patterns = batches.map { batch ->
         batch.sortedBy { it.performedAt }.joinToString(",") { set ->
-            if (isDirectMetric(summary.machine.trackingMode)) "${formatNumber(set.weight)} min" else set.reps.toString()
+            if (isDirectMetric(summary.machine.trackingMode)) "${formatNumber(set.weight)}m" else set.reps.toString()
         }
     }
     fun trend(index: Int): Int {

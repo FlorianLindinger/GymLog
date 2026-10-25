@@ -10,30 +10,58 @@ import java.util.Locale
 import kotlin.math.log10
 import kotlin.math.pow
 
-internal data class BodyHighLowReference(val label: String, val low: TimeValue, val high: TimeValue, val allTime: Boolean,
-    val showHigh: Boolean = true, val showLow: Boolean = true) {
-    val visibleValues: List<Double> get() = listOfNotNull(low.value.takeIf { showLow }, high.value.takeIf { showHigh }).distinct()
+internal data class BodyReferenceLine(val value: Double, val dashed: Boolean = false)
+
+internal data class BodyHighLowReference(
+    val label: String,
+    val low: TimeValue,
+    val high: TimeValue,
+    val allTime: Boolean,
+    val showHigh: Boolean = true,
+    val showLow: Boolean = true,
+    val mean: Double? = null,
+    val showMean: Boolean = false,
+) {
+    val visibleLines: List<BodyReferenceLine> get() = buildList {
+        if (showLow) add(BodyReferenceLine(low.value))
+        if (showMean && mean != null) add(BodyReferenceLine(mean, dashed = true))
+        if (showHigh) add(BodyReferenceLine(high.value))
+    }.distinct()
+    val visibleValues: List<Double> get() = visibleLines.map { it.value }.distinct()
 }
 
-internal fun bodyHighLowReferences(points: List<TimeValue>, settings: BodyChartSettings, end: Long): List<BodyHighLowReference> {
+internal fun bodyHighLowReferences(
+    points: List<TimeValue>,
+    settings: BodyChartSettings,
+    end: Long,
+    plotRange: VisibleTimeRange? = null,
+    plotLabel: String = "Plot history",
+): List<BodyHighLowReference> {
     val finite = points.filter { it.value.isFinite() }
-    fun reference(label: String, values: List<TimeValue>, allTime: Boolean, showHigh: Boolean, showLow: Boolean): BodyHighLowReference? {
+    fun reference(label: String, values: List<TimeValue>, allTime: Boolean,
+        showHigh: Boolean, showLow: Boolean, showMean: Boolean): BodyHighLowReference? {
         if (values.isEmpty()) return null
-        return BodyHighLowReference(label, values.minBy(TimeValue::value), values.maxBy(TimeValue::value), allTime, showHigh, showLow)
+        return BodyHighLowReference(label, values.minBy(TimeValue::value), values.maxBy(TimeValue::value),
+            allTime, showHigh, showLow, values.map(TimeValue::value).average(), showMean)
     }
     return buildList {
-        if (settings.showAllTimeHigh || settings.showAllTimeLow)
-            reference("All-time", finite, true, settings.showAllTimeHigh, settings.showAllTimeLow)?.let { add(it) }
-        if (settings.showHistoryHigh || settings.showHistoryLow) {
+        if (settings.showAllTimeHigh || settings.showAllTimeLow || settings.showAllTimeMean)
+            reference("All-time", finite, true, settings.showAllTimeHigh, settings.showAllTimeLow, settings.showAllTimeMean)?.let { add(it) }
+        if (settings.showHistoryHigh || settings.showHistoryLow || settings.showHistoryMean) {
             val range = settings.highLowRange
-            val start = when (range) {
-                ChartRange.CUSTOM -> settings.highLowStart ?: return@buildList
-                ChartRange.ALL -> Long.MIN_VALUE
-                else -> end - (chartWindowDuration(range) ?: 0)
+            val historyRange = if (settings.highLowFollowPlot) plotRange ?: return@buildList else {
+                val start = when (range) {
+                    ChartRange.CUSTOM -> settings.highLowStart ?: return@buildList
+                    ChartRange.ALL -> Long.MIN_VALUE
+                    else -> end - (chartWindowDuration(range) ?: 0)
+                }
+                val historyEnd = if (range == ChartRange.CUSTOM) settings.highLowEnd ?: return@buildList else end
+                VisibleTimeRange(start, historyEnd)
             }
-            val historyEnd = if (range == ChartRange.CUSTOM) settings.highLowEnd ?: return@buildList else end
-            val label = if (range == ChartRange.CUSTOM) "Custom history" else "${range.storageValue} history"
-            reference(label, finite.filter { it.timestamp in start..historyEnd }, false, settings.showHistoryHigh, settings.showHistoryLow)?.let { add(it) }
+            val label = if (settings.highLowFollowPlot) plotLabel else
+                if (range == ChartRange.CUSTOM) "Custom history" else "${range.storageValue} history"
+            reference(label, finite.filter { it.timestamp in historyRange.start..historyRange.end }, false,
+                settings.showHistoryHigh, settings.showHistoryLow, settings.showHistoryMean)?.let { add(it) }
         }
     }
 }

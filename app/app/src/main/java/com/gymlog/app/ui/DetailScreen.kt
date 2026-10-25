@@ -58,6 +58,7 @@ import com.gymlog.app.data.usesResistanceLevel
 import com.gymlog.app.data.recordedMetricHistory
 import com.gymlog.app.data.recordedMetricChangeCount
 import com.gymlog.app.data.recordedMetric
+import com.gymlog.app.data.trainingPerformance
 import com.gymlog.app.data.TrackingMode
 import com.gymlog.app.data.AreaAssignment
 import com.gymlog.app.data.BodyArea
@@ -87,12 +88,15 @@ fun DetailScreen(
 ) {
     var showWeight by remember { mutableStateOf(false) }
     var showAreas by remember { mutableStateOf(false) }
+    var showWarningSettings by remember(summary.machine.id) { mutableStateOf(false) }
     var confirmDelete by remember { mutableStateOf(false) }
     var deletingSets by remember { mutableStateOf<List<SetRecord>?>(null) }
     var editingSet by remember { mutableStateOf<SetRecord?>(null) }
     var expandedBatch by remember { mutableStateOf<Long?>(null) }
     var quickEntry by remember { mutableStateOf(false) }
     val machine = summary.machine
+    val useOneRepMax = machine.trackingMode == TrackingMode.WEIGHT &&
+        (machine.progressionSettings ?: repository.loadProgressionSettings()).useOneRepMax
     val context = LocalContext.current
     val chartPreferences = remember { context.getSharedPreferences("gym_chart_ranges", 0) }
     var showCustomChartRange by remember { mutableStateOf(false) }
@@ -160,7 +164,7 @@ fun DetailScreen(
                     startMillis = if (machine.chartWindow == ChartRange.CUSTOM) customChartStart else null,
                     key = "${machine.chartWindow.storageValue}:$customChartStart:$customChartEnd",
                 )
-                SessionMetricsChart(summary.recentSets, machine.trackingMode, machine.showTrend, chartWindow)
+                SessionMetricsChart(summary.recentSets, machine.trackingMode, machine.showTrend, chartWindow, useOneRepMax)
             }
         }
 
@@ -198,8 +202,8 @@ fun DetailScreen(
                     val previous = entryBatches.getOrNull(index + 1)
                     val metric = if (machine.trackingMode.usesResistanceLevel()) ordered.last().reps.toDouble() else ordered.last().weight
                     val previousMetric = previous?.maxByOrNull { it.performedAt }?.let { summary.recordedMetric(it) }
-                    val volume = ordered.sumOf { it.reps * it.weight }
-                    val previousVolume = previous?.sumOf { it.reps * it.weight }
+                    val volume = trainingPerformance(ordered, useOneRepMax)
+                    val previousVolume = previous?.let { trainingPerformance(it, useOneRepMax) }
                     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                         Text(formatTimestamp(batchKey), Modifier.weight(1f), style = MaterialTheme.typography.labelMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -210,7 +214,7 @@ fun DetailScreen(
                     Text(formatRecentEntry(ordered, machine.trackingMode),
                         style = MaterialTheme.typography.bodySmall, color = historyComparisonColor(metric, previousMetric))
                     if (machine.trackingMode != TrackingMode.DURATION) Text(
-                        "Volume: ${formatAxisValue(volume)} a.u.", style = MaterialTheme.typography.labelSmall,
+                        "${if (useOneRepMax) "1RM" else if (machine.trackingMode.usesResistanceLevel()) "Load" else "Volume"}: ${formatAxisValue(volume)} ${if (useOneRepMax) "kg" else if (machine.trackingMode == TrackingMode.WATTS) "W min" else if (machine.trackingMode == TrackingMode.STRENGTH) "Lv. min" else "a.u."}", style = MaterialTheme.typography.labelSmall,
                         color = historyComparisonColor(volume, previousVolume))
                     if (expandedBatch == batchKey) ordered.forEachIndexed { setIndex, set ->
                         Row(Modifier.fillMaxWidth().padding(start = 12.dp, top = 1.dp, bottom = 1.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -233,6 +237,10 @@ fun DetailScreen(
             }
         }
 
+        OutlinedButton(onClick = { showWarningSettings = true }, modifier = Modifier.fillMaxWidth()) {
+            Text("Progress Warnings" + if (machine.progressionSettings == null) " (global)" else " (custom)")
+        }
+
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             OutlinedButton(onClick = { repository.setMachineHidden(machine.id, !isHidden); onChanged() }, modifier = Modifier.weight(1f)) {
                 Text(if (isHidden) "Unhide exercise" else "Hide exercise")
@@ -245,6 +253,24 @@ fun DetailScreen(
         }
         Spacer(Modifier.height(8.dp))
     }
+
+    if (showWarningSettings) ProgressionSettingsDialog(
+        current = machine.progressionSettings ?: repository.loadProgressionSettings(),
+        title = "${machine.name} warnings",
+        initiallyFollowGlobal = machine.progressionSettings == null,
+        globalUseOneRepMax = repository.loadProgressionSettings().useOneRepMax,
+        onDismiss = { showWarningSettings = false },
+        onFollowGlobal = {
+            repository.saveExerciseProgressionSettings(machine.id, null)
+            onChanged()
+            showWarningSettings = false
+        },
+        onSave = {
+            repository.saveExerciseProgressionSettings(machine.id, it)
+            onChanged()
+            showWarningSettings = false
+        },
+    )
 
     if (showWeight) MetricValueDialog(
         current = machine.currentWeight,
@@ -361,6 +387,7 @@ private fun SessionMetricsChart(
     trackingMode: TrackingMode,
     showTrend: Boolean,
     window: ChartWindow,
+    useOneRepMax: Boolean,
 ) {
     val orderedSets = sets.sortedBy { it.performedAt }
     if (orderedSets.isEmpty()) {
@@ -377,7 +404,10 @@ private fun SessionMetricsChart(
             showTrend,
         )
     } else {
-        DualAxisSessionPlot(orderedSets, groupSetBatches(sets).asReversed(), window, trackingMode = trackingMode, showTrend = showTrend)
+        val sessions = if (trackingMode == TrackingMode.WEIGHT) {
+            orderedSets.groupBy { trainingDate(it.performedAt) }.toSortedMap().values.toList()
+        } else groupSetBatches(sets).asReversed()
+        DualAxisSessionPlot(orderedSets, sessions, window, trackingMode = trackingMode, showTrend = showTrend, useOneRepMax = useOneRepMax)
     }
 }
 
@@ -388,7 +418,9 @@ private fun DualAxisSessionPlot(
     window: ChartWindow,
     trackingMode: TrackingMode,
     showTrend: Boolean,
+    useOneRepMax: Boolean,
 ) {
+    var showMetricExplanation by remember { mutableStateOf(false) }
     val repsColor = Color(0xFFFFA726)
     val weightColor = MaterialTheme.colorScheme.primary
     val volumeColor = Color(0xFF00BCD4)
@@ -397,12 +429,18 @@ private fun DualAxisSessionPlot(
     }
     val weight = sets.map { TimeValue(it.performedAt, it.weight) }
     val volume = sessions.map { session ->
-        TimeValue(session.maxOf { it.performedAt }, session.sumOf { it.weight * it.reps })
+        TimeValue(session.maxOf { it.performedAt }, trainingPerformance(session, useOneRepMax))
     }
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
         ChartLegendEntry(if (trackingMode == TrackingMode.WATTS) "Watts" else if (trackingMode == TrackingMode.STRENGTH) "Level" else "Reps/set",
             reps, window, showTrend, repsColor, TextAlign.Start, Modifier.weight(1f))
-        ChartLegendEntry("Volume/training [a.u.]", volume, window, showTrend, volumeColor, TextAlign.Center, Modifier.weight(1.5f))
+        ChartLegendEntry(when {
+            useOneRepMax -> "1RM [kg] ?"
+            trackingMode == TrackingMode.WATTS -> "Work [W min]"
+            trackingMode == TrackingMode.STRENGTH -> "Load [Lv. min]"
+            else -> "Volume/training [a.u.]"
+        }, volume, window, showTrend, volumeColor, TextAlign.Center,
+            Modifier.weight(1.5f).clickable { showMetricExplanation = true })
         ChartLegendEntry(if (trackingMode.usesResistanceLevel()) "Minutes" else "Weight [kg]",
             weight, window, showTrend, weightColor, TextAlign.End, Modifier.weight(1f))
     }
@@ -423,6 +461,7 @@ private fun DualAxisSessionPlot(
         leftColor = repsColor,
         rightColor = weightColor,
     )
+    if (showMetricExplanation) TrainingMetricExplanationDialog { showMetricExplanation = false }
 }
 @Composable
 private fun AxisMetricPlot(

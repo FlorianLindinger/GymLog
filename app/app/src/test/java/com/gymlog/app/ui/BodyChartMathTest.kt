@@ -9,6 +9,53 @@ import org.junit.Test
 
 class BodyChartMathTest {
     @Test
+    fun historyAndAllTimeMeansUseOriginalMeasurementsAndHaveIndependentDashedLines() {
+        val day = 86_400_000L
+        val points = listOf(TimeValue(0, 100.0), TimeValue(50 * day, 10.0), TimeValue(60 * day, 20.0), TimeValue(100 * day, 60.0),
+            TimeValue(100 * day, Double.NaN))
+        val references = bodyHighLowReferences(points,
+            BodyChartSettings(showAllTimeMean = true, showHistoryMean = true), 100 * day)
+        assertEquals(2, references.size)
+        assertEquals(47.5, references[0].mean!!, 0.0)
+        assertEquals(30.0, references[1].mean!!, 0.0)
+        references.forEach {
+            assertEquals(listOf(BodyReferenceLine(it.mean!!, dashed = true)), it.visibleLines)
+            assertEquals(false, it.showHigh)
+            assertEquals(false, it.showLow)
+        }
+        val combined = bodyHighLowReferences(points,
+            BodyChartSettings(showHistoryLow = true, showHistoryMean = true, showHistoryHigh = true), 100 * day).single()
+        assertEquals(listOf(10.0, 30.0, 60.0), combined.visibleValues)
+        assertEquals(listOf(false, true, false), combined.visibleLines.map { it.dashed })
+    }
+
+    @Test
+    fun historyCanFollowExactPlotRangeInsteadOfSavedSeparateChoice() {
+        val points = listOf(TimeValue(0, 100.0), TimeValue(10, 20.0), TimeValue(20, 40.0), TimeValue(21, 200.0))
+        val settings = BodyChartSettings(showHistoryLow = true, showHistoryMean = true, showHistoryHigh = true,
+            highLowFollowPlot = true, highLowRange = com.gymlog.app.data.ChartRange.CUSTOM, highLowStart = 0, highLowEnd = 21)
+        val reference = bodyHighLowReferences(points, settings, 100, VisibleTimeRange(10, 20), "Custom history").single()
+        assertEquals("Custom history", reference.label)
+        assertEquals(listOf(20.0, 30.0, 40.0), reference.visibleValues)
+        val all = bodyHighLowReferences(points, settings, 100, VisibleTimeRange(0, 21), "All history").single()
+        assertEquals(90.0, all.mean!!, 0.0)
+        val separate = bodyHighLowReferences(points, settings.copy(highLowFollowPlot = false), 100, VisibleTimeRange(10, 20)).single()
+        assertEquals(90.0, separate.mean!!, 0.0)
+        assertTrue(bodyHighLowReferences(points, settings, 100, VisibleTimeRange(30, 40)).isEmpty())
+    }
+
+    @Test
+    fun meansAndFollowPlotInheritGloballyWithoutLosingManualReferenceChoices() {
+        val local = BodyChartSettings(highLowRange = com.gymlog.app.data.ChartRange.THREE_MONTHS)
+        val global = BodyChartSettings(showAllTimeMean = true, showHistoryMean = true, highLowFollowPlot = true)
+        val inherited = resolveBodySettings(local, global)
+        assertTrue(inherited.showAllTimeMean && inherited.showHistoryMean && inherited.highLowFollowPlot)
+        val manual = local.copy(globalHighLow = false)
+        assertEquals(manual, resolveBodySettings(manual, global))
+        assertEquals(com.gymlog.app.data.ChartRange.THREE_MONTHS, manual.highLowRange)
+    }
+
+    @Test
     fun highLowCanShowAllTimeAndDefaultTwoMonthHistoryIndependently() {
         val day = 86_400_000L
         val points = listOf(TimeValue(0, 100.0), TimeValue(39 * day, 50.0), TimeValue(60 * day, 70.0), TimeValue(100 * day, 60.0))

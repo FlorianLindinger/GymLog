@@ -3,16 +3,23 @@ package com.gymlog.app.ui
 import com.gymlog.app.data.ChartRange
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.Checkbox
+import androidx.compose.material3.Switch
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.selection.toggleable
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.window.DialogProperties
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.pulltorefresh.PullToRefreshBox
-import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.defaultMinSize
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -33,7 +40,6 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
@@ -52,7 +58,6 @@ import java.time.LocalDate
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Locale
-import kotlinx.coroutines.delay
 
 internal data class BodyChartSettings(
     val target: Double? = null,
@@ -70,8 +75,11 @@ internal data class BodyChartSettings(
     val globalTarget: Boolean = true,
     val showAllTimeHigh: Boolean = false,
     val showAllTimeLow: Boolean = false,
+    val showAllTimeMean: Boolean = false,
     val showHistoryHigh: Boolean = false,
     val showHistoryLow: Boolean = false,
+    val showHistoryMean: Boolean = false,
+    val highLowFollowPlot: Boolean = false,
     val highLowRange: ChartRange = ChartRange.TWO_MONTHS,
     val highLowStart: Long? = null,
     val highLowEnd: Long? = null,
@@ -97,8 +105,11 @@ private fun readBodySettings(prefs: android.content.SharedPreferences, prefix: S
     customEnd = prefs.getLong("${prefix}end", 0).takeIf { it > 0 },
     showAllTimeHigh = prefs.getBoolean("${prefix}all_time_high", prefs.getBoolean("${prefix}all_time_high_low", false)),
     showAllTimeLow = prefs.getBoolean("${prefix}all_time_low", prefs.getBoolean("${prefix}all_time_high_low", false)),
+    showAllTimeMean = prefs.getBoolean("${prefix}all_time_mean", false),
     showHistoryHigh = prefs.getBoolean("${prefix}history_high", prefs.getBoolean("${prefix}history_high_low", false)),
     showHistoryLow = prefs.getBoolean("${prefix}history_low", prefs.getBoolean("${prefix}history_high_low", false)),
+    showHistoryMean = prefs.getBoolean("${prefix}history_mean", false),
+    highLowFollowPlot = prefs.getBoolean("${prefix}high_low_follow_plot", false),
     highLowRange = ChartRange.fromStorage(prefs.getString("${prefix}high_low_range", ChartRange.TWO_MONTHS.storageValue)),
     highLowStart = prefs.getLong("${prefix}high_low_start", 0).takeIf { it > 0 },
     highLowEnd = prefs.getLong("${prefix}high_low_end", 0).takeIf { it > 0 },
@@ -127,6 +138,8 @@ private fun saveBodySettings(prefs: android.content.SharedPreferences, prefix: S
         .putLong("${prefix}start", value.customStart ?: 0).putLong("${prefix}end", value.customEnd ?: 0)
         .putBoolean("${prefix}all_time_high", value.showAllTimeHigh).putBoolean("${prefix}all_time_low", value.showAllTimeLow)
         .putBoolean("${prefix}history_high", value.showHistoryHigh).putBoolean("${prefix}history_low", value.showHistoryLow)
+        .putBoolean("${prefix}all_time_mean", value.showAllTimeMean).putBoolean("${prefix}history_mean", value.showHistoryMean)
+        .putBoolean("${prefix}high_low_follow_plot", value.highLowFollowPlot)
         .putString("${prefix}high_low_range", value.highLowRange.storageValue)
         .putLong("${prefix}high_low_start", value.highLowStart ?: 0).putLong("${prefix}high_low_end", value.highLowEnd ?: 0)
         .putBoolean("${prefix}global_interval", value.globalInterval).putBoolean("${prefix}global_fit", value.globalFit)
@@ -148,8 +161,11 @@ internal fun resolveBodySettings(local: BodyChartSettings, global: BodyChartSett
     showRange = if (local.globalSummary) global.showRange else local.showRange,
     showAllTimeHigh = if (local.globalHighLow) global.showAllTimeHigh else local.showAllTimeHigh,
     showAllTimeLow = if (local.globalHighLow) global.showAllTimeLow else local.showAllTimeLow,
+    showAllTimeMean = if (local.globalHighLow) global.showAllTimeMean else local.showAllTimeMean,
     showHistoryHigh = if (local.globalHighLow) global.showHistoryHigh else local.showHistoryHigh,
     showHistoryLow = if (local.globalHighLow) global.showHistoryLow else local.showHistoryLow,
+    showHistoryMean = if (local.globalHighLow) global.showHistoryMean else local.showHistoryMean,
+    highLowFollowPlot = if (local.globalHighLow) global.highLowFollowPlot else local.highLowFollowPlot,
     highLowRange = if (local.globalHighLow) global.highLowRange else local.highLowRange,
     highLowStart = if (local.globalHighLow) global.highLowStart else local.highLowStart,
     highLowEnd = if (local.globalHighLow) global.highLowEnd else local.highLowEnd,
@@ -170,7 +186,6 @@ private data class BodyFit(
     val fittedLast: Double,
 )
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun BodyOverviewScreen(
     snapshot: BodyDataSnapshot,
@@ -186,18 +201,9 @@ fun BodyOverviewScreen(
     var showTrend by remember { mutableStateOf(preferences.getBoolean("show_trend", true)) }
     var globalSettings by remember { mutableStateOf(readBodySettings(preferences, "global_").copy(showFit = showTrend)) }
     var showGlobalSettings by remember { mutableStateOf(false) }
-    var showBodyMenu by remember { mutableStateOf(false) }
     var showCustomRange by remember { mutableStateOf(false) }
     var customStart by remember { mutableStateOf(preferences.getLong("custom_start", 0L).takeIf { it > 0L }) }
     var customEnd by remember { mutableStateOf(preferences.getLong("custom_end", 0L).takeIf { it > 0L }) }
-    val pullState = rememberPullToRefreshState()
-    var pulledRefresh by remember { mutableStateOf(false) }
-    LaunchedEffect(pulledRefresh, isSyncing, syncStatus) {
-        if (pulledRefresh && !isSyncing) {
-            delay(1500)
-            pulledRefresh = false
-        }
-    }
     val settings = remember {
         mutableStateMapOf<BodyMetric, BodyChartSettings>().apply {
             bodyMetricDisplayOrder.forEach { metric ->
@@ -240,61 +246,38 @@ fun BodyOverviewScreen(
     )
 
     Box(modifier.fillMaxSize()) {
-        PullToRefreshBox(
-            isRefreshing = pulledRefresh && isSyncing,
-            onRefresh = { pulledRefresh = true; if (!isSyncing) onSync() },
-            state = pullState,
+        LazyColumn(
             modifier = Modifier.fillMaxSize().padding(bottom = 64.dp),
-            indicator = {
-                if (pulledRefresh || pullState.distanceFraction > 0f) {
-                    Card(Modifier.align(Alignment.TopCenter).padding(8.dp)) {
-                        Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                            if (isSyncing) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
-                            Column {
-                                Text("Body", style = MaterialTheme.typography.titleSmall)
-                                Text(if (pulledRefresh) syncStatus else if (pullState.distanceFraction >= 1f) "Release to sync" else "Pull to sync",
-                                    style = MaterialTheme.typography.labelSmall)
-                                Text(snapshot.syncedAt?.let { "Last sync ${formatBodySyncTime(it)}" } ?: "Not synced yet",
-                                    style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            }
-                        }
-                    }
-                }
-            },
+            contentPadding = PaddingValues(8.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            LazyColumn(
-                modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(8.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                item {
-                    ChartRangeControls(
-                        selectedWindow = window,
-                        showTrend = showTrend,
-                        showTrendControl = false,
-                        onWindowSelected = { preset ->
-                            window = preset
-                            preferences.edit().putString("window", preset.storageValue).apply()
+            item {
+                ChartRangeControls(
+                    selectedWindow = window,
+                    showTrend = showTrend,
+                    showTrendControl = false,
+                    onWindowSelected = { preset ->
+                        window = preset
+                        preferences.edit().putString("window", preset.storageValue).apply()
+                    },
+                    onCustomSelected = { showCustomRange = true },
+                    onTrendSelected = {},
+                )
+            }
+            bodyMetricDisplayOrder.forEach { metric ->
+                item(metric.name) {
+                    BodyMetricCard(
+                        metric = metric,
+                        values = measurementsByMetric[metric].orEmpty(),
+                        settings = settings.getValue(metric),
+                        globalSettings = globalSettings,
+                        onSettings = {
+                            settings[metric] = it
+                            saveBodySettings(preferences, "${metric.name}_", it)
                         },
-                        onCustomSelected = { showCustomRange = true },
-                        onTrendSelected = {},
+                        window = bodyChartWindow,
+                        globalRange = window,
                     )
-                }
-                bodyMetricDisplayOrder.forEach { metric ->
-                    item(metric.name) {
-                        BodyMetricCard(
-                            metric = metric,
-                            values = measurementsByMetric[metric].orEmpty(),
-                            settings = settings.getValue(metric),
-                            globalSettings = globalSettings,
-                            onSettings = {
-                                settings[metric] = it
-                                saveBodySettings(preferences, "${metric.name}_", it)
-                            },
-                            window = bodyChartWindow,
-                        )
-                    }
                 }
             }
         }
@@ -304,23 +287,19 @@ fun BodyOverviewScreen(
         ) {
             FilledTonalButton(onClick = onGym, modifier = Modifier.weight(1f)) { Text("Gym") }
             FilledTonalButton(onClick = { showGlobalSettings = true }, modifier = Modifier.weight(1f)) { Text("Settings") }
-            FilledTonalButton(onClick = { showBodyMenu = true }, modifier = Modifier.weight(1f)) { Text("Menu") }
         }
     }
-    if (showBodyMenu) AlertDialog(
-        onDismissRequest = { showBodyMenu = false },
-        title = { Text("Body") },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(onClick = { onSync(); showBodyMenu = false }, modifier = Modifier.fillMaxWidth()) { Text("Sync Health Connect") }
-                Button(onClick = { showGlobalSettings = true; showBodyMenu = false }, modifier = Modifier.fillMaxWidth()) { Text("Global plot settings") }
-                Text("Body data and graph settings are independent of training plans.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-        },
-        confirmButton = { TextButton(onClick = { showBodyMenu = false }) { Text("Close") } },
-    )
     if (showGlobalSettings) BodyChartSettingsDialog(
         metric = null, current = globalSettings.copy(interval = window, customStart = customStart, customEnd = customEnd), onDismiss = { showGlobalSettings = false },
+        header = {
+            Button(onClick = onSync, enabled = !isSyncing, modifier = Modifier.fillMaxWidth()) {
+                if (isSyncing) CircularProgressIndicator(Modifier.size(20.dp).padding(end = 4.dp), strokeWidth = 2.dp)
+                Text("Sync Health Connect")
+            }
+            Text(syncStatus, style = MaterialTheme.typography.bodySmall)
+            Text(snapshot.syncedAt?.let { "Last sync ${formatBodySyncTime(it)}" } ?: "Not synced yet",
+                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        },
         onSave = {
             globalSettings = it
             window = it.interval
@@ -360,6 +339,7 @@ private fun BodyMetricCard(
     onSettings: (BodyChartSettings) -> Unit,
     window: ChartWindow,
     globalSettings: BodyChartSettings,
+    globalRange: ChartRange,
 ) {
     var editing by remember { mutableStateOf(false) }
     val effective = resolveBodySettings(settings, globalSettings)
@@ -393,10 +373,19 @@ private fun BodyMetricCard(
     val fitColor = Color(0xFFFFD54F)
     val targetColor = Color(0xFF66BB6A)
     val raw = remember(sorted) { sorted.map { TimeValue(it.measuredAt, it.value) } }
-    val highLow = remember(raw, effective, plotWindow.endMillis) {
-        if (effective.showAllTimeHigh || effective.showAllTimeLow || effective.showHistoryHigh || effective.showHistoryLow)
-            bodyHighLowReferences(raw, effective, plotWindow.endMillis ?: sorted.lastOrNull()?.measuredAt ?: System.currentTimeMillis())
-        else emptyList()
+    val visiblePlotRange = remember(raw, plotWindow) {
+        if (raw.isEmpty()) null else calculateVisibleTimeRange(raw.first().timestamp, raw.last().timestamp, plotWindow)
+    }
+    val referenceRange = if (settings.globalInterval) globalRange else settings.interval
+    val referenceLabel = when (referenceRange) {
+        ChartRange.ALL -> "All history"
+        ChartRange.CUSTOM -> "Custom history"
+        else -> "${referenceRange.storageValue} history"
+    }
+    val highLow = remember(raw, effective, plotWindow, visiblePlotRange, referenceLabel) {
+        bodyHighLowReferences(raw, effective,
+            plotWindow.endMillis ?: sorted.lastOrNull()?.measuredAt ?: System.currentTimeMillis(),
+            visiblePlotRange, referenceLabel)
     }
     val allTimeColor = Color(0xFFCE93D8)
     val historyColor = Color(0xFFFF8A65)
@@ -440,9 +429,11 @@ private fun BodyMetricCard(
                 )
             }
             highLow.forEach { reference ->
-                Text("${reference.label}: " + listOfNotNull(
+                AutoFitText("${reference.label}: " + listOfNotNull(
                     "Low ${formatBodyValue(reference.low.value)}".takeIf { reference.showLow },
+                    reference.mean?.let { "Mean ${formatBodyValue(it)}" }?.takeIf { reference.showMean },
                     "High ${formatBodyValue(reference.high.value)}".takeIf { reference.showHigh }).joinToString(" / ") + " ${metric.unit}",
+                    modifier = Modifier.fillMaxWidth(),
                     style = MaterialTheme.typography.labelSmall,
                     color = if (reference.allTime) allTimeColor else historyColor)
             }
@@ -454,8 +445,8 @@ private fun BodyMetricCard(
                 fitColor,
                 targetColor,
                 plotWindow,
-                highLow.flatMap { reference -> reference.visibleValues.map { value ->
-                    TimeBand(value, 0.0, if (reference.allTime) allTimeColor else historyColor)
+                highLow.flatMap { reference -> reference.visibleLines.map { line ->
+                    TimeBand(line.value, 0.0, if (reference.allTime) allTimeColor else historyColor, dashed = line.dashed)
                 } },
             )
         }
@@ -514,6 +505,7 @@ private fun BodyGraph(
         yMin = settings.yMin,
         yMax = settings.yMax,
         bodyCalendarLabels = true,
+        mirrorLeftTicksOnRight = true,
     )
 }
 
@@ -583,9 +575,80 @@ internal fun CustomBodyRangeDialog(
 
 @Composable
 private fun SettingCheck(label: String, checked: Boolean, onChange: (Boolean) -> Unit) {
-    Row(Modifier.fillMaxWidth().clickable { onChange(!checked) }, verticalAlignment = Alignment.CenterVertically) {
-        Checkbox(checked, onChange)
-        Text(label, style = MaterialTheme.typography.bodyMedium)
+    Row(
+        Modifier.fillMaxWidth().defaultMinSize(minHeight = 48.dp)
+            .toggleable(value = checked, role = Role.Switch, onValueChange = onChange),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Text(label, Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
+        Switch(checked, onCheckedChange = null)
+    }
+}
+
+@Composable
+private fun BodySettingsSection(
+    title: String,
+    description: String? = null,
+    badge: String? = null,
+    content: @Composable ColumnScope.() -> Unit,
+) {
+    Card(
+        Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = .45f)),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = .18f)),
+    ) {
+        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(title, Modifier.weight(1f), style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.primary)
+                if (badge != null) Text(badge,
+                    Modifier.background(MaterialTheme.colorScheme.primaryContainer, RoundedCornerShape(8.dp))
+                        .padding(horizontal = 8.dp, vertical = 3.dp),
+                    style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onPrimaryContainer)
+            }
+            description?.let { BodySettingsHint(it) }
+            content()
+        }
+    }
+}
+
+@Composable
+private fun BodySettingsHint(text: String) {
+    Text(text, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+}
+
+@Composable
+private fun BodySettingsInheritance(checked: Boolean, onChange: (Boolean) -> Unit, label: String = "Use global settings") {
+    Column(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.primaryContainer.copy(alpha = .35f), RoundedCornerShape(10.dp))
+        .padding(horizontal = 10.dp, vertical = 4.dp)) {
+        SettingCheck(label, checked, onChange)
+        BodySettingsHint(if (checked) "Follows future global changes" else "Custom for this plot")
+    }
+}
+
+@Composable
+private fun BodyReferenceGroup(title: String, color: Color, content: @Composable ColumnScope.() -> Unit) {
+    Column(Modifier.fillMaxWidth().background(color.copy(alpha = .08f), RoundedCornerShape(12.dp)).padding(10.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(7.dp)) {
+            Box(Modifier.size(8.dp).background(color, RoundedCornerShape(4.dp)))
+            Text(title, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold)
+        }
+        content()
+    }
+}
+
+@Composable
+private fun BodyReferenceToggles(
+    low: Boolean, mean: Boolean, high: Boolean,
+    onLow: (Boolean) -> Unit, onMean: (Boolean) -> Unit, onHigh: (Boolean) -> Unit,
+) {
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        FilterChip(low, { onLow(!low) }, label = { Text("Low") }, modifier = Modifier.weight(1f))
+        FilterChip(mean, { onMean(!mean) }, label = { Text("Mean") }, modifier = Modifier.weight(1f))
+        FilterChip(high, { onHigh(!high) }, label = { Text("High") }, modifier = Modifier.weight(1f))
     }
 }
 
@@ -594,6 +657,7 @@ private fun BodyChartSettingsDialog(
     metric: BodyMetric?,
     current: BodyChartSettings,
     onDismiss: () -> Unit,
+    header: (@Composable () -> Unit)? = null,
     onSave: (BodyChartSettings) -> Unit,
 ) {
     var draft by remember { mutableStateOf(current) }
@@ -610,73 +674,96 @@ private fun BodyChartSettingsDialog(
     val maximum = axisValue(yMax)
     val boundsValid = (yMin.isBlank() || minimum != null) && (yMax.isBlank() || maximum != null && maximum > 0) &&
         (minimum == null || maximum == null || minimum < maximum)
+    fun source(followsGlobal: Boolean) = if (global) "Default" else if (followsGlobal) "Global" else "Custom"
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text(metric?.let { "${it.label} settings" } ?: "Global plot settings") },
+        modifier = Modifier.padding(horizontal = 12.dp).widthIn(max = 640.dp).fillMaxWidth(),
+        properties = DialogProperties(usePlatformDefaultWidth = false),
+        title = {
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(metric?.let { "${it.label} settings" } ?: "Global plot settings")
+                BodySettingsHint(if (global) "Defaults for plots that follow global settings" else "Choose global defaults or customize each section")
+            }
+        },
         text = {
-            Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text("Interval", fontWeight = FontWeight.SemiBold)
-                if (!global) SettingCheck("Follow global interval", draft.globalInterval) { draft = draft.copy(globalInterval = it) }
-                if (global || !draft.globalInterval) {
-                    ChartRangeControls(draft.interval, draft.showFit,
-                        { draft = draft.copy(interval = it) }, { custom = true },
-                        {}, showTrendControl = false)
-                    if (draft.interval == ChartRange.CUSTOM && draft.customStart != null && draft.customEnd != null) {
-                        Text("${formatChartDate(draft.customStart!!)} \u2013 ${formatChartDate(draft.customEnd!!)}", style = MaterialTheme.typography.labelSmall)
-                    }
-                }
-                Text("Averaging", fontWeight = FontWeight.SemiBold)
-                if (!global) SettingCheck("Follow global averaging", draft.globalAveraging) { draft = draft.copy(globalAveraging = it) }
-                if (global || !draft.globalAveraging) {
-                    SettingCheck("Average in time bins", draft.averaging) { draft = draft.copy(averaging = it) }
-                    OutlinedTextField(bins, { bins = it.filter(Char::isDigit) }, label = { Text("Number of bins (1-1000)") },
-                        enabled = draft.averaging, isError = draft.averaging && validBins == null,
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), singleLine = true)
-                    Text("Equal intervals across the selected range; empty bins are skipped. Fit uses the original measurements.", style = MaterialTheme.typography.bodySmall)
-                }
-                Text("Fit", fontWeight = FontWeight.SemiBold)
-                if (!global) SettingCheck("Follow global fit", draft.globalFit) { draft = draft.copy(globalFit = it) }
-                if (global || !draft.globalFit) SettingCheck("Show fit", draft.showFit) { draft = draft.copy(showFit = it) }
-                Text("Plot summary", fontWeight = FontWeight.SemiBold)
-                if (!global) SettingCheck("Follow global summary", draft.globalSummary) { draft = draft.copy(globalSummary = it) }
-                if (global || !draft.globalSummary) {
-                    SettingCheck("Show count in interval", draft.showIntervalCount) { draft = draft.copy(showIntervalCount = it) }
-                    SettingCheck("Show total count", draft.showTotalCount) { draft = draft.copy(showTotalCount = it) }
-                    SettingCheck("Show interval mean", draft.showMean) { draft = draft.copy(showMean = it) }
-                    SettingCheck("Show interval range", draft.showRange) { draft = draft.copy(showRange = it) }
-                }
-                if (!global) {
-                    Text("Y axis (${metric!!.unit})", fontWeight = FontWeight.SemiBold)
-                    Text("Leave either limit blank for automatic scaling.", style = MaterialTheme.typography.bodySmall)
-                    OutlinedTextField(yMin, { yMin = it }, label = { Text("Y minimum (Auto if blank)") },
-                        isError = !boundsValid && yMin.isNotBlank(), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal), singleLine = true)
-                    OutlinedTextField(yMax, { yMax = it }, label = { Text("Y maximum (Auto if blank)") },
-                        isError = !boundsValid && yMax.isNotBlank(), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal), singleLine = true)
-                    if (!boundsValid) Text("Use nonnegative numbers, with maximum greater than minimum.", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
-                }
-                Text("High / low", fontWeight = FontWeight.SemiBold)
-                if (!global) SettingCheck("Follow global high / low", draft.globalHighLow) { draft = draft.copy(globalHighLow = it) }
-                if (global || !draft.globalHighLow) {
-                    SettingCheck("Show all-time high", draft.showAllTimeHigh) { draft = draft.copy(showAllTimeHigh = it) }
-                    SettingCheck("Show all-time low", draft.showAllTimeLow) { draft = draft.copy(showAllTimeLow = it) }
-                    SettingCheck("Show history-window high", draft.showHistoryHigh) { draft = draft.copy(showHistoryHigh = it) }
-                    SettingCheck("Show history-window low", draft.showHistoryLow) { draft = draft.copy(showHistoryLow = it) }
-                    if (draft.showHistoryHigh || draft.showHistoryLow) {
-                        Text("High / low history window", style = MaterialTheme.typography.labelMedium)
-                        ChartRangeControls(draft.highLowRange, false,
-                            { draft = draft.copy(highLowRange = it) }, { customHighLow = true }, {}, showTrendControl = false)
-                        if (draft.highLowRange == ChartRange.CUSTOM && draft.highLowStart != null && draft.highLowEnd != null) {
-                            Text("${formatChartDate(draft.highLowStart!!)} - ${formatChartDate(draft.highLowEnd!!)}", style = MaterialTheme.typography.labelSmall)
+            Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                if (header != null) BodySettingsSection("Health Connect") { header() }
+                BodySettingsSection("Time range", "Which measurements appear in the plot", source(draft.globalInterval)) {
+                    if (!global) BodySettingsInheritance(draft.globalInterval, { draft = draft.copy(globalInterval = it) })
+                    if (global || !draft.globalInterval) {
+                        ChartRangeControls(draft.interval, draft.showFit,
+                            { draft = draft.copy(interval = it) }, { custom = true }, {}, showTrendControl = false)
+                        if (draft.interval == ChartRange.CUSTOM && draft.customStart != null && draft.customEnd != null) {
+                            BodySettingsHint("${formatChartDate(draft.customStart!!)} - ${formatChartDate(draft.customEnd!!)}")
                         }
-                        Text("History ends at the plot's end date. Custom uses the dates you choose. Highs and lows use original measurements.", style = MaterialTheme.typography.bodySmall)
                     }
                 }
-                Text("Target", fontWeight = FontWeight.SemiBold)
-                if (!global) SettingCheck("Follow global target visibility", draft.globalTarget) { draft = draft.copy(globalTarget = it) }
-                if (global) {
-                    SettingCheck("Show targets", draft.targetEnabled) { draft = draft.copy(targetEnabled = it) }
-                    Text("Plots that follow this setting show or hide their own target values.", style = MaterialTheme.typography.bodySmall)
-                } else BodyTargetFields(metric!!, draft) { draft = it }
+                BodySettingsSection("Averaging", "Simplify the displayed measurements", source(draft.globalAveraging)) {
+                    if (!global) BodySettingsInheritance(draft.globalAveraging, { draft = draft.copy(globalAveraging = it) })
+                    if (global || !draft.globalAveraging) {
+                        SettingCheck("Average in time bins", draft.averaging) { draft = draft.copy(averaging = it) }
+                        OutlinedTextField(bins, { bins = it.filter(Char::isDigit) }, modifier = Modifier.fillMaxWidth(),
+                            label = { Text("Number of bins (1-1000)") },
+                            enabled = draft.averaging, isError = draft.averaging && validBins == null,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), singleLine = true)
+                        BodySettingsHint("Equal time bins; empty bins are skipped. Fits and reference lines use the original measurements.")
+                    }
+                }
+                BodySettingsSection("Trend fit", "Show the direction of change", source(draft.globalFit)) {
+                    if (!global) BodySettingsInheritance(draft.globalFit, { draft = draft.copy(globalFit = it) })
+                    if (global || !draft.globalFit) SettingCheck("Show fit", draft.showFit) { draft = draft.copy(showFit = it) }
+                }
+                BodySettingsSection("Plot summary", "Values shown above the chart", source(draft.globalSummary)) {
+                    if (!global) BodySettingsInheritance(draft.globalSummary, { draft = draft.copy(globalSummary = it) })
+                    if (global || !draft.globalSummary) {
+                        SettingCheck("Count in interval", draft.showIntervalCount) { draft = draft.copy(showIntervalCount = it) }
+                        SettingCheck("Total count", draft.showTotalCount) { draft = draft.copy(showTotalCount = it) }
+                        SettingCheck("Interval mean", draft.showMean) { draft = draft.copy(showMean = it) }
+                        SettingCheck("Interval range", draft.showRange) { draft = draft.copy(showRange = it) }
+                    }
+                }
+                if (!global) BodySettingsSection("Y axis (${metric!!.unit})", "Leave either limit blank for automatic scaling", "Custom") {
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedTextField(yMin, { yMin = it }, modifier = Modifier.weight(1f), label = { Text("Minimum") },
+                            isError = !boundsValid && yMin.isNotBlank(), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal), singleLine = true)
+                        OutlinedTextField(yMax, { yMax = it }, modifier = Modifier.weight(1f), label = { Text("Maximum") },
+                            isError = !boundsValid && yMax.isNotBlank(), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal), singleLine = true)
+                    }
+                    if (!boundsValid) Text("Use nonnegative values; maximum must exceed minimum.", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+                }
+                BodySettingsSection("Reference lines", "Solid low/high lines and dashed means", source(draft.globalHighLow)) {
+                    if (!global) BodySettingsInheritance(draft.globalHighLow, { draft = draft.copy(globalHighLow = it) })
+                    if (global || !draft.globalHighLow) {
+                        BodyReferenceGroup("All-time", Color(0xFFCE93D8)) {
+                            BodySettingsHint("Every recorded measurement")
+                            BodyReferenceToggles(draft.showAllTimeLow, draft.showAllTimeMean, draft.showAllTimeHigh,
+                                { draft = draft.copy(showAllTimeLow = it) }, { draft = draft.copy(showAllTimeMean = it) }, { draft = draft.copy(showAllTimeHigh = it) })
+                        }
+                        BodyReferenceGroup("History window", Color(0xFFFF8A65)) {
+                            BodyReferenceToggles(draft.showHistoryLow, draft.showHistoryMean, draft.showHistoryHigh,
+                                { draft = draft.copy(showHistoryLow = it) }, { draft = draft.copy(showHistoryMean = it) }, { draft = draft.copy(showHistoryHigh = it) })
+                            if (draft.showHistoryHigh || draft.showHistoryLow || draft.showHistoryMean) {
+                                HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = .2f))
+                                SettingCheck("Follow plot interval", draft.highLowFollowPlot) { draft = draft.copy(highLowFollowPlot = it) }
+                                if (!draft.highLowFollowPlot) {
+                                    ChartRangeControls(draft.highLowRange, false,
+                                        { draft = draft.copy(highLowRange = it) }, { customHighLow = true }, {}, showTrendControl = false)
+                                    if (draft.highLowRange == ChartRange.CUSTOM && draft.highLowStart != null && draft.highLowEnd != null) {
+                                        BodySettingsHint("${formatChartDate(draft.highLowStart!!)} - ${formatChartDate(draft.highLowEnd!!)}")
+                                    }
+                                }
+                                BodySettingsHint(if (draft.highLowFollowPlot) "Uses the plot's exact interval, including Custom and All." else "Ends at the plot's end date. Custom uses your chosen dates.")
+                            }
+                        }
+                    }
+                }
+                BodySettingsSection("Target", "Green target and acceptance band", source(draft.globalTarget)) {
+                    if (!global) BodySettingsInheritance(draft.globalTarget, { draft = draft.copy(globalTarget = it) }, "Use global visibility")
+                    if (global) {
+                        SettingCheck("Show targets", draft.targetEnabled) { draft = draft.copy(targetEnabled = it) }
+                        BodySettingsHint("Controls visibility for plots that follow this setting. Target values remain specific to each plot.")
+                    } else BodyTargetFields(metric!!, draft) { draft = it }
+                }
             }
         },
         confirmButton = { Button(onClick = {
