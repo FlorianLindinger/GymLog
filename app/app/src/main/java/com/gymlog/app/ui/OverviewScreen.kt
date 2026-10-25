@@ -105,7 +105,6 @@ fun OverviewScreen(
     onTrainingHeader: () -> Unit,
     onEditPlanNotes: () -> Unit,
     areaFrequency: Map<BodyArea, Double>,
-    onEditAreas: (MachineSummary) -> Unit,
     onQuickSet: (MachineSummary, List<Int>) -> Unit,
     onDeleteCurrentExerciseSets: (MachineSummary) -> Unit,
     onMetricChange: (MachineSummary, Double) -> Unit,
@@ -175,7 +174,6 @@ fun OverviewScreen(
                         onLongPress = {},
                         isDragging = false,
                         isReordering = false,
-                        onEditAreas = onEditAreas,
                     )
                 }
                 if (hiddenMachines.isNotEmpty()) {
@@ -195,7 +193,7 @@ fun OverviewScreen(
                     if (showHidden) {
                         val rankedHidden = rankOverviewMachines(hiddenMachines, trainingUnitCutoff, recentExercises)
                         items(rankedHidden, key = { "hidden_${it.machine.id}" }) { summary ->
-                            MachineCard(summary, recentExercises, trainingUnitCutoff, areaFrequency, onMachine, { machine, reps -> onQuickSet(machine, reps) }, onDeleteCurrentExerciseSets, onMetricChange, onMetricChangeForSession, progressionSettings, Modifier, {}, false, false, onEditAreas)
+                            MachineCard(summary, recentExercises, trainingUnitCutoff, areaFrequency, onMachine, { machine, reps -> onQuickSet(machine, reps) }, onDeleteCurrentExerciseSets, onMetricChange, onMetricChangeForSession, progressionSettings)
                         }
                     }
                 }            }
@@ -228,10 +226,12 @@ private fun TrainingDurationCard(machines: List<MachineSummary>, activePlanName:
     var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
     val lifecycleState by LocalLifecycleOwner.current.lifecycle.currentStateAsState()
     val isForeground = lifecycleState.isAtLeast(Lifecycle.State.RESUMED)
-    LaunchedEffect(isForeground) {
-        while (isForeground) {
+    val latestSetTime = remember(machines) { machines.flatMap { it.recentSets }.maxOfOrNull { it.performedAt } }
+    LaunchedEffect(isForeground, latestSetTime) {
+        now = System.currentTimeMillis()
+        while (isForeground && latestSetTime != null && now - latestSetTime < 10L * 60L * 1000L) {
+            delay(minOf(30_000L, (latestSetTime + 10L * 60L * 1000L - now).coerceAtLeast(1L)))
             now = System.currentTimeMillis()
-            delay(30_000)
         }
     }
     val allSets = machines.flatMap { it.recentSets }
@@ -383,7 +383,6 @@ private fun MachineCard(
     onLongPress: () -> Unit = {},
     isDragging: Boolean = false,
     isReordering: Boolean = false,
-    onEditAreas: (MachineSummary) -> Unit,
 ) {
     var quickReps by remember(summary.machine.id) { mutableStateOf(false) }
     var changeMetric by remember(summary.machine.id) { mutableStateOf(false) }
@@ -399,7 +398,6 @@ private fun MachineCard(
     val trainingCount = remember(summary.recentSets) { exerciseTrainingCount(summary) }
     val outlineColor = when {
         isLastDone -> Color(0xFF1976D2)
-        !trainedInUnit && clash == null -> MaterialTheme.colorScheme.outline
         clash != null && clash >= 60 -> Color(0xFFE53935)
         clash != null && clash >= 25 -> Color(0xFFFB8C00)
         clash != null && clash > 0 -> Color(0xFFFBC02D)
@@ -435,9 +433,9 @@ private fun MachineCard(
             }
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
-                    Text(summary.machine.name, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                    Text(summary.machine.name, maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
                     if (summary.machine.titleNote.isNotBlank()) {
-                        Text(" · ${summary.machine.titleNote}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(" · ${summary.machine.titleNote}", maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
                 if (metricInHeader) {
@@ -463,10 +461,10 @@ private fun MachineCard(
                     modifier = Modifier.weight(1f),
                     style = MaterialTheme.typography.labelSmall,
                     color = outlineColor,
+                    maxLines = 1,
+                    softWrap = false,
+                    overflow = TextOverflow.Ellipsis,
                 )
-                TextButton(onClick = { onEditAreas(summary) }, contentPadding = PaddingValues(horizontal = 4.dp, vertical = 0.dp)) {
-                    Text(if (summary.areas.isEmpty()) "Set regions" else "Regions", style = MaterialTheme.typography.labelSmall)
-                }
             }
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
@@ -484,7 +482,8 @@ private fun MachineCard(
                     modifier = Modifier.weight(1f),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 3,
+                    maxLines = 1,
+                    softWrap = false,
                     overflow = TextOverflow.Ellipsis,
                 )
                 if (!metricInHeader) {

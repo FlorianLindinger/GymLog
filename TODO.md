@@ -1,8 +1,15 @@
 
-Have way to be on top only before done. So basically prio in rankin. I guess it already has that. Maybe rename to to make more clear the prio within auto 
 
+
+data not best. eg. total abdominal doest have glutes i guess. but also not in catalogue somehow
 
 ===================================
+
+add color codes to installer of both apps. i guess make them gernally nice and sharable between apps. ask AI for good ideas and ebst practives
+
+in body. color code green red the plot field title if alltime high low. maybe also if in or out of target region. will be hard with colors. maybe wirte down allteim high or smoemthing ...
+
+Cleanuo code of unused stuff and backwards comparabilitry.
 
 Improvised stats tab a lot. Ask for ideas by ai
 

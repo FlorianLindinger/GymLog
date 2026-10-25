@@ -124,6 +124,7 @@ fun GymLogApp(
     onAccentColorChanged: (Long) -> Unit,
     bodyData: BodyDataSnapshot,
     healthSyncStatus: String,
+    healthSyncing: Boolean,
     onHealthSync: () -> Unit,
 ) {
     val viewModel: GymLogViewModel = androidx.lifecycle.viewmodel.compose.viewModel(factory = GymLogViewModel.factory(repository))
@@ -135,7 +136,6 @@ fun GymLogApp(
     var screen by remember { mutableStateOf(Screen.OVERVIEW) }
     var selectedId by remember { mutableStateOf<Long?>(null) }
     var showAdd by remember { mutableStateOf(false) }
-    var editingAreas by remember { mutableStateOf<MachineSummary?>(null) }
     var showMenu by remember { mutableStateOf(false) }
     var confirmImport by remember { mutableStateOf(false) }
     var showProgressionSettings by remember { mutableStateOf(false) }
@@ -296,7 +296,6 @@ fun GymLogApp(
                 onTrainingHeader = { showTrainingHeader = true },
                 onEditPlanNotes = { showPlanNotes = true },
                 areaFrequency = areaFrequency,
-                onEditAreas = { editingAreas = it },
                 onQuickSet = { machine, reps ->
                     if (isDirectMetric(machine.machine.trackingMode)) {
                         reps.firstOrNull()?.let { repository.addTrainingMinutes(machine.machine.id, it) }
@@ -319,6 +318,7 @@ fun GymLogApp(
             Screen.BODY -> BodyOverviewScreen(
                 snapshot = bodyData,
                 syncStatus = healthSyncStatus,
+                isSyncing = healthSyncing,
                 modifier = Modifier.padding(padding),
                 onSync = onHealthSync,
                 onGym = { screen = Screen.OVERVIEW },
@@ -415,21 +415,6 @@ fun GymLogApp(
             screen = Screen.DETAIL
         },
     )
-
-    editingAreas?.let { exercise ->
-        MuscleProfileDialog(
-            exerciseName = exercise.machine.name,
-            current = exercise.areas,
-            colors = uiState.areaColors,
-            onColorChange = { area, color -> repository.setAreaColor(area, color); refresh() },
-            onDismiss = { editingAreas = null },
-            onSave = { areas ->
-                repository.saveAreas(exercise.machine.id, areas)
-                editingAreas = null
-                refresh()
-            },
-        )
-    }
 
     if (showMenu) AlertDialog(
         onDismissRequest = { showMenu = false },

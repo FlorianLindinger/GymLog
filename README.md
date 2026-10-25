@@ -23,6 +23,7 @@
 - Editable history, progression warnings, and live-training status
 - Interval charts with gridlines, rolling averages, linear fits, and targets
 - Body trends for weight, body fat, and lean body mass
+- Per-plot body targets and independent Y-axis limits, with compact automatic scaling
 - Optional, permission-controlled Health Connect synchronization
 - Portable JSON backup and restore
 - No account, analytics, or internet permission

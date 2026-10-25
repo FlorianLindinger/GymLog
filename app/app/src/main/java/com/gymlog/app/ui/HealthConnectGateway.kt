@@ -10,7 +10,6 @@ import androidx.health.connect.client.records.WeightRecord
 import androidx.health.connect.client.request.ReadRecordsRequest
 import androidx.health.connect.client.time.TimeRangeFilter
 import java.time.Instant
-import kotlin.math.abs
 import kotlin.reflect.KClass
 
 class HealthConnectGateway(private val context: Context) {
@@ -61,9 +60,11 @@ class HealthConnectGateway(private val context: Context) {
         val leanMasses = health.readAllRecords(LeanBodyMassRecord::class, filter)
 
         fun source(record: Record): String = record.metadata.dataOrigin.packageName
-        fun nearestWeight(time: Instant): WeightRecord? = weights.minByOrNull {
-            abs(it.time.toEpochMilli() - time.toEpochMilli())
-        }?.takeIf { abs(it.time.toEpochMilli() - time.toEpochMilli()) <= 7L * 24L * 60L * 60L * 1000L }
+        val sortedWeights = weights.sortedBy { it.time }
+        val weightTimes = sortedWeights.map { it.time.toEpochMilli() }
+        fun nearestWeight(time: Instant): WeightRecord? = nearestBodyMeasurementIndex(
+            weightTimes, time.toEpochMilli(), 7L * 24L * 60L * 60L * 1000L,
+        )?.let { sortedWeights[it] }
 
         val result = mutableListOf<BodyMeasurement>()
         weights.forEach {

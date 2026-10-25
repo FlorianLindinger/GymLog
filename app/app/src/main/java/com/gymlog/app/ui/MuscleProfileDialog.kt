@@ -2,7 +2,7 @@ package com.gymlog.app.ui
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.rememberScrollState
@@ -19,9 +19,11 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.unit.dp
 import com.gymlog.app.data.AreaAssignment
 import com.gymlog.app.data.BodyArea
+import com.gymlog.app.data.ExerciseCatalog
 
 @Composable
 internal fun MuscleProfileDialog(
@@ -32,10 +34,13 @@ internal fun MuscleProfileDialog(
     onDismiss: () -> Unit,
     onSave: (List<AreaAssignment>) -> Unit,
 ) {
-    var draft by remember(current) { mutableStateOf(current) }
+    var draft by remember(exerciseName) { mutableStateOf(current) }
+    val suggestions = remember(exerciseName) {
+        if (exerciseName.isBlank()) emptyList() else ExerciseCatalog.search(exerciseName, limit = 3)
+    }
     var showSuggestions by remember { mutableStateOf(false) }
     var chosenProfile by remember { mutableStateOf<String?>(null) }
-    var showReference by remember { mutableStateOf(false) }
+    var showRegionGuide by remember { mutableStateOf(true) }
     var colorArea by remember { mutableStateOf<BodyArea?>(null) }
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -43,17 +48,28 @@ internal fun MuscleProfileDialog(
         text = {
             Column(Modifier.heightIn(max = 520.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text(exerciseName, style = MaterialTheme.typography.titleSmall)
-                OutlinedButton(onClick = { showSuggestions = true }, modifier = Modifier.fillMaxWidth()) { Text("Suggest from exercise list") }
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Text("Body region guide", Modifier.weight(1f), style = MaterialTheme.typography.titleSmall)
+                    TextButton(onClick = { showRegionGuide = !showRegionGuide }) { Text(if (showRegionGuide) "Hide" else "Show") }
+                }
+                if (showRegionGuide) BodyRegionGuide(colors)
+                if (suggestions.isNotEmpty()) {
+                    Text("Suggested profiles for this exercise", style = MaterialTheme.typography.labelMedium)
+                    suggestions.forEach { template ->
+                        TextButton(onClick = { draft = template.areas; chosenProfile = template.title }) {
+                            Column(Modifier.fillMaxWidth()) {
+                                Text(template.title)
+                                Text(muscleProfileSummary(template.areas), style = MaterialTheme.typography.bodySmall)
+                            }
+                        }
+                    }
+                }
+                OutlinedButton(onClick = { showSuggestions = true }, modifier = Modifier.fillMaxWidth()) { Text("Browse exercise list") }
                 chosenProfile?.let { Text("Starting profile: " + it, color = MaterialTheme.colorScheme.primary) }
                 Text("High: primary · Medium: supporting · Low: light involvement. Off removes the region.", style = MaterialTheme.typography.bodySmall)
                 Text("Suggestions are editable estimates. Adjust them for your machine and technique.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 TextButton(onClick = { draft = emptyList(); chosenProfile = null }, enabled = draft.isNotEmpty()) { Text("Clear all regions") }
                 MuscleProfileFields(draft, colors, if (onColorChange == null) null else { area -> colorArea = area }) { draft = it }
-                TextButton(onClick = { showReference = !showReference }) { Text(if (showReference) "Hide muscle reference" else "Show muscle reference") }
-                if (showReference) {
-                    BodyMapPicker(Modifier.fillMaxWidth().aspectRatio(960f / 836f))
-                    Text("Diagram: OpenStax; adaptation by Tomáš Kebert / umimeto.org. See third-party notices.", style = MaterialTheme.typography.labelSmall)
-                }
             }
         },
         confirmButton = { Button(onClick = { onSave(draft) }) { Text("Save") } },

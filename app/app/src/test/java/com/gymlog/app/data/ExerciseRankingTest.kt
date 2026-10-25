@@ -101,12 +101,14 @@ class ExerciseRankingTest {
     }
 
     @Test
-    fun missingProfilesAreUnknownAndFollowKnownCandidates() {
+    fun missingProfilesRemainUnknownButRankAsZeroOverlap() {
         val unknown = exercise(1, BodyArea.CHEST).copy(areas = emptyList())
         val known = exercise(2, BodyArea.CHEST)
         assertNull(exerciseOverlap(unknown, emptyList()).percent)
         assertNull(exerciseOverlap(known, listOf(unknown)).percent)
-        assertEquals(listOf(2L, 1L), rankOverviewMachines(listOf(unknown, known), cutoff, emptyList(), zone).map { it.machine.id })
+        assertEquals(listOf(1L, 2L), rankOverviewMachines(listOf(unknown, known), cutoff, emptyList(), zone).map { it.machine.id })
+        val current = exercise(3, BodyArea.CHEST, times = listOf(cutoff + 1))
+        assertEquals(listOf(3L, 1L, 2L), rankOverviewMachines(listOf(known, unknown, current), cutoff, listOf(current), zone).map { it.machine.id })
     }
 
     @Test

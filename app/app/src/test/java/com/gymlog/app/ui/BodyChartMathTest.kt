@@ -12,7 +12,7 @@ class BodyChartMathTest {
     fun highLowCanShowAllTimeAndDefaultTwoMonthHistoryIndependently() {
         val day = 86_400_000L
         val points = listOf(TimeValue(0, 100.0), TimeValue(39 * day, 50.0), TimeValue(60 * day, 70.0), TimeValue(100 * day, 60.0))
-        val settings = BodyChartSettings(showAllTimeHighLow = true, showHistoryHighLow = true)
+        val settings = BodyChartSettings(showAllTimeHigh = true, showAllTimeLow = true, showHistoryHigh = true, showHistoryLow = true)
         val references = bodyHighLowReferences(points, settings, 100 * day)
         assertEquals(2, references.size)
         assertEquals(100.0, references[0].high.value, 0.0)
@@ -24,10 +24,26 @@ class BodyChartMathTest {
     }
 
     @Test
+    fun highAndLowEachIndependentlyControlReferenceValuesIncludingCustomHistory() {
+        val points = listOf(TimeValue(0, 90.0), TimeValue(10, 20.0), TimeValue(20, 30.0))
+        val base = BodyChartSettings(highLowRange = com.gymlog.app.data.ChartRange.CUSTOM, highLowStart = 10, highLowEnd = 20)
+        listOf(base.copy(showAllTimeHigh = true) to listOf(90.0),
+            base.copy(showAllTimeLow = true) to listOf(20.0),
+            base.copy(showHistoryHigh = true) to listOf(30.0),
+            base.copy(showHistoryLow = true) to listOf(20.0)).forEach { (settings, expected) ->
+            assertEquals(expected, bodyHighLowReferences(points, settings, 100).single().visibleValues)
+        }
+        val inherited = resolveBodySettings(base.copy(showAllTimeHigh = true), base.copy(showAllTimeLow = true, showHistoryHigh = true))
+        assertEquals(false, inherited.showAllTimeHigh)
+        assertTrue(inherited.showAllTimeLow && inherited.showHistoryHigh)
+        assertEquals(false, inherited.showHistoryLow)
+    }
+
+    @Test
     fun historyHighLowUsesChosenEndAndCustomDatesAndSkipsEmptyWindows() {
         val day = 86_400_000L
         val points = listOf(TimeValue(0, 100.0), TimeValue(50 * day, 70.0), TimeValue(100 * day, 60.0))
-        val history = BodyChartSettings(showHistoryHighLow = true)
+        val history = BodyChartSettings(showHistoryHigh = true, showHistoryLow = true)
         assertEquals(100.0, bodyHighLowReferences(points, history, 50 * day).single().high.value, 0.0)
         val custom = history.copy(highLowRange = com.gymlog.app.data.ChartRange.CUSTOM, highLowStart = 50 * day, highLowEnd = 100 * day)
         val reference = bodyHighLowReferences(points, custom, 200 * day).single()
@@ -52,25 +68,65 @@ class BodyChartMathTest {
     fun globalControlsResolveIndependentlyAndManualValuesSurvive() {
         val local = BodyChartSettings(showFit = false, averaging = false, bins = 7, target = 80.0,
             acceptance = 2.0, targetEnabled = true)
-        val global = BodyChartSettings(showFit = true, averaging = true, bins = 20)
-        val target = BodyChartSettings(target = 70.0, acceptance = 1.0, targetEnabled = false)
-        val inherited = resolveBodySettings(local, global, target)
+        val global = BodyChartSettings(showFit = true, averaging = true, bins = 20, target = 70.0, acceptance = 1.0, targetEnabled = false)
+        val inherited = resolveBodySettings(local, global)
         assertTrue(inherited.showFit && inherited.averaging)
         assertEquals(20, inherited.bins)
-        assertEquals(70.0, inherited.target!!, 0.0)
+        assertEquals(80.0, inherited.target!!, 0.0)
+        assertEquals(2.0, inherited.acceptance!!, 0.0)
         assertEquals(false, inherited.targetEnabled)
+        assertTrue(resolveBodySettings(local.copy(targetEnabled = false), global.copy(targetEnabled = true)).targetEnabled)
         val manual = local.copy(globalFit = false, globalAveraging = false, globalTarget = false)
-        assertEquals(manual, resolveBodySettings(manual, global, target))
+        assertEquals(manual, resolveBodySettings(manual, global))
     }
 
     @Test
-    fun estimatesKeepTwelveMonthsThenYearsAndMonthsUntilTenYears() {
-        assertEquals("12 months", formatBodyEta(365.0))
+    fun summaryStatisticsCanEachBeShownAloneOrAllHidden() {
+        val values = listOf(10.0, 20.0).mapIndexed { index, value -> BodyMeasurement(BodyMetric.FAT_PERCENTAGE, value, index.toLong(), "test") }
+        val hidden = BodyChartSettings(showIntervalCount = false, showTotalCount = false, showMean = false, showRange = false)
+        assertEquals("", bodyPlotSummary(values, 8, hidden, "%"))
+        assertEquals("2 in interval", bodyPlotSummary(values, 8, hidden.copy(showIntervalCount = true), "%"))
+        assertEquals("8 total", bodyPlotSummary(values, 8, hidden.copy(showTotalCount = true), "%"))
+        assertEquals("Mean 15 %", bodyPlotSummary(values, 8, hidden.copy(showMean = true), "%"))
+        assertEquals("10\u201320 %", bodyPlotSummary(values, 8, hidden.copy(showRange = true), "%"))
+        assertEquals("0 in interval \u00b7 8 total", bodyPlotSummary(emptyList(), 8, BodyChartSettings(), "%"))
+        assertEquals("", bodyPlotSummary(emptyList(), 8, hidden.copy(showMean = true, showRange = true), "%"))
+    }
+
+    @Test
+    fun summaryAndHighLowGlobalDefaultsKeepLocalOverridesAndAxisLimits() {
+        val local = BodyChartSettings(showIntervalCount = true, showTotalCount = false, showMean = true, showRange = false,
+            showAllTimeHigh = false, showAllTimeLow = false, showHistoryHigh = false, showHistoryLow = false, yMin = 10.0, yMax = 20.0)
+        val global = BodyChartSettings(showIntervalCount = false, showTotalCount = true, showMean = false, showRange = true,
+            showAllTimeHigh = true, showAllTimeLow = true, showHistoryHigh = true, showHistoryLow = true, highLowRange = com.gymlog.app.data.ChartRange.CUSTOM,
+            highLowStart = 10L, highLowEnd = 50L)
+        val effective = resolveBodySettings(local, global)
+        assertEquals(false, effective.showIntervalCount)
+        assertTrue(effective.showTotalCount && effective.showRange)
+        assertEquals(false, effective.showMean)
+        assertTrue(effective.showAllTimeHigh && effective.showAllTimeLow && effective.showHistoryHigh && effective.showHistoryLow)
+        assertEquals(global.highLowRange, effective.highLowRange)
+        assertEquals(global.highLowStart, effective.highLowStart)
+        assertEquals(global.highLowEnd, effective.highLowEnd)
+        assertEquals(local.yMin, effective.yMin)
+        assertEquals(local.yMax, effective.yMax)
+        val manual = local.copy(globalSummary = false, globalHighLow = false)
+        assertEquals(manual, resolveBodySettings(manual, global))
+    }
+
+    @Test
+    fun estimatesIncludeRemainingWeeksUntilOverOneYear() {
+        assertEquals("1 mon. 2 weeks", formatBodyEta(45.0))
+        assertEquals("2 mon. 1 week", formatBodyEta(68.0))
+        assertEquals("2 weeks", formatBodyEta(16.0))
+        assertEquals("12 mon.", formatBodyEta(365.0))
+        assertEquals("1 year", formatBodyEta(366.0))
         assertEquals("1 year 1 month", formatBodyEta(396.0))
         assertEquals("2 years", formatBodyEta(731.0))
         assertEquals("9 years 11 months", formatBodyEta(3630.0))
         assertEquals("10 years", formatBodyEta(3653.0))
         assertEquals("1 day", formatBodyEta(0.1))
+        assertEquals("\u2014", formatBodyEta(Double.POSITIVE_INFINITY))
     }
 
     @Test

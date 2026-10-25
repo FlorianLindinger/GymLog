@@ -55,7 +55,7 @@ internal fun ExerciseCatalogDialog(initialQuery: String, onDismiss: () -> Unit, 
                 }
                 OutlinedTextField(
                     value = query, onValueChange = { query = it }, modifier = Modifier.fillMaxWidth(),
-                    label = { Text("English or German name") }, singleLine = true,
+                    label = { Text("Exercise, machine, or manufacturer") }, singleLine = true,
                     trailingIcon = { if (query.isNotEmpty()) TextButton(onClick = { query = "" }) { Text("Clear") } },
                 )
                 Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -76,7 +76,7 @@ internal fun ExerciseCatalogDialog(initialQuery: String, onDismiss: () -> Unit, 
                                 Text(template.englishName, fontWeight = FontWeight.SemiBold)
                                 Text(template.germanName, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                 Text(template.equipment.label, style = MaterialTheme.typography.labelSmall)
-                                Text(muscleProfileSummary(template.areas), style = MaterialTheme.typography.bodySmall)
+                                Text(if (template.areas.isEmpty()) "Choose body regions manually for this machine." else muscleProfileSummary(template.areas), style = MaterialTheme.typography.bodySmall)
                                 Text("Use this profile", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelLarge)
                             }
                         }

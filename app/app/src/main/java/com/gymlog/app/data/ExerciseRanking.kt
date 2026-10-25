@@ -62,7 +62,6 @@ internal fun rankOverviewMachines(
     val automatic = remaining.filter { it.machine.orderGroup == ExerciseOrderGroup.AUTOMATIC }
         .sortedWith(compareBy<MachineSummary>(
             { it.recentSets.any { set -> set.performedAt >= currentTrainingCutoff } },
-            { overlaps[it.machine.id] == null },
             { overlaps[it.machine.id] ?: 0 },
             { counts[it.machine.id] ?: 0 },
             { it.machine.rankingPriority },

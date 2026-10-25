@@ -4,6 +4,10 @@ import com.gymlog.app.data.ChartRange
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Checkbox
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
+import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -15,6 +19,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -28,6 +33,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
@@ -46,6 +52,7 @@ import java.time.LocalDate
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Locale
+import kotlinx.coroutines.delay
 
 internal data class BodyChartSettings(
     val target: Double? = null,
@@ -61,11 +68,21 @@ internal data class BodyChartSettings(
     val globalFit: Boolean = true,
     val globalAveraging: Boolean = true,
     val globalTarget: Boolean = true,
-    val showAllTimeHighLow: Boolean = false,
-    val showHistoryHighLow: Boolean = false,
+    val showAllTimeHigh: Boolean = false,
+    val showAllTimeLow: Boolean = false,
+    val showHistoryHigh: Boolean = false,
+    val showHistoryLow: Boolean = false,
     val highLowRange: ChartRange = ChartRange.TWO_MONTHS,
     val highLowStart: Long? = null,
     val highLowEnd: Long? = null,
+    val yMin: Double? = null,
+    val yMax: Double? = null,
+    val showIntervalCount: Boolean = true,
+    val showTotalCount: Boolean = true,
+    val showMean: Boolean = true,
+    val showRange: Boolean = true,
+    val globalSummary: Boolean = true,
+    val globalHighLow: Boolean = true,
 )
 
 private fun readBodySettings(prefs: android.content.SharedPreferences, prefix: String): BodyChartSettings = BodyChartSettings(
@@ -78,40 +95,64 @@ private fun readBodySettings(prefs: android.content.SharedPreferences, prefix: S
     interval = ChartRange.fromStorage(prefs.getString("${prefix}interval", ChartRange.SIX_MONTHS.storageValue)),
     customStart = prefs.getLong("${prefix}start", 0).takeIf { it > 0 },
     customEnd = prefs.getLong("${prefix}end", 0).takeIf { it > 0 },
-    showAllTimeHighLow = prefs.getBoolean("${prefix}all_time_high_low", false),
-    showHistoryHighLow = prefs.getBoolean("${prefix}history_high_low", false),
+    showAllTimeHigh = prefs.getBoolean("${prefix}all_time_high", prefs.getBoolean("${prefix}all_time_high_low", false)),
+    showAllTimeLow = prefs.getBoolean("${prefix}all_time_low", prefs.getBoolean("${prefix}all_time_high_low", false)),
+    showHistoryHigh = prefs.getBoolean("${prefix}history_high", prefs.getBoolean("${prefix}history_high_low", false)),
+    showHistoryLow = prefs.getBoolean("${prefix}history_low", prefs.getBoolean("${prefix}history_high_low", false)),
     highLowRange = ChartRange.fromStorage(prefs.getString("${prefix}high_low_range", ChartRange.TWO_MONTHS.storageValue)),
     highLowStart = prefs.getLong("${prefix}high_low_start", 0).takeIf { it > 0 },
     highLowEnd = prefs.getLong("${prefix}high_low_end", 0).takeIf { it > 0 },
     globalInterval = prefs.getBoolean("${prefix}global_interval", true),
     globalFit = prefs.getBoolean("${prefix}global_fit", true),
     globalAveraging = prefs.getBoolean("${prefix}global_averaging", true),
+    yMin = prefs.getString("${prefix}y_min", null)?.toDoubleOrNull()?.takeIf { it.isFinite() && it >= 0 },
+    yMax = prefs.getString("${prefix}y_max", null)?.toDoubleOrNull()?.takeIf { it.isFinite() && it > 0 },
     // Keep previously configured per-plot targets during migration.
     globalTarget = prefs.getBoolean("${prefix}global_target", !prefs.contains("${prefix}target")),
+    showIntervalCount = prefs.getBoolean("${prefix}show_interval_count", true),
+    showTotalCount = prefs.getBoolean("${prefix}show_total_count", true),
+    showMean = prefs.getBoolean("${prefix}show_mean", true),
+    showRange = prefs.getBoolean("${prefix}show_range", true),
+    globalSummary = prefs.getBoolean("${prefix}global_summary", true),
+    globalHighLow = prefs.getBoolean("${prefix}global_high_low", !prefs.contains("${prefix}all_time_high_low") && !prefs.contains("${prefix}history_high_low")),
 )
 
 private fun saveBodySettings(prefs: android.content.SharedPreferences, prefix: String, value: BodyChartSettings) {
     prefs.edit().putString("${prefix}target", value.target?.toString())
         .putString("${prefix}acceptance", value.acceptance?.toString())
         .putBoolean("${prefix}target_enabled", value.targetEnabled)
+        .putString("${prefix}y_min", value.yMin?.toString()).putString("${prefix}y_max", value.yMax?.toString())
         .putBoolean("${prefix}fit", value.showFit).putBoolean("${prefix}averaging", value.averaging)
         .putInt("${prefix}bins", value.bins).putString("${prefix}interval", value.interval.storageValue)
         .putLong("${prefix}start", value.customStart ?: 0).putLong("${prefix}end", value.customEnd ?: 0)
-        .putBoolean("${prefix}all_time_high_low", value.showAllTimeHighLow)
-        .putBoolean("${prefix}history_high_low", value.showHistoryHighLow)
+        .putBoolean("${prefix}all_time_high", value.showAllTimeHigh).putBoolean("${prefix}all_time_low", value.showAllTimeLow)
+        .putBoolean("${prefix}history_high", value.showHistoryHigh).putBoolean("${prefix}history_low", value.showHistoryLow)
         .putString("${prefix}high_low_range", value.highLowRange.storageValue)
         .putLong("${prefix}high_low_start", value.highLowStart ?: 0).putLong("${prefix}high_low_end", value.highLowEnd ?: 0)
         .putBoolean("${prefix}global_interval", value.globalInterval).putBoolean("${prefix}global_fit", value.globalFit)
-        .putBoolean("${prefix}global_averaging", value.globalAveraging).putBoolean("${prefix}global_target", value.globalTarget).apply()
+        .putBoolean("${prefix}global_averaging", value.globalAveraging).putBoolean("${prefix}global_target", value.globalTarget)
+        .putBoolean("${prefix}show_interval_count", value.showIntervalCount)
+        .putBoolean("${prefix}show_total_count", value.showTotalCount)
+        .putBoolean("${prefix}show_mean", value.showMean).putBoolean("${prefix}show_range", value.showRange)
+        .putBoolean("${prefix}global_summary", value.globalSummary).putBoolean("${prefix}global_high_low", value.globalHighLow).apply()
 }
 
-internal fun resolveBodySettings(local: BodyChartSettings, global: BodyChartSettings, target: BodyChartSettings): BodyChartSettings = local.copy(
+internal fun resolveBodySettings(local: BodyChartSettings, global: BodyChartSettings): BodyChartSettings = local.copy(
     showFit = if (local.globalFit) global.showFit else local.showFit,
     averaging = if (local.globalAveraging) global.averaging else local.averaging,
     bins = if (local.globalAveraging) global.bins else local.bins,
-    target = if (local.globalTarget) target.target else local.target,
-    acceptance = if (local.globalTarget) target.acceptance else local.acceptance,
-    targetEnabled = if (local.globalTarget) target.targetEnabled else local.targetEnabled,
+    targetEnabled = if (local.globalTarget) global.targetEnabled else local.targetEnabled,
+    showIntervalCount = if (local.globalSummary) global.showIntervalCount else local.showIntervalCount,
+    showTotalCount = if (local.globalSummary) global.showTotalCount else local.showTotalCount,
+    showMean = if (local.globalSummary) global.showMean else local.showMean,
+    showRange = if (local.globalSummary) global.showRange else local.showRange,
+    showAllTimeHigh = if (local.globalHighLow) global.showAllTimeHigh else local.showAllTimeHigh,
+    showAllTimeLow = if (local.globalHighLow) global.showAllTimeLow else local.showAllTimeLow,
+    showHistoryHigh = if (local.globalHighLow) global.showHistoryHigh else local.showHistoryHigh,
+    showHistoryLow = if (local.globalHighLow) global.showHistoryLow else local.showHistoryLow,
+    highLowRange = if (local.globalHighLow) global.highLowRange else local.highLowRange,
+    highLowStart = if (local.globalHighLow) global.highLowStart else local.highLowStart,
+    highLowEnd = if (local.globalHighLow) global.highLowEnd else local.highLowEnd,
 )
 
 private enum class CustomRangeMode { INTERVAL, DURATION }
@@ -129,10 +170,12 @@ private data class BodyFit(
     val fittedLast: Double,
 )
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun BodyOverviewScreen(
     snapshot: BodyDataSnapshot,
     syncStatus: String,
+    isSyncing: Boolean,
     modifier: Modifier = Modifier,
     onSync: () -> Unit,
     onGym: () -> Unit,
@@ -143,93 +186,115 @@ fun BodyOverviewScreen(
     var showTrend by remember { mutableStateOf(preferences.getBoolean("show_trend", true)) }
     var globalSettings by remember { mutableStateOf(readBodySettings(preferences, "global_").copy(showFit = showTrend)) }
     var showGlobalSettings by remember { mutableStateOf(false) }
-    val globalTargets = remember {
-        mutableStateMapOf<BodyMetric, BodyChartSettings>().apply {
-            bodyMetricDisplayOrder.forEach { put(it, readBodySettings(preferences, "global_${it.name}_")) }
-        }
-    }
     var showBodyMenu by remember { mutableStateOf(false) }
     var showCustomRange by remember { mutableStateOf(false) }
     var customStart by remember { mutableStateOf(preferences.getLong("custom_start", 0L).takeIf { it > 0L }) }
     var customEnd by remember { mutableStateOf(preferences.getLong("custom_end", 0L).takeIf { it > 0L }) }
+    val pullState = rememberPullToRefreshState()
+    var pulledRefresh by remember { mutableStateOf(false) }
+    LaunchedEffect(pulledRefresh, isSyncing, syncStatus) {
+        if (pulledRefresh && !isSyncing) {
+            delay(1500)
+            pulledRefresh = false
+        }
+    }
     val settings = remember {
         mutableStateMapOf<BodyMetric, BodyChartSettings>().apply {
             bodyMetricDisplayOrder.forEach { metric ->
                 put(
                     metric,
-                    readBodySettings(preferences, "${metric.name}_"),
+                    readBodySettings(preferences, "${metric.name}_").let { local ->
+                        // Keep local values; recover old per-metric global targets only when no local value exists.
+                        if (!preferences.getBoolean("target_visibility_v2", false) && local.globalTarget) {
+                            val oldTarget = readBodySettings(preferences, "global_${metric.name}_")
+                            local.copy(target = local.target ?: oldTarget.target,
+                                acceptance = if (local.target != null) local.acceptance else oldTarget.acceptance)
+                        } else local
+                    },
                 )
             }
         }
     }
-    val oldestMeasurement = snapshot.measurements.minOfOrNull { it.measuredAt }
+    androidx.compose.runtime.LaunchedEffect(Unit) {
+        if (!preferences.getBoolean("target_visibility_v2", false)) {
+            globalSettings = globalSettings.copy(targetEnabled = globalSettings.targetEnabled || bodyMetricDisplayOrder.any {
+                readBodySettings(preferences, "global_${it.name}_").targetEnabled
+            })
+            saveBodySettings(preferences, "global_", globalSettings)
+            settings.forEach { (metric, value) -> saveBodySettings(preferences, "${metric.name}_", value) }
+            preferences.edit().putBoolean("target_visibility_v2", true).apply()
+        }
+    }
+    val oldestMeasurement = remember(snapshot.measurements) { snapshot.measurements.minOfOrNull { it.measuredAt } }
+    val measurementsByMetric = remember(snapshot.measurements) { snapshot.measurements.groupBy { it.metric } }
+    val windowNow = remember(window, customStart, customEnd, snapshot.syncedAt) { System.currentTimeMillis() }
     val bodyChartWindow = ChartWindow(
         durationMillis = if (window == ChartRange.CUSTOM) {
             customStart?.let { start -> customEnd?.let { end -> (end - start).coerceAtLeast(1L) } }
         } else {
             chartWindowDuration(window)
         },
-        endMillis = if (window == ChartRange.CUSTOM) customEnd else System.currentTimeMillis(),
+        endMillis = if (window == ChartRange.CUSTOM) customEnd else windowNow,
         startMillis = if (window == ChartRange.CUSTOM) customStart else null,
         key = "$window:$customStart:$customEnd",
     )
 
     Box(modifier.fillMaxSize()) {
-        LazyColumn(
-            modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(start = 8.dp, end = 8.dp, top = 8.dp, bottom = 72.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            item {
-                Card(Modifier.fillMaxWidth()) {
-                    Row(
-                        Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 7.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Text("Body", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-                        Text(
-                            snapshot.syncedAt?.let { "Last sync ${formatBodySyncTime(it)}" }
-                                ?: syncStatus.ifBlank { "Not synced yet" },
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            textAlign = TextAlign.End,
-                        )
+        PullToRefreshBox(
+            isRefreshing = pulledRefresh && isSyncing,
+            onRefresh = { pulledRefresh = true; if (!isSyncing) onSync() },
+            state = pullState,
+            modifier = Modifier.fillMaxSize().padding(bottom = 64.dp),
+            indicator = {
+                if (pulledRefresh || pullState.distanceFraction > 0f) {
+                    Card(Modifier.align(Alignment.TopCenter).padding(8.dp)) {
+                        Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                            if (isSyncing) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+                            Column {
+                                Text("Body", style = MaterialTheme.typography.titleSmall)
+                                Text(if (pulledRefresh) syncStatus else if (pullState.distanceFraction >= 1f) "Release to sync" else "Pull to sync",
+                                    style = MaterialTheme.typography.labelSmall)
+                                Text(snapshot.syncedAt?.let { "Last sync ${formatBodySyncTime(it)}" } ?: "Not synced yet",
+                                    style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                        }
                     }
                 }
-            }
-            item {
-                ChartRangeControls(
-                    selectedWindow = window,
-                    showTrend = showTrend,
-                    trendLabel = "Fit",
-                    onWindowSelected = { preset ->
-                        window = preset
-                        preferences.edit().putString("window", preset.storageValue).apply()
-                    },
-                    onCustomSelected = { showCustomRange = true },
-                    onTrendSelected = {
-                        showTrend = !showTrend
-                        globalSettings = globalSettings.copy(showFit = showTrend)
-                        saveBodySettings(preferences, "global_", globalSettings)
-                        preferences.edit().putBoolean("show_trend", showTrend).apply()
-                    },
-                )
-            }
-            bodyMetricDisplayOrder.forEach { metric ->
-                item(metric.name) {
-                    BodyMetricCard(
-                        metric = metric,
-                        values = snapshot.measurements.filter { it.metric == metric },
-                        settings = settings.getValue(metric),
-                        globalSettings = globalSettings,
-                        globalTarget = globalTargets.getValue(metric),
-                        onSettings = {
-                            settings[metric] = it
-                            saveBodySettings(preferences, "${metric.name}_", it)
+            },
+        ) {
+            LazyColumn(
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(8.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                item {
+                    ChartRangeControls(
+                        selectedWindow = window,
+                        showTrend = showTrend,
+                        showTrendControl = false,
+                        onWindowSelected = { preset ->
+                            window = preset
+                            preferences.edit().putString("window", preset.storageValue).apply()
                         },
-                        window = bodyChartWindow,
+                        onCustomSelected = { showCustomRange = true },
+                        onTrendSelected = {},
                     )
+                }
+                bodyMetricDisplayOrder.forEach { metric ->
+                    item(metric.name) {
+                        BodyMetricCard(
+                            metric = metric,
+                            values = measurementsByMetric[metric].orEmpty(),
+                            settings = settings.getValue(metric),
+                            globalSettings = globalSettings,
+                            onSettings = {
+                                settings[metric] = it
+                                saveBodySettings(preferences, "${metric.name}_", it)
+                            },
+                            window = bodyChartWindow,
+                        )
+                    }
                 }
             }
         }
@@ -238,6 +303,7 @@ fun BodyOverviewScreen(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             FilledTonalButton(onClick = onGym, modifier = Modifier.weight(1f)) { Text("Gym") }
+            FilledTonalButton(onClick = { showGlobalSettings = true }, modifier = Modifier.weight(1f)) { Text("Settings") }
             FilledTonalButton(onClick = { showBodyMenu = true }, modifier = Modifier.weight(1f)) { Text("Menu") }
         }
     }
@@ -255,11 +321,6 @@ fun BodyOverviewScreen(
     )
     if (showGlobalSettings) BodyChartSettingsDialog(
         metric = null, current = globalSettings.copy(interval = window, customStart = customStart, customEnd = customEnd), onDismiss = { showGlobalSettings = false },
-        targets = globalTargets,
-        onTargetsSave = { targets -> targets.forEach { (metric, value) ->
-            globalTargets[metric] = value
-            saveBodySettings(preferences, "global_${metric.name}_", value)
-        } },
         onSave = {
             globalSettings = it
             window = it.interval
@@ -299,43 +360,53 @@ private fun BodyMetricCard(
     onSettings: (BodyChartSettings) -> Unit,
     window: ChartWindow,
     globalSettings: BodyChartSettings,
-    globalTarget: BodyChartSettings,
 ) {
     var editing by remember { mutableStateOf(false) }
-    val effective = resolveBodySettings(settings, globalSettings, globalTarget)
-    val plotWindow = if (settings.globalInterval) window else ChartWindow(
-        durationMillis = chartWindowDuration(settings.interval),
-        startMillis = if (settings.interval == ChartRange.CUSTOM) settings.customStart else null,
-        endMillis = if (settings.interval == ChartRange.CUSTOM) settings.customEnd else System.currentTimeMillis(),
-        key = "${settings.interval}:${settings.customStart}:${settings.customEnd}",
-    )
-    val sorted = values.sortedBy { it.measuredAt }
-    val intervalValues = if (sorted.isEmpty()) {
-        emptyList()
-    } else {
-        val range = calculateVisibleTimeRange(sorted.first().measuredAt, sorted.last().measuredAt, plotWindow)
-        sorted.filter { it.measuredAt in range.start..range.end }
+    val effective = resolveBodySettings(settings, globalSettings)
+    val plotWindow = remember(settings.globalInterval, settings.interval, settings.customStart, settings.customEnd, window) {
+        if (settings.globalInterval) window else ChartWindow(
+            durationMillis = chartWindowDuration(settings.interval),
+            startMillis = if (settings.interval == ChartRange.CUSTOM) settings.customStart else null,
+            endMillis = if (settings.interval == ChartRange.CUSTOM) settings.customEnd else System.currentTimeMillis(),
+            key = "${settings.interval}:${settings.customStart}:${settings.customEnd}",
+        )
     }
-    val fit = bodyLinearFit(intervalValues)
+    val sorted = remember(values) { values.sortedBy { it.measuredAt } }
+    val intervalValues = remember(sorted, plotWindow) {
+        if (sorted.isEmpty()) emptyList() else {
+            val range = calculateVisibleTimeRange(sorted.first().measuredAt, sorted.last().measuredAt, plotWindow)
+            sorted.filter { it.measuredAt in range.start..range.end }
+        }
+    }
+    val fit = remember(intervalValues, effective.showFit, effective.targetEnabled, effective.target) {
+        if (effective.showFit || effective.targetEnabled && effective.target != null) bodyLinearFit(intervalValues)
+        else BodyFit(0.0, intervalValues.lastOrNull()?.value ?: 0.0)
+    }
     val latest = sorted.lastOrNull()
     val targetEta = effective.target?.takeIf { effective.targetEnabled }?.let { target ->
         ((target - fit.fittedLast) / fit.slopePerDay).takeIf {
             intervalValues.size >= 2 && fit.slopePerDay != 0.0 && it >= 0.0
         }
     }
-    val primary = MaterialTheme.colorScheme.primary
-    val fitColor = MaterialTheme.colorScheme.tertiary
+    // Fixed chart roles stay distinct even when the app accent color changes.
+    val primary = Color(0xFF64B5F6)
+    val fitColor = Color(0xFFFFD54F)
     val targetColor = Color(0xFF66BB6A)
-    val highLow = bodyHighLowReferences(sorted.map { TimeValue(it.measuredAt, it.value) }, effective,
-        plotWindow.endMillis ?: sorted.lastOrNull()?.measuredAt ?: System.currentTimeMillis())
-    val allTimeColor = MaterialTheme.colorScheme.secondary
-    val historyColor = MaterialTheme.colorScheme.tertiary
-    val fitPoints = trendTimeSeries(
-        intervalValues.map { TimeValue(it.measuredAt, it.value) },
-        fitColor,
-        PlotAxis.LEFT,
-        plotWindow,
-    ).points
+    val raw = remember(sorted) { sorted.map { TimeValue(it.measuredAt, it.value) } }
+    val highLow = remember(raw, effective, plotWindow.endMillis) {
+        if (effective.showAllTimeHigh || effective.showAllTimeLow || effective.showHistoryHigh || effective.showHistoryLow)
+            bodyHighLowReferences(raw, effective, plotWindow.endMillis ?: sorted.lastOrNull()?.measuredAt ?: System.currentTimeMillis())
+        else emptyList()
+    }
+    val allTimeColor = Color(0xFFCE93D8)
+    val historyColor = Color(0xFFFF8A65)
+    val fitPoints = remember(intervalValues, fit, plotWindow, effective.showFit) {
+        if (!effective.showFit || intervalValues.size < 2) emptyList() else {
+            val range = calculateVisibleTimeRange(sorted.first().measuredAt, sorted.last().measuredAt, plotWindow)
+            val lastTime = intervalValues.last().measuredAt
+            listOf(range.start, range.end).map { time -> TimeValue(time, fit.fittedLast + fit.slopePerDay * (time - lastTime) / DAY_MILLIS.toDouble()) }
+        }
+    }
     Card(Modifier.fillMaxWidth().clickable { editing = true }) {
         Column(Modifier.padding(horizontal = 6.dp, vertical = 3.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -354,12 +425,11 @@ private fun BodyMetricCard(
                     )
                 }
             }
-            Text(
-                "${intervalValues.size} in interval \u00b7 ${sorted.size} total" +
-                    if (intervalValues.isEmpty()) "" else " \u00b7 Mean ${formatBodyValue(intervalValues.map { it.value }.average())}" +
-                        " \u00b7 ${formatBodyValue(intervalValues.minOf { it.value })}\u2013${formatBodyValue(intervalValues.maxOf { it.value })} ${metric.unit}",
-                style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+            val summary = remember(intervalValues, sorted.size, effective, metric.unit) {
+                bodyPlotSummary(intervalValues, sorted.size, effective, metric.unit)
+            }
+            if (summary.isNotEmpty()) Text(summary,
+                style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             if (effective.targetEnabled && effective.target != null) {
                 Text(
                     "Target: ${formatBodyValue(effective.target)} ${metric.unit}" +
@@ -370,7 +440,9 @@ private fun BodyMetricCard(
                 )
             }
             highLow.forEach { reference ->
-                Text("${reference.label}: Low ${formatBodyValue(reference.low.value)} / High ${formatBodyValue(reference.high.value)} ${metric.unit}",
+                Text("${reference.label}: " + listOfNotNull(
+                    "Low ${formatBodyValue(reference.low.value)}".takeIf { reference.showLow },
+                    "High ${formatBodyValue(reference.high.value)}".takeIf { reference.showHigh }).joinToString(" / ") + " ${metric.unit}",
                     style = MaterialTheme.typography.labelSmall,
                     color = if (reference.allTime) allTimeColor else historyColor)
             }
@@ -382,7 +454,7 @@ private fun BodyMetricCard(
                 fitColor,
                 targetColor,
                 plotWindow,
-                highLow.flatMap { reference -> listOf(reference.low.value, reference.high.value).distinct().map { value ->
+                highLow.flatMap { reference -> reference.visibleValues.map { value ->
                     TimeBand(value, 0.0, if (reference.allTime) allTimeColor else historyColor)
                 } },
             )
@@ -411,7 +483,7 @@ private fun BodyGraph(
         }
         return
     }
-    val raw = values.map { TimeValue(it.measuredAt, it.value) }
+    val raw = remember(values) { values.map { TimeValue(it.measuredAt, it.value) } }
     val range = calculateVisibleTimeRange(raw.first().timestamp, raw.last().timestamp, window)
     if (raw.none { it.timestamp in range.start..range.end }) {
         Box(Modifier.fillMaxWidth().height(132.dp), contentAlignment = Alignment.Center) {
@@ -419,19 +491,29 @@ private fun BodyGraph(
         }
         return
     }
-    TimeWindowChart(
-        series = buildList {
-            add(TimeSeries(if (settings.averaging) averageTimeBins(raw, range, settings.bins) else raw, dataColor))
+    val data = remember(raw, range, settings.averaging, settings.bins) {
+        if (settings.averaging) averageTimeBins(raw, range, settings.bins) else raw
+    }
+    val series = remember(data, dataColor, fit, fitColor) {
+        buildList {
+            add(TimeSeries(data, dataColor))
             if (fit.isNotEmpty()) {
                 add(
                     TimeSeries(fit, fitColor, strokeWidth = 2.5f, dashed = true, showPoints = false),
                 )
             }
-        },
+        }
+    }
+    TimeWindowChart(
+        series = series,
         window = window.copy(startMillis = range.start, endMillis = range.end),
         bands = settings.target?.takeIf { settings.targetEnabled }?.let { target ->
             listOf(TimeBand(target, settings.acceptance ?: 0.0, targetColor))
         }.orEmpty() + highLowBands,
+        compactYAxis = true,
+        yMin = settings.yMin,
+        yMax = settings.yMax,
+        bodyCalendarLabels = true,
     )
 }
 
@@ -512,19 +594,22 @@ private fun BodyChartSettingsDialog(
     metric: BodyMetric?,
     current: BodyChartSettings,
     onDismiss: () -> Unit,
-    targets: Map<BodyMetric, BodyChartSettings> = emptyMap(),
-    onTargetsSave: (Map<BodyMetric, BodyChartSettings>) -> Unit = {},
     onSave: (BodyChartSettings) -> Unit,
 ) {
     var draft by remember { mutableStateOf(current) }
     var bins by remember { mutableStateOf(current.bins.toString()) }
     var custom by remember { mutableStateOf(false) }
     var customHighLow by remember { mutableStateOf(false) }
-    val targetDrafts = remember { mutableStateMapOf<BodyMetric, BodyChartSettings>().apply { putAll(targets) } }
+    var yMin by remember { mutableStateOf(current.yMin?.let(::formatChartAxisValue).orEmpty()) }
+    var yMax by remember { mutableStateOf(current.yMax?.let(::formatChartAxisValue).orEmpty()) }
     val global = metric == null
     val validBins = bins.toIntOrNull()?.takeIf { it in 1..1000 }
-    val targetsValid = if (global) targetDrafts.values.all { !it.targetEnabled || it.target != null }
-        else draft.globalTarget || !draft.targetEnabled || draft.target != null
+    val targetsValid = global || draft.globalTarget || !draft.targetEnabled || draft.target != null
+    fun axisValue(text: String) = text.replace(',', '.').toDoubleOrNull()?.takeIf { it.isFinite() && it >= 0 }
+    val minimum = axisValue(yMin)
+    val maximum = axisValue(yMax)
+    val boundsValid = (yMin.isBlank() || minimum != null) && (yMax.isBlank() || maximum != null && maximum > 0) &&
+        (minimum == null || maximum == null || minimum < maximum)
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(metric?.let { "${it.label} settings" } ?: "Global plot settings") },
@@ -535,7 +620,7 @@ private fun BodyChartSettingsDialog(
                 if (global || !draft.globalInterval) {
                     ChartRangeControls(draft.interval, draft.showFit,
                         { draft = draft.copy(interval = it) }, { custom = true },
-                        { draft = draft.copy(showFit = !draft.showFit, globalFit = false) }, trendLabel = "Fit")
+                        {}, showTrendControl = false)
                     if (draft.interval == ChartRange.CUSTOM && draft.customStart != null && draft.customEnd != null) {
                         Text("${formatChartDate(draft.customStart!!)} \u2013 ${formatChartDate(draft.customEnd!!)}", style = MaterialTheme.typography.labelSmall)
                     }
@@ -552,11 +637,31 @@ private fun BodyChartSettingsDialog(
                 Text("Fit", fontWeight = FontWeight.SemiBold)
                 if (!global) SettingCheck("Follow global fit", draft.globalFit) { draft = draft.copy(globalFit = it) }
                 if (global || !draft.globalFit) SettingCheck("Show fit", draft.showFit) { draft = draft.copy(showFit = it) }
+                Text("Plot summary", fontWeight = FontWeight.SemiBold)
+                if (!global) SettingCheck("Follow global summary", draft.globalSummary) { draft = draft.copy(globalSummary = it) }
+                if (global || !draft.globalSummary) {
+                    SettingCheck("Show count in interval", draft.showIntervalCount) { draft = draft.copy(showIntervalCount = it) }
+                    SettingCheck("Show total count", draft.showTotalCount) { draft = draft.copy(showTotalCount = it) }
+                    SettingCheck("Show interval mean", draft.showMean) { draft = draft.copy(showMean = it) }
+                    SettingCheck("Show interval range", draft.showRange) { draft = draft.copy(showRange = it) }
+                }
                 if (!global) {
-                    Text("High / low", fontWeight = FontWeight.SemiBold)
-                    SettingCheck("Show all-time high / low", draft.showAllTimeHighLow) { draft = draft.copy(showAllTimeHighLow = it) }
-                    SettingCheck("Show history-window high / low", draft.showHistoryHighLow) { draft = draft.copy(showHistoryHighLow = it) }
-                    if (draft.showHistoryHighLow) {
+                    Text("Y axis (${metric!!.unit})", fontWeight = FontWeight.SemiBold)
+                    Text("Leave either limit blank for automatic scaling.", style = MaterialTheme.typography.bodySmall)
+                    OutlinedTextField(yMin, { yMin = it }, label = { Text("Y minimum (Auto if blank)") },
+                        isError = !boundsValid && yMin.isNotBlank(), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal), singleLine = true)
+                    OutlinedTextField(yMax, { yMax = it }, label = { Text("Y maximum (Auto if blank)") },
+                        isError = !boundsValid && yMax.isNotBlank(), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal), singleLine = true)
+                    if (!boundsValid) Text("Use nonnegative numbers, with maximum greater than minimum.", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+                }
+                Text("High / low", fontWeight = FontWeight.SemiBold)
+                if (!global) SettingCheck("Follow global high / low", draft.globalHighLow) { draft = draft.copy(globalHighLow = it) }
+                if (global || !draft.globalHighLow) {
+                    SettingCheck("Show all-time high", draft.showAllTimeHigh) { draft = draft.copy(showAllTimeHigh = it) }
+                    SettingCheck("Show all-time low", draft.showAllTimeLow) { draft = draft.copy(showAllTimeLow = it) }
+                    SettingCheck("Show history-window high", draft.showHistoryHigh) { draft = draft.copy(showHistoryHigh = it) }
+                    SettingCheck("Show history-window low", draft.showHistoryLow) { draft = draft.copy(showHistoryLow = it) }
+                    if (draft.showHistoryHigh || draft.showHistoryLow) {
                         Text("High / low history window", style = MaterialTheme.typography.labelMedium)
                         ChartRangeControls(draft.highLowRange, false,
                             { draft = draft.copy(highLowRange = it) }, { customHighLow = true }, {}, showTrendControl = false)
@@ -567,19 +672,16 @@ private fun BodyChartSettingsDialog(
                     }
                 }
                 Text("Target", fontWeight = FontWeight.SemiBold)
-                if (!global) SettingCheck("Follow global target", draft.globalTarget) { draft = draft.copy(globalTarget = it) }
+                if (!global) SettingCheck("Follow global target visibility", draft.globalTarget) { draft = draft.copy(globalTarget = it) }
                 if (global) {
-                    bodyMetricDisplayOrder.forEach { item ->
-                        Text(item.label, fontWeight = FontWeight.Medium)
-                        BodyTargetFields(item, targetDrafts.getValue(item)) { targetDrafts[item] = it }
-                    }
-                } else if (!draft.globalTarget) BodyTargetFields(metric!!, draft) { draft = it }
+                    SettingCheck("Show targets", draft.targetEnabled) { draft = draft.copy(targetEnabled = it) }
+                    Text("Plots that follow this setting show or hide their own target values.", style = MaterialTheme.typography.bodySmall)
+                } else BodyTargetFields(metric!!, draft) { draft = it }
             }
         },
         confirmButton = { Button(onClick = {
-            onTargetsSave(targetDrafts.toMap())
-            onSave(draft.copy(bins = validBins ?: current.bins))
-        }, enabled = targetsValid && !((global || !draft.globalAveraging) && draft.averaging && validBins == null)) { Text("Save") } },
+            onSave(draft.copy(bins = validBins ?: current.bins, yMin = minimum, yMax = maximum))
+        }, enabled = boundsValid && targetsValid && !((global || !draft.globalAveraging) && draft.averaging && validBins == null)) { Text("Save") } },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
     )
     if (customHighLow) CustomBodyRangeDialog(
@@ -605,19 +707,30 @@ private fun BodyChartSettingsDialog(
 private fun BodyTargetFields(metric: BodyMetric, current: BodyChartSettings, onChange: (BodyChartSettings) -> Unit) {
     var target by remember { mutableStateOf(current.target?.toString().orEmpty()) }
     var acceptance by remember { mutableStateOf(current.acceptance?.toString().orEmpty()) }
-    SettingCheck("Enable target", current.targetEnabled) { onChange(current.copy(targetEnabled = it)) }
+    if (!current.globalTarget) SettingCheck("Show target", current.targetEnabled) { onChange(current.copy(targetEnabled = it)) }
     OutlinedTextField(target, {
         target = it
         onChange(current.copy(target = it.replace(',', '.').toDoubleOrNull()?.takeIf { value -> value.isFinite() && value >= 0 }))
-    }, label = { Text("Target (${metric.unit})") }, enabled = current.targetEnabled,
-        isError = current.targetEnabled && current.target == null,
+    }, label = { Text("Target (${metric.unit})") },
+        isError = !current.globalTarget && current.targetEnabled && current.target == null,
         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal), singleLine = true)
     OutlinedTextField(acceptance, {
         acceptance = it
         onChange(current.copy(acceptance = it.replace(',', '.').toDoubleOrNull()?.takeIf { value -> value.isFinite() && value >= 0 }))
-    }, label = { Text("Acceptance \u00b1 (${metric.unit})") }, enabled = current.targetEnabled,
+    }, label = { Text("Acceptance \u00b1 (${metric.unit})") },
         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal), singleLine = true)
 }
+
+internal fun bodyPlotSummary(values: List<BodyMeasurement>, total: Int, settings: BodyChartSettings, unit: String): String =
+    buildList {
+        if (settings.showIntervalCount) add("${values.size} in interval")
+        if (settings.showTotalCount) add("$total total")
+        if (values.isNotEmpty()) {
+            if (settings.showMean) add("Mean ${formatBodyValue(values.map { it.value }.average())} $unit")
+            if (settings.showRange) add("${formatBodyValue(values.minOf { it.value })}\u2013${formatBodyValue(values.maxOf { it.value })} $unit")
+        }
+    }.joinToString(" \u00b7 ")
+
 private fun bodyLinearFit(values: List<BodyMeasurement>): BodyFit {
     if (values.size < 2) return BodyFit(0.0, values.lastOrNull()?.value ?: 0.0)
     val origin = values.first().measuredAt
@@ -638,9 +751,12 @@ internal fun formatBodyEta(days: Double): String {
     val months = ((totalDays + 0.5) / (365.25 / 12)).toLong()
     fun quantity(value: Long, unit: String) = "$value $unit${if (value == 1L) "" else "s"}"
     if (months >= 120) return quantity(months / 12, "year")
-    if (months >= 13) return listOf(quantity(months / 12, "year"),
+    if (totalDays > 365 && months >= 12) return listOf(quantity(months / 12, "year"),
         (months % 12).takeIf { it > 0 }?.let { quantity(it, "month") }).filterNotNull().joinToString(" ")
-    if (months >= 1) return quantity(months, "month")
+    if (months >= 1) {
+        val weeks = ((totalDays - months * (365.25 / 12)) / 7).toLong().coerceAtLeast(0)
+        return listOf("$months mon.", weeks.takeIf { it > 0 }?.let { quantity(it, "week") }).filterNotNull().joinToString(" ")
+    }
     if (totalDays >= 7) return quantity(totalDays / 7, "week")
     return quantity(totalDays, "day")
 }

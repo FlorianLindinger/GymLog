@@ -1,6 +1,7 @@
 package com.gymlog.app
 
 import android.os.Bundle
+import android.os.SystemClock
 import android.content.Intent
 import android.net.Uri
 import android.widget.Toast
@@ -24,9 +25,12 @@ import com.gymlog.app.ui.BodyDataSnapshot
 import com.gymlog.app.ui.BodyMeasurement
 import com.gymlog.app.ui.BodyMetric
 import com.gymlog.app.ui.HealthConnectGateway
+import com.gymlog.app.ui.shouldAutoSyncBody
 import com.gymlog.app.ui.theme.GymLogTheme
 import java.time.LocalDate
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 private fun demoBodyData(): BodyDataSnapshot {
     val now = System.currentTimeMillis()
@@ -55,17 +59,26 @@ class MainActivity : ComponentActivity() {
             var accentColor by remember { mutableStateOf(repository.accentColor()) }
             var bodyData by remember { mutableStateOf(if (BuildConfig.DEBUG && intent.getBooleanExtra("demo_body_data", false)) demoBodyData() else BodyDataSnapshot()) }
             var healthSyncStatus by remember { mutableStateOf("Not synced yet.") }
+            var healthSyncing by remember { mutableStateOf(false) }
+            var lastHealthSyncElapsed by remember { mutableStateOf<Long?>(null) }
             val healthGateway = remember { HealthConnectGateway(this) }
             val scope = rememberCoroutineScope()
             fun readHealthData() {
+                if (healthSyncing) return
+                healthSyncing = true
                 scope.launch {
                     healthSyncStatus = "Syncing Health Connect…"
-                    runCatching { healthGateway.readBodyData() }
-                        .onSuccess {
-                            bodyData = it
-                            healthSyncStatus = "Synced ${it.measurements.size} measurements."
-                        }
-                        .onFailure { healthSyncStatus = "Health Connect sync failed: ${it.message}" }
+                    try {
+                        runCatching { withContext(Dispatchers.IO) { healthGateway.readBodyData() } }
+                            .onSuccess {
+                                bodyData = it
+                                lastHealthSyncElapsed = SystemClock.elapsedRealtime()
+                                healthSyncStatus = "Synced ${it.measurements.size} measurements."
+                            }
+                            .onFailure { healthSyncStatus = "Health Connect sync failed: ${it.message}" }
+                    } finally {
+                        healthSyncing = false
+                    }
                 }
             }
             val healthPermissionLauncher = rememberLauncherForActivityResult(
@@ -75,7 +88,8 @@ class MainActivity : ComponentActivity() {
                 else healthSyncStatus = "Health Connect permission was not granted."
             }
             LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
-                if (healthGateway.sdkStatus() == HealthConnectClient.SDK_AVAILABLE) {
+                if (shouldAutoSyncBody(lastHealthSyncElapsed, SystemClock.elapsedRealtime()) &&
+                    healthGateway.sdkStatus() == HealthConnectClient.SDK_AVAILABLE) {
                     scope.launch {
                         if (healthGateway.hasPermissions()) readHealthData()
                     }
@@ -124,6 +138,7 @@ class MainActivity : ComponentActivity() {
                     },
                     bodyData = bodyData,
                     healthSyncStatus = healthSyncStatus,
+                    healthSyncing = healthSyncing,
                     onHealthSync = {
                         when (healthGateway.sdkStatus()) {
                             HealthConnectClient.SDK_AVAILABLE -> scope.launch {

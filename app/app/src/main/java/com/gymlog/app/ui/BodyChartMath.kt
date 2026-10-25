@@ -10,17 +10,21 @@ import java.util.Locale
 import kotlin.math.log10
 import kotlin.math.pow
 
-internal data class BodyHighLowReference(val label: String, val low: TimeValue, val high: TimeValue, val allTime: Boolean)
+internal data class BodyHighLowReference(val label: String, val low: TimeValue, val high: TimeValue, val allTime: Boolean,
+    val showHigh: Boolean = true, val showLow: Boolean = true) {
+    val visibleValues: List<Double> get() = listOfNotNull(low.value.takeIf { showLow }, high.value.takeIf { showHigh }).distinct()
+}
 
 internal fun bodyHighLowReferences(points: List<TimeValue>, settings: BodyChartSettings, end: Long): List<BodyHighLowReference> {
     val finite = points.filter { it.value.isFinite() }
-    fun reference(label: String, values: List<TimeValue>, allTime: Boolean): BodyHighLowReference? {
+    fun reference(label: String, values: List<TimeValue>, allTime: Boolean, showHigh: Boolean, showLow: Boolean): BodyHighLowReference? {
         if (values.isEmpty()) return null
-        return BodyHighLowReference(label, values.minBy(TimeValue::value), values.maxBy(TimeValue::value), allTime)
+        return BodyHighLowReference(label, values.minBy(TimeValue::value), values.maxBy(TimeValue::value), allTime, showHigh, showLow)
     }
     return buildList {
-        if (settings.showAllTimeHighLow) reference("All-time", finite, true)?.let { add(it) }
-        if (settings.showHistoryHighLow) {
+        if (settings.showAllTimeHigh || settings.showAllTimeLow)
+            reference("All-time", finite, true, settings.showAllTimeHigh, settings.showAllTimeLow)?.let { add(it) }
+        if (settings.showHistoryHigh || settings.showHistoryLow) {
             val range = settings.highLowRange
             val start = when (range) {
                 ChartRange.CUSTOM -> settings.highLowStart ?: return@buildList
@@ -29,7 +33,7 @@ internal fun bodyHighLowReferences(points: List<TimeValue>, settings: BodyChartS
             }
             val historyEnd = if (range == ChartRange.CUSTOM) settings.highLowEnd ?: return@buildList else end
             val label = if (range == ChartRange.CUSTOM) "Custom history" else "${range.storageValue} history"
-            reference(label, finite.filter { it.timestamp in start..historyEnd }, false)?.let { add(it) }
+            reference(label, finite.filter { it.timestamp in start..historyEnd }, false, settings.showHistoryHigh, settings.showHistoryLow)?.let { add(it) }
         }
     }
 }

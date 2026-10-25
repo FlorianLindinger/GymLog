@@ -14,9 +14,13 @@ internal data class ExerciseTemplate(
     val equipment: ExerciseEquipment,
     val areas: List<AreaAssignment>,
     val aliases: String = "",
+    val manufacturer: String? = null,
+    val sourceUrl: String? = null,
+    val baseExerciseName: String? = null,
+    val trackingModeOverride: TrackingMode? = null,
 ) {
     val title: String get() = "$englishName / $germanName"
-    val trackingMode: TrackingMode get() = if (equipment == ExerciseEquipment.CARDIO) TrackingMode.STRENGTH else TrackingMode.WEIGHT
+    val trackingMode: TrackingMode get() = trackingModeOverride ?: if (equipment == ExerciseEquipment.CARDIO) TrackingMode.STRENGTH else TrackingMode.WEIGHT
 }
 
 /** Independently curated starting profiles, not measured muscle-activation percentages. */
@@ -41,7 +45,7 @@ internal object ExerciseCatalog {
         entry("Chest Press Machine", "Brustpresse", machine, press, "Brustmaschine seated chest press")
         entry("Incline Chest Press Machine", "Schrägbank-Brustpresse", machine, inclinePress, "incline press obere Brust")
         entry("Decline Chest Press Machine", "Negative Brustpresse", machine, press)
-        entry("Pec Deck", "Butterfly-Maschine", machine, fly, "butterfly chest fly Brust Butterfly")
+        entry("Pec Deck", "Butterfly-Maschine", machine, fly, "butterfly chest fly Brust Butterfly; Pectoral")
         entry("Bench Press", "Bankdrücken", free, press, "Langhantel Flachbankdrücken barbell bench press")
         entry("Dumbbell Bench Press", "Kurzhantel-Bankdrücken", free, press, "KH Bankdrücken dumbbell chest press")
         entry("Incline Bench Press", "Schrägbankdrücken", free, inclinePress, "Langhantel Schrägbank")
@@ -63,6 +67,7 @@ internal object ExerciseCatalog {
         val row = profile("UPPER_BACK", "BICEPS TRAPS", "SHOULDERS FOREARMS")
         val bentRow = profile("UPPER_BACK", "BICEPS TRAPS LOWER_BACK", "CORE FOREARMS SHOULDERS")
         entry("Lat Pulldown", "Latzug", machine, pulldown, "Latziehen Lat Maschine Latissimus Rückenzug")
+        entry("Vertical Traction Machine", "Vertikale Zugmaschine", machine, pulldown, "Vertical Traction; vertikaler Rückenzug")
         entry("Wide-grip Lat Pulldown", "Breiter Latzug", cable, pulldown, "Latzug breit")
         entry("Close-grip Lat Pulldown", "Enger Latzug", cable, pulldown, "Latzug eng neutral grip")
         entry("Underhand Lat Pulldown", "Latzug im Untergriff", cable, pulldown, "reverse grip pulldown")
@@ -70,7 +75,7 @@ internal object ExerciseCatalog {
         entry("Seated Row Machine", "Rudermaschine sitzend", machine, row, "Rücken Rudern Maschine low row horizontal row")
         entry("Chest-supported Row Machine", "Brustgestütztes Rudern an der Maschine", machine, row, "Iso lateral row")
         entry("High Row Machine", "Hohe Rudermaschine", machine, row, "high pull row")
-        entry("Seated Cable Row", "Sitzendes Kabelrudern", cable, row, "Rudern am Kabelzug eng breit")
+        entry("Seated Cable Row", "Sitzendes Kabelrudern", cable, row, "Rudern am Kabelzug eng breit; Pulley; Long Pulley")
         entry("Single-arm Cable Row", "Einarmiges Kabelrudern", cable, row)
         entry("Standing Cable Row", "Stehendes Kabelrudern", cable, row + profile("", "", "CORE"))
         entry("Barbell Row", "Langhantelrudern", free, bentRow, "vorgebeugtes Rudern bent over row")
@@ -86,7 +91,7 @@ internal object ExerciseCatalog {
         entry("Straight-arm Pulldown", "Latziehen mit gestreckten Armen", cable, profile("UPPER_BACK", "", "TRICEPS CORE"), "Kabel Überzüge cable pullover")
         entry("Pullover Machine", "Überzugmaschine", machine, profile("UPPER_BACK", "CHEST", "TRICEPS"), "Nautilus pullover Überzüge Maschine")
         entry("Dumbbell Pullover", "Kurzhantel-Überzüge", free, profile("UPPER_BACK CHEST", "", "TRICEPS"))
-        entry("Back Extension Machine", "Rückenstrecker-Maschine", machine, profile("LOWER_BACK", "GLUTES HAMSTRINGS"), "Rückenextension Rückenmaschine")
+        entry("Back Extension Machine", "Rückenstrecker-Maschine", machine, profile("LOWER_BACK", "GLUTES HAMSTRINGS"), "Rückenextension Rückenmaschine; Lower Back")
         entry("Back Extension", "Hyperextensions", body, profile("LOWER_BACK", "GLUTES HAMSTRINGS"), "Roman chair Rückenstrecken")
         entry("Reverse Hyperextension", "Umgekehrte Hyperextensions", machine, profile("GLUTES", "HAMSTRINGS LOWER_BACK"))
         entry("Superman", "Superman-Rückenheben", body, profile("LOWER_BACK", "GLUTES", "SHOULDERS"))
@@ -100,7 +105,7 @@ internal object ExerciseCatalog {
         entry("Arnold Press", "Arnold-Drücken", free, shoulderPress)
         entry("Smith Machine Shoulder Press", "Schulterdrücken an der Multipresse", machine, shoulderPress)
         entry("Landmine Press", "Landmine-Schulterdrücken", free, shoulderPress + profile("", "", "CORE"))
-        entry("Lateral Raise Machine", "Seithebemaschine", machine, lateral, "Seitheben Maschine")
+        entry("Lateral Raise Machine", "Seithebemaschine", machine, lateral, "Seitheben Maschine; Delts Machine")
         entry("Dumbbell Lateral Raise", "Kurzhantel-Seitheben", free, lateral, "Seitheben KH")
         entry("Cable Lateral Raise", "Seitheben am Kabelzug", cable, lateral)
         entry("Front Raise", "Frontheben", free, lateral, "Kurzhantel Langhantel plate front raise")
@@ -118,7 +123,7 @@ internal object ExerciseCatalog {
 
         val curl = profile("BICEPS", "FOREARMS")
         val triceps = profile("TRICEPS")
-        entry("Biceps Curl Machine", "Bizepsmaschine", machine, curl, "Bizeps Curl Maschine Armbeuger")
+        entry("Biceps Curl Machine", "Bizepsmaschine", machine, curl, "Bizeps Curl Maschine Armbeuger; Arm Curl")
         entry("Preacher Curl Machine", "Scottcurl-Maschine", machine, curl, "Scott Curl Maschine")
         entry("Barbell Curl", "Langhantelcurls", free, curl, "LH Curls Bizepscurl")
         entry("EZ-bar Curl", "SZ-Curls", free, curl, "SZ Stange Bizepscurls")
@@ -129,7 +134,7 @@ internal object ExerciseCatalog {
         entry("Preacher Curl", "Scottcurls", free, curl)
         entry("Cable Curl", "Bizepscurls am Kabelzug", cable, curl, "Seilzug Curls")
         entry("Reverse Curl", "Curls im Obergriff", free, profile("FOREARMS", "BICEPS"), "Reverse Bizepscurl")
-        entry("Triceps Extension Machine", "Trizepsmaschine", machine, triceps, "Armstrecker Trizepsstrecken Maschine")
+        entry("Triceps Extension Machine", "Trizepsmaschine", machine, triceps, "Armstrecker Trizepsstrecken Maschine; Arm Extension")
         entry("Triceps Pushdown", "Trizepsdrücken am Kabelzug", cable, triceps, "Trizeps Pushdown Seil Seilzug rope pushdown")
         entry("Overhead Cable Triceps Extension", "Trizepsstrecken über Kopf am Kabelzug", cable, triceps, "French press Kabel")
         entry("Dumbbell Triceps Extension", "Trizepsstrecken mit Kurzhantel", free, triceps, "über Kopf einarmig")
@@ -199,6 +204,7 @@ internal object ExerciseCatalog {
 
         val abs = profile("CORE")
         entry("Abdominal Crunch Machine", "Bauchmaschine", machine, abs, "Bauchpresse Crunch Maschine Bauchmuskeltrainer")
+        entry("Total Abdominal Machine", "Bauchtrainer mit Beinbewegung", machine, abs, "Total Abdominal; Bauchmaschine mit Beinbewegung")
         entry("Cable Crunch", "Crunches am Kabelzug", cable, abs, "Bauch Seilzug kniende Crunches")
         entry("Crunch", "Bauchpressen", body, abs, "Crunches Bauch Crunch")
         entry("Sit-up", "Rumpfbeugen", body, abs, "Sit Ups Situps")
@@ -212,7 +218,7 @@ internal object ExerciseCatalog {
         entry("Dead Bug", "Käfer-Übung", body, abs)
         entry("Bird Dog", "Diagonalstrecken im Vierfüßlerstand", body, profile("CORE LOWER_BACK", "GLUTES", "SHOULDERS"))
         entry("Russian Twist", "Russische Drehung", body, abs, "Rumpfdrehen Russian Twists")
-        entry("Torso Rotation Machine", "Rumpfrotationsmaschine", machine, abs, "Rumpfdreher Rotary Torso")
+        entry("Torso Rotation Machine", "Rumpfrotationsmaschine", machine, abs, "Rumpfdreher; Rotary Torso; Rumpfrotation; Bauchrotation; Bauchrotationsmaschine")
         entry("Cable Wood Chop", "Holzhacken am Kabelzug", cable, profile("CORE", "SHOULDERS"), "Woodchopper")
         entry("Pallof Press", "Pallof-Drücken", cable, profile("CORE", "", "SHOULDERS"), "Anti Rotation")
         entry("Ab Wheel Rollout", "Bauchrollen", body, profile("CORE", "SHOULDERS UPPER_BACK"), "Ab Roller Bauchrad")
@@ -228,30 +234,60 @@ internal object ExerciseCatalog {
         entry("Incline Treadmill Walk", "Steigungsgehen auf dem Laufband", cardio, profile("GLUTES CALVES", "QUADS HAMSTRINGS"))
         entry("Elliptical Trainer", "Crosstrainer", cardio, profile("QUADS GLUTES", "HAMSTRINGS CALVES", "UPPER_BACK SHOULDERS BICEPS TRICEPS"), "Ellipsentrainer Cross Trainer")
         entry("Rowing Ergometer", "Ruderergometer", cardio, profile("QUADS UPPER_BACK", "GLUTES HAMSTRINGS BICEPS", "CORE FOREARMS"), "Rudergerät rowing cardio Rower")
-        entry("Stair Climber", "Treppensteiger", cardio, profile("GLUTES QUADS", "CALVES HAMSTRINGS"), "Stairmaster Stepper Treppenmaschine")
+        entry("Stair Climber", "Treppensteiger", cardio, profile("GLUTES QUADS", "CALVES HAMSTRINGS"), "Stairmaster; Stepmaster; Step Master; Stepper; Treppenmaschine; Climb; Excite Climb")
         entry("Ski Ergometer", "Ski-Ergometer", cardio, profile("UPPER_BACK TRICEPS CORE", "SHOULDERS", "QUADS GLUTES"), "SkiErg")
         entry("Air Bike", "Airbike", cardio, profile("QUADS GLUTES", "HAMSTRINGS SHOULDERS UPPER_BACK TRICEPS BICEPS"), "Assault Bike Fan Bike")
         entry("Jump Rope", "Seilspringen", cardio, profile("CALVES", "QUADS", "CORE SHOULDERS FOREARMS"), "Skipping Springseil")
         entry("Burpee", "Burpees", body, profile("QUADS GLUTES CHEST", "CORE TRICEPS SHOULDERS", "CALVES"))
         entry("Kettlebell Swing", "Kettlebell-Schwingen", free, profile("GLUTES HAMSTRINGS", "CORE LOWER_BACK", "FOREARMS SHOULDERS"))
+        entry("Upper-body Ergometer", "Oberkörperergometer", cardio, profile("SHOULDERS BICEPS TRICEPS", "UPPER_BACK CHEST", "CORE"), "Arm Bike; Arm Ergometer; Handkurbelergometer")
+        entry("Lower-body Arc Trainer", "Unterkörper-Arc-Trainer", cardio, profile("QUADS GLUTES", "HAMSTRINGS CALVES", "CORE"))
+        entry("Machine Gripper", "Griffkraftmaschine", machine, profile("FOREARMS"), "Handgripper; Grip Machine")
+        entry("Neck Training Machine", "Nacken- und Halsmaschine", machine, profile("TRAPS"), "4-Way Neck; Halsmuskulatur; Neck Flexion")
+        entry("Standing Machine Press", "Stehendes Drücken an der Maschine", machine, profile("CHEST SHOULDERS", "TRICEPS", "CORE QUADS GLUTES"), "Ground Base Jammer")
+        addAll(ManufacturerEquipment.templates(toList()))
     }
 
-    private val names = entries.associateWith { listOf(it.englishName, it.germanName, it.aliases).map(::normalizeExerciseSearch) }
+    // Semicolons separate exact equipment labels; legacy aliases also remain searchable word by word.
+    private data class SearchNames(val alternatives: List<String>, val words: List<String>, val compact: List<String>, val raw: String)
+    private val names = entries.associateWith { entry ->
+        val alternatives = (listOf(entry.englishName, entry.germanName) + entry.aliases.split(';'))
+            .map(::exerciseSearchTerms).filter(String::isNotBlank).distinct()
+        SearchNames(alternatives, alternatives.flatMap { it.split(' ') }.filter(String::isNotBlank).distinct(),
+            alternatives.map { it.replace(" ", "") }, normalizeExerciseSearch(entry.englishName.substringBefore(" · ")))
+    }
 
     fun search(query: String, equipment: ExerciseEquipment? = null, limit: Int = 20): List<ExerciseTemplate> {
-        val normalized = normalizeExerciseSearch(query)
+        val normalized = exerciseSearchTerms(query)
+        val raw = normalizeExerciseSearch(query).replace(Regex("(?<=[a-z])(?=[0-9])|(?<=[0-9])(?=[a-z])"), " ")
+        val modelQuery = raw.replace(Regex("\\s+[0-9]+$"), "")
+        val manufacturer = when {
+            Regex("\\bhammer\\s*strength\\b").containsMatchIn(raw) -> "Hammer Strength"
+            Regex("\\b(technogym|artis|biostrength|selection|pure\\s*strength)\\b").containsMatchIn(raw) -> "Technogym"
+            else -> null
+        }
+        val line = listOf("selection 700", "selection 900", "pure strength", "biostrength", "artis", "mts", "hd elite")
+            .firstOrNull { it in raw }
+        if (query.isNotBlank() && normalized.isBlank() && manufacturer == null) return emptyList()
         val tokens = normalized.split(' ').filter(String::isNotBlank)
+        val compact = normalized.replace(" ", "")
         return entries.asSequence().filter { equipment == null || it.equipment == equipment }
+            .filter { manufacturer == null || it.manufacturer == manufacturer }
+            .filter { line == null || line in names.getValue(it).raw }
             .mapNotNull { entry ->
-                val alternatives = names.getValue(entry)
-                val words = alternatives.flatMap { it.split(' ') }.filter(String::isNotBlank)
+                val indexed = names.getValue(entry)
+                val alternatives = indexed.alternatives
+                val words = indexed.words
                 val score = when {
+                    modelQuery.isNotBlank() && modelQuery == indexed.raw -> 1_400
                     normalized.isBlank() -> 0
                     normalized in alternatives -> 1_000
+                    compact in indexed.compact -> 950
                     alternatives.any { it.startsWith(normalized) } -> 800
                     alternatives.any { normalized in it } -> 600
                     tokens.all { token -> words.any { it.startsWith(token) } } -> 400
-                    tokens.all { token -> words.any { word -> word.startsWith(token) || (token.length >= 4 && oneEditAway(token, word)) } } -> 100
+                    indexed.compact.any { closeExerciseWord(compact, it) } -> 300
+                    tokens.all { token -> words.any { word -> word.startsWith(token) || closeExerciseWord(token, word) } } -> 200
                     else -> return@mapNotNull null
                 }
                 entry to score
@@ -267,16 +303,35 @@ internal fun normalizeExerciseSearch(value: String): String = Normalizer.normali
 ).replace(Regex("\\p{M}+"), "").replace("ae", "a").replace("oe", "o").replace("ue", "u")
     .replace(Regex("[^a-z0-9]+"), " ").trim()
 
-private fun oneEditAway(a: String, b: String): Boolean {
-    if (kotlin.math.abs(a.length - b.length) > 1) return false
-    var i = 0
-    var j = 0
-    var edits = 0
-    while (i < a.length && j < b.length) {
-        if (a[i] == b[j]) { i++; j++; continue }
-        if (++edits > 1) return false
-        if (a.length >= b.length) i++
-        if (b.length >= a.length) j++
+/** Ignore gym, supplier, product-line and station numbers, while keeping movement qualifiers. */
+private fun exerciseSearchTerms(value: String): String = normalizeExerciseSearch(value)
+    .replace(Regex("[0-9]+"), " ")
+    .replace(Regex("\\b(?:fit\\s*x|technogym|hammer\\s*strength|selection|pure\\s*strength)\\b"), " ")
+    .replace(Regex("\\s+"), " ").trim()
+
+/** Bounded Damerau-Levenshtein: also accepts swapped letters and two errors in long names. */
+private fun closeExerciseWord(a: String, b: String): Boolean {
+    if (a == b) return true
+    val shortest = minOf(a.length, b.length)
+    val budget = if (shortest >= 8) 2 else if (shortest >= 4) 1 else return false
+    if (kotlin.math.abs(a.length - b.length) > budget) return false
+    var previousPrevious = IntArray(b.length + 1)
+    var previous = IntArray(b.length + 1) { it }
+    for (i in 1..a.length) {
+        val current = IntArray(b.length + 1)
+        current[0] = i
+        for (j in 1..b.length) {
+            current[j] = minOf(
+                previous[j] + 1, current[j - 1] + 1,
+                previous[j - 1] + if (a[i - 1] == b[j - 1]) 0 else 1,
+            )
+            if (i > 1 && j > 1 && a[i - 1] == b[j - 2] && a[i - 2] == b[j - 1]) {
+                current[j] = minOf(current[j], previousPrevious[j - 2] + 1)
+            }
+        }
+        if (current.minOrNull()!! > budget) return false
+        previousPrevious = previous
+        previous = current
     }
-    return edits + (a.length - i) + (b.length - j) <= 1
+    return previous[b.length] <= budget
 }
