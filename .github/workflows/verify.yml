@@ -14,6 +14,21 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  windows-helpers:
+    runs-on: windows-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check Out Repository
+        uses: actions/checkout@v6
+
+      - name: Test Windows Helpers Without a Device
+        shell: powershell
+        run: |
+          Get-ChildItem scripts/windows/tests -Filter '*.Tests.ps1' | ForEach-Object {
+            & powershell -STA -NoProfile -ExecutionPolicy Bypass -File $_.FullName
+            if ($LASTEXITCODE -ne 0) { throw "Helper test failed: $($_.Name)" }
+          }
+
   verify:
     runs-on: ubuntu-latest
     timeout-minutes: 30

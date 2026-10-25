@@ -431,12 +431,11 @@ class GymRepository(context: Context, private val gymClock: GymClock = GymClock(
                 arrayOf(id.toString()),
             ).use { cursor -> if (cursor.moveToFirst()) cursor.getString(0) to cursor.getDouble(1) else null }
                 ?: return@transaction
-            val (trackingMode, currentValue) = machine
-            if (currentValue == value) return@transaction
+            val (trackingMode, _) = machine
             database.update("machines", ContentValues().apply { put("current_weight", value) }, "id=?", arrayOf(id.toString()))
             addWeightHistory(database, id, value, now)
             val setValues = ContentValues().apply {
-                if (trackingMode == TrackingMode.STRENGTH.name) put("reps", value.toInt().coerceAtLeast(1)) else put("weight", value)
+                if (TrackingMode.fromStorage(trackingMode).usesResistanceLevel()) put("reps", value.toInt().coerceAtLeast(1)) else put("weight", value)
             }
             database.update(
                 "sets",
@@ -468,15 +467,19 @@ class GymRepository(context: Context, private val gymClock: GymClock = GymClock(
     fun addTrainingMinutes(machineId: Long, minutes: Int) {
         require(minutes > 0) { "Training duration must be greater than zero" }
         val database = db.writableDatabase
-        val recordedLevel = database.rawQuery(
+        val (mode, recordedLevel) = database.rawQuery(
             "SELECT tracking_mode,current_weight FROM machines WHERE id=?",
             arrayOf(machineId.toString()),
         ).use { cursor ->
             require(cursor.moveToFirst()) { "Exercise does not exist" }
-            if (TrackingMode.fromStorage(cursor.getString(0)) == TrackingMode.STRENGTH) cursor.getDouble(1).roundToInt().coerceAtLeast(1) else 1
+            val mode = TrackingMode.fromStorage(cursor.getString(0))
+            mode to if (mode.usesResistanceLevel()) cursor.getDouble(1).roundToInt().coerceAtLeast(1) else 1
         }
         val now = gymClock.now()
         database.transaction {
+            if (mode == TrackingMode.DURATION) database.update("machines", ContentValues().apply {
+                put("current_weight", minutes.toDouble())
+            }, "id=?", arrayOf(machineId.toString()))
             database.delete(
                 "sets",
                 "machine_id=? AND performed_at>=?",
@@ -785,7 +788,7 @@ class GymRepository(context: Context, private val gymClock: GymClock = GymClock(
                         loadSets(db.readableDatabase, summary.machine.id, null).forEach {
                             put(JSONObject().apply {
                                 put("id", it.id)
-                                if (summary.machine.trackingMode == TrackingMode.STRENGTH) {
+                                if (summary.machine.trackingMode.usesResistanceLevel()) {
                                     put("recordedLevel", it.reps)
                                     put("trainingMinutes", it.weight)
                                 } else {
@@ -891,8 +894,8 @@ class GymRepository(context: Context, private val gymClock: GymClock = GymClock(
                     database.insertOrThrow("sets", null, ContentValues().apply {
                         if (preserveIds && set.has("id")) put("id", set.getLong("id"))
                         put("machine_id", id)
-                        put("reps", if (trackingMode == TrackingMode.STRENGTH.name) set.getInt("recordedLevel") else set.getInt("reps"))
-                        put("weight", if (trackingMode == TrackingMode.STRENGTH.name) set.getDouble("trainingMinutes") else set.getDouble("weight"))
+                        put("reps", if (TrackingMode.fromStorage(trackingMode).usesResistanceLevel()) set.getInt("recordedLevel") else set.getInt("reps"))
+                        put("weight", if (TrackingMode.fromStorage(trackingMode).usesResistanceLevel()) set.getDouble("trainingMinutes") else set.getDouble("weight"))
                         put("performed_at", set.getLong("performedAt"))
                     })
                 }

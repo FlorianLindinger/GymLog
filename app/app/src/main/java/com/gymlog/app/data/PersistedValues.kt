@@ -2,12 +2,14 @@
 
 /** Stable persisted values. Unknown legacy/backup text is safely normalised at the boundary. */
 enum class TrackingMode {
-    WEIGHT, STRENGTH, DURATION;
+    WEIGHT, STRENGTH, DURATION, WATTS;
 
     companion object {
         fun fromStorage(value: String?): TrackingMode = entries.firstOrNull { it.name == value } ?: WEIGHT
     }
 }
+
+fun TrackingMode.usesResistanceLevel(): Boolean = this == TrackingMode.STRENGTH || this == TrackingMode.WATTS
 
 enum class ChartRange(val storageValue: String) {
     ONE_WEEK("1W"), TWO_WEEKS("2W"), THREE_WEEKS("3W"), ONE_MONTH("1M"), TWO_MONTHS("2M"),

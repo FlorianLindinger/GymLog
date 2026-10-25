@@ -12,6 +12,7 @@
 /app/**/build/
 .externalNativeBuild/
 .cxx/
+.tools/
 
 # Locally generated artifacts
 /app/artifacts/

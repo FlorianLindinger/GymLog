@@ -116,7 +116,7 @@ fun HistoryScreen(
         } else {
             item { Text("Recent Sessions", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold) }
             if (byDate.isEmpty()) item { Text("Your completed sets will appear here.", color = MaterialTheme.colorScheme.onSurfaceVariant) }
-            byDate.entries.sortedByDescending { it.key }.take(12).forEach { (date, sets) ->
+            byDate.entries.sortedByDescending { it.key }.take(30).forEach { (date, sets) ->
                 item(key = date.toEpochDay()) {
                     SessionCard(date, sets, onEdit = { editing = it }, onDelete = { deletingEntry = it }, onManage = { selectedDate = date })
                 }
@@ -282,16 +282,17 @@ private fun SessionCard(
 
 @Composable
 private fun HistorySetRow(set: HistorySet, onEdit: (HistorySet) -> Unit, onDelete: (HistorySet) -> Unit, showName: Boolean = true) {
-    Row(Modifier.fillMaxWidth().padding(vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
-        if (showName) Text(set.machineName, Modifier.weight(1f)) else Spacer(Modifier.weight(1f))
-        Text(
-            if (isDirectMetric(set.trackingMode)) formatTrainingEntry(set.weight, set.trackingMode, set.reps)
-            else "${set.reps} × ${formatMetric(set.weight, set.trackingMode)}",
-            fontWeight = FontWeight.Medium,
-            fontFamily = FontFamily.Monospace,
-        )
-        Text("Edit", Modifier.clickable { onEdit(set) }.padding(horizontal = 7.dp, vertical = 3.dp), color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelMedium)
-        Text("Delete", Modifier.clickable { onDelete(set) }.padding(horizontal = 5.dp, vertical = 3.dp), color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.labelMedium)
+    Column(Modifier.fillMaxWidth().padding(vertical = 2.dp)) {
+        if (showName) Text(set.machineName, fontWeight = FontWeight.Medium)
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                if (isDirectMetric(set.trackingMode)) formatTrainingEntry(set.weight, set.trackingMode, set.reps)
+                else "${set.reps} x ${formatMetric(set.weight, set.trackingMode)}",
+                Modifier.weight(1f), style = MaterialTheme.typography.bodySmall,
+            )
+            Text("Edit", Modifier.clickable { onEdit(set) }.padding(horizontal = 7.dp, vertical = 3.dp), color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelMedium)
+            Text("Delete", Modifier.clickable { onDelete(set) }.padding(horizontal = 5.dp, vertical = 3.dp), color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.labelMedium)
+        }
     }
 }
 
@@ -332,7 +333,7 @@ fun EditSetDialog(
         title = { Text(title) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                if (trackingMode != TrackingMode.DURATION) OutlinedTextField(reps, { reps = it.filter(Char::isDigit) }, label = { Text(if (trackingMode == TrackingMode.STRENGTH) "Level" else "Reps") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), singleLine = true)
+                if (trackingMode != TrackingMode.DURATION) OutlinedTextField(reps, { reps = it.filter(Char::isDigit) }, label = { Text(if (trackingMode == TrackingMode.WATTS) "Watts" else if (trackingMode == TrackingMode.STRENGTH) "Level" else "Reps") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), singleLine = true)
                 OutlinedTextField(weight, { weight = it.filter { char -> char.isDigit() || char == '.' || char == ',' } }, label = { Text(if (trackingMode == TrackingMode.WEIGHT) "Weight (kg)" else "Minutes") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal), singleLine = true)
             }
         },

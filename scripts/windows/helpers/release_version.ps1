@@ -1,48 +1,52 @@
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory)]
-    [ValidateSet('minor', 'major', 'none')]
-    [string]$Bump
+    [ValidateSet('none','patch','minor','major')][string]$Bump='none',
+    [switch]$Publish
 )
-
-$ErrorActionPreference = 'Stop'
-$scriptDirectory = Split-Path -Parent $PSCommandPath
-$repoRoot = (Resolve-Path (Join-Path $scriptDirectory '..\..\..')).Path
-$gradleFile = Join-Path $repoRoot 'app\app\build.gradle.kts'
-
-Set-Location $repoRoot
-if (git status --porcelain) { throw 'The Git working tree must be clean before starting a release.' }
-if ((git branch --show-current) -ne 'main') { throw 'Releases must be created from the main branch.' }
-
-$content = Get-Content -Raw -LiteralPath $gradleFile
-$nameMatch = [regex]::Match($content, 'versionName\s*=\s*"(?<version>\d+\.\d+)"')
-$codeMatch = [regex]::Match($content, 'versionCode\s*=\s*(?<code>\d+)')
-if (-not $nameMatch.Success -or -not $codeMatch.Success) { throw 'Could not read an x.y versionName and integer versionCode.' }
-
-$version = $nameMatch.Groups['version'].Value
-if ($Bump -ne 'none') {
-    $parts = $version.Split('.')
-    $major = [int]$parts[0]
-    $minor = [int]$parts[1]
-    if ($Bump -eq 'major') { $major++; $minor = 0 } else { $minor++ }
-    $version = "$major.$minor"
-    $nextCode = [int]$codeMatch.Groups['code'].Value + 1
-    $content = [regex]::Replace($content, 'versionName\s*=\s*"\d+\.\d+"', "versionName = `"$version`"", 1)
-    $content = [regex]::Replace($content, 'versionCode\s*=\s*\d+', "versionCode = $nextCode", 1)
-    Set-Content -LiteralPath $gradleFile -Value $content -NoNewline
-    git add app/app/build.gradle.kts
-    git commit -m "Prepare release v$version"
-    if ($LASTEXITCODE -ne 0) { throw 'Could not commit the version bump.' }
-}
-
-if ((git tag --list "v$version") -eq "v$version") { throw "Tag v$version already exists." }
-
-
-git push origin main
-if ($LASTEXITCODE -ne 0) { throw 'Pushing main failed. No tag was created.' }
-git tag -a "v$version" -m "GymLog v$version"
-if ($LASTEXITCODE -ne 0) { throw "Could not create tag v$version." }
-git push origin "v$version"
-if ($LASTEXITCODE -ne 0) { throw "Main was pushed, but v$version was not. Push it with: git push origin v$version" }
-
-Write-Host "Release v$version queued. GitHub Actions will verify, sign, and publish it."
+$ErrorActionPreference='Stop'
+. (Join-Path $PSScriptRoot 'android_env.ps1')
+. (Join-Path $PSScriptRoot 'release_tools.ps1')
+try {
+    Set-Location $script:RepoRoot
+    $status = git status --porcelain
+    if ($LASTEXITCODE -ne 0) { throw 'Could not read Git status.' }
+    if ($status) { throw 'Commit or stash your changes before preparing a release.' }
+    if ((git branch --show-current) -ne 'main') { throw 'Prepare releases from main.' }
+    $versionFile = Join-Path $script:AppRoot 'app/build.gradle.kts'
+    $info = Get-ReleaseVersionInfo ([IO.File]::ReadAllText($versionFile)) $Bump
+    $version = $info.Version
+    $existing = git tag --list "v$version"
+    if ($LASTEXITCODE -ne 0) { throw 'Could not read local tags.' }
+    if ($existing) { throw "Tag v$version already exists." }
+    if ($Publish) {
+        git remote get-url origin | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw 'Set the origin remote before publishing.' }
+        $existing = git ls-remote --tags origin "refs/tags/v$version"
+        if ($LASTEXITCODE -ne 0) { throw 'Could not check remote tags.' }
+        if ($existing) { throw "Remote tag v$version already exists." }
+    }
+    if ($Bump -ne 'none') {
+        [IO.File]::WriteAllText($versionFile, $info.Content, (New-Object Text.UTF8Encoding $false))
+    }
+    Initialize-Build
+    Invoke-Gradle @(':app:testDebugUnitTest', ':app:lintDebug', ':app:assembleDebug')
+    Copy-DebugApk
+    if (-not $Publish) {
+        Write-Host "Prepared v$version. Review app/app/build.gradle.kts and CHANGELOG.md, then commit your changes. No tag or push was performed."
+        Write-Host 'When ready, run release_no_bump.bat -Publish from a clean main branch.'
+        exit 0
+    }
+    if ($Bump -ne 'none') {
+        git add -- app/app/build.gradle.kts
+        if ($LASTEXITCODE -ne 0) { throw 'Could not stage the version bump.' }
+        git commit -m "Prepare release v$version"
+        if ($LASTEXITCODE -ne 0) { throw 'Could not commit app/app/build.gradle.kts.' }
+    }
+    $status = git status --porcelain
+    if ($LASTEXITCODE -ne 0 -or $status) { throw 'Unexpected file changes during verification; no tag was created.' }
+    git tag -a "v$version" -m "GymLog v$version"
+    if ($LASTEXITCODE -ne 0) { throw 'Could not create the local tag.' }
+    git push --atomic origin HEAD:refs/heads/main "refs/tags/v$version"
+    if ($LASTEXITCODE -ne 0) { throw "Push failed; the local v$version tag remains. Check origin and retry git push --atomic origin HEAD:refs/heads/main refs/tags/v$version." }
+    Write-Host "Pushed v$version. GitHub Actions will verify, sign and publish the release."
+} catch { Write-Error $_ -ErrorAction Continue; exit 1 }

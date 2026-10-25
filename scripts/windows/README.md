@@ -1,78 +1,127 @@
-# Windows Helper Scripts
+# Windows development helpers
 
-Run these commands from the repository root. Each script resolves the root
-automatically, so it can also be launched from another working directory.
+Run from any directory, or double-click a `.bat` file. Each launcher resolves the
+project from its own location and delegates to shared PowerShell helpers.
+Execution policy is set only for the child process, never system-wide.
 
-## Build and verification
+## Commands
 
-- `build.bat` builds a debug APK and copies it to
-  `app\artifacts\debug\app-debug.apk`.
-- `verify.bat` compiles, tests, lints, assembles, and checks Git whitespace.
-- `release\release_minor.bat` changes `x.y` to `x.(y+1)`, commits, tags, and
-  pushes a release request to GitHub Actions.
-- `release\release_major.bat` changes `x.y` to `(x+1).0` and performs the same
-  flow.
-- `release\release_no_bump.bat` releases the version already in Gradle. All
-  three require a clean `main` branch. GitHub Actions verifies, signs, and
-  publishes the release.
+| Command | Result |
+| --- | --- |
+| `build.bat` | Build a debug APK and copy it with a SHA-256 checksum into `app/artifacts/debug/` |
+| `verify.bat` | Run Windows helper tests, compile, run Android unit tests and lint, assemble a debug APK, and check Git whitespace |
+| `device_check.bat [SERIAL]` | Show the selected phone, Android/API version, and installed GymLog version |
+| `install_via_usb_wifi_or_bluetooth.bat [SERIAL]` | Install the existing debug APK with app data preserved, then launch GymLog |
+| `build_and_install_via_usb_wifi_or_bluetooth.bat [SERIAL]` | Build, install, and launch GymLog |
+| `install_via_usb_wifi_or_bluetooth.bat -Serial SERIAL -Apk "PATH.apk"` | Install a specific debug or release APK |
+| `install_via_usb_wifi_or_bluetooth.bat -Bluetooth` | Open Bluetooth transfer for the existing APK; finish installation on the phone |
+| `build_and_install_via_usb_wifi_or_bluetooth.bat -Bluetooth` | Build first, then open Bluetooth transfer |
+| `connect_wifi.bat -PairAddress IP:PAIRING_PORT -ConnectAddress IP:CONNECTION_PORT` | Pair Android 11+ wireless debugging and connect |
+| `launch_and_stream_gym_log_logs.bat [SERIAL]` | Launch GymLog and stream its process logs; Ctrl+C stops logging |
+| `screenshot.bat [SERIAL]` | Save a validated PNG under `app/screenshots/` |
+| `build_release.bat` | Build and verify signed APK/AAB assets, then copy them and SHA-256 checksums into `app/artifacts/release/VERSION/` |
+| `release/release_patch.bat` | Prepare and verify a patch version locally, adding a patch component if necessary |
+| `release/release_minor.bat` | Prepare and verify a minor version locally |
+| `release/release_major.bat` | Prepare and verify a major version locally |
+| `release/release_no_bump.bat -Publish` | From clean `main`, verify the current version, create its tag, and atomically push main and the tag to queue GitHub Actions |
 
-## Phone and debugging tools
+Both primary installers keep the console open after success or failure so output
+and Bluetooth instructions remain visible. Close the window or type `exit` when
+done. Set `GYMLOG_NO_PAUSE=1` for automation; the original command exit code is
+preserved. The old `*_via_usb_or_wifi.bat` names and dedicated Bluetooth
+shortcuts remain compatible aliases.
 
-- `build_and_install_via_usb_wifi_or_bluetooth.bat [SERIAL]` builds, installs, and launches
-  GymLog on an attached Android phone.
-- `install_via_usb_wifi_or_bluetooth.bat [SERIAL]` installs the existing debug APK.
-- Add `-Bluetooth` instead of a serial to either installer for a guided Bluetooth APK transfer. `install_via_bluetooth.bat` and `build_and_install_via_bluetooth.bat` are shortcuts for the same option.
-- `device_check.bat [SERIAL]` reports the connected device and installed
-  GymLog version.
-- `launch_and_stream_gym_log_logs.bat [SERIAL]` clears the phone's existing
-  logcat buffer, force-stops and relaunches GymLog, then continuously displays
-  messages from only the new GymLog process. Press `Ctrl+C` to stop. If several
-  devices are attached, pass the serial shown by `adb devices -l`.
-- `screenshot.bat [SERIAL]` writes a device screenshot under `app\screenshots\`.
+## Java, SDK, and output discovery
 
-## Bluetooth transfer and phone installation
+Use JDK 17 or 21 with Android SDK Platform 36 and Platform-Tools. Java discovery
+checks `GYMLOG_JAVA_HOME`, `JAVA_HOME`, `STUDIO_JDK`, Android Studio's Windows
+install registration (including custom drives), usual Studio locations, and PATH.
+Unsupported Java versions are skipped. No workstation path is embedded in the
+helpers.
 
-The primary commands and window titles now include USB, Wi-Fi and Bluetooth. They prefer an authorized USB/local device, then a connected Wi-Fi device, then automatically open Bluetooth transfer when neither is usable. Wi-Fi must already be paired/connected. Old `install_via_usb_or_wifi.bat` and `build_and_install_via_usb_or_wifi.bat` names remain compatible shortcuts. An explicit serial, ambiguous device selection, or APK install failure stops without switching targets. Use `-NoBluetoothFallback` to require ADB.
+The SDK is found through `ANDROID_HOME`, `ANDROID_SDK_ROOT`,
+`app/local.properties`, an optional `.tools/android-sdk`, or Android Studio's
+usual SDK directory. ADB discovery needs no JDK and also accepts `GYMLOG_ADB` or
+ADB on PATH. Device, screenshot, and install-only commands do not require a
+build environment.
 
-From `scripts\windows`, use either:
+Disposable Gradle app output stays under
+`%LOCALAPPDATA%/GymLog/build/app`, overridden by `GYMLOG_BUILD_DIR`. The existing
+Gradle cache and `GRADLE_USER_HOME` behavior are preserved. Copied debug APKs
+remain at `app/artifacts/debug/app-debug.apk`; screenshots and artifacts are
+ignored by Git.
 
-```bat
-install_via_usb_wifi_or_bluetooth.bat -Bluetooth
-build_and_install_via_usb_wifi_or_bluetooth.bat -Bluetooth
-```
+## USB and Wi-Fi installation
 
-The first sends the existing `app\artifacts\debug\app-debug.apk`; the second builds it first. Omit `-Bluetooth` to try USB/Wi-Fi first and use Bluetooth as the third fallback. Install-only Bluetooth transfer needs no JDK, Android SDK or USB debugging. Keep Bluetooth enabled and pair the phone with the PC in Windows Settings.
+`[SERIAL]` is optional. Installers prefer an authorized USB/local target, then a
+connected Wi-Fi target, then Bluetooth if no usable ADB connection is available.
+Wi-Fi must already be paired and connected. If the preferred group contains
+several connections, pass `-Serial` explicitly; other device helpers require a
+serial whenever several authorized connections are listed. A single phone may
+appear twice through IP and mDNS, so select either of its listed connections.
+An explicit unavailable serial, ambiguous selection, or install failure stops
+without switching to Bluetooth. Use `-NoBluetoothFallback` to require ADB.
 
-The helper opens Windows **Bluetooth File Transfer**. Select **Send files**, select the phone, then **Browse** and paste the APK path printed by the helper. Accept the transfer on the phone, open the received APK and confirm **Install**. Android may ask you to allow that file manager to install apps.
+Enable Developer options and USB debugging, unlock the phone, and accept its
+Allow USB debugging prompt. For Wi-Fi, use the pairing and connection addresses
+shown in Android Wireless debugging; these ports differ. Enter the pairing code
+directly at ADB's prompt. The helpers do not save it, uninstall GymLog, clear app
+data, or change debugging permissions.
 
-Bluetooth is file transfer followed by manual installation on the phone, not an ADB connection. The helper reports that the wizard opened; it cannot confirm delivery, installation or launching. USB/Wi-Fi keep the existing automatic install/launch behavior. If the phone refuses APK files over Bluetooth, use USB/Wi-Fi or another manual transfer method. A signing-key mismatch still prevents an update; keep the existing app installed to preserve workout data.
+Log streaming preserves existing logcat entries and does not force-stop GymLog.
+Run it again if the app process restarts.
 
-See [Microsoft's Bluetooth file-transfer instructions](https://support.microsoft.com/en-us/windows/hardware/bluetooth/send-and-receive-files-over-bluetooth-in-windows) and [Android ADB connection methods](https://developer.android.com/tools/adb).
+## Bluetooth transfer
 
-Test without opening a window or contacting a phone:
+Explicit `-Bluetooth` skips ADB and cannot be combined with a serial, Wi-Fi
+address, or `-NoBluetoothFallback`. Install-only Bluetooth needs no JDK, SDK, or
+USB debugging. Pair the phone with Windows first.
+
+The helper copies the exact APK path to the clipboard, verifies it, and opens
+Windows Bluetooth File Transfer. Choose **Send files**, select the phone, then
+choose **Browse** and paste the path with **Ctrl+V**. If clipboard copying fails,
+manually copy the printed path. Accept the transfer, open the APK on the phone,
+and confirm installation. Android may ask you to allow the file manager to
+install apps. Keep GymLog installed to preserve workout data.
+
+The helper confirms only that the wizard opened; delivery and installation need
+to be completed on the phone. If the phone refuses APKs over Bluetooth, use
+USB/Wi-Fi or another manual transfer method. Signing-key mismatches still
+prevent an update.
+
+## Releases
+
+Version preparation requires a clean `main` branch. Patch/minor/major launchers
+update `app/app/build.gradle.kts`, increment `versionCode`, and verify locally.
+Review the version and `CHANGELOG.md`, then commit. Preparation does not create
+a tag or push by default. Existing two-part versions remain two-part for
+minor/major changes; a patch release introduces the third component.
+
+Use `release/release_no_bump.bat -Publish` from clean `main` to publish the
+reviewed version. The explicit `-Publish` option checks local and remote tags,
+verifies the app, and atomically pushes main and its annotated version tag.
+GitHub Actions then verifies, signs, and publishes the release. A bump launcher
+can also receive `-Publish` to commit its verified version change and publish it.
+
+For a local signed build, set `GYMLOG_KEYSTORE_FILE`, `GYMLOG_KEYSTORE_PASSWORD`,
+`GYMLOG_KEY_ALIAS`, and `GYMLOG_KEY_PASSWORD`, then run `build_release.bat`.
+The build verifies the APK signature and copies the APK, AAB, and checksums;
+it does not create tags or push. Keep signing values out of the repository.
+
+## Implementation and tests
+
+`helpers/android.ps1` dispatches commands. `helpers/android_env.ps1` handles
+portable environment discovery, Gradle invocation, and artifact copying;
+`adb_devices.ps1` handles connection selection, `bluetooth_apk.ps1` handles the
+interactive transfer, and `release_version.ps1` / `release_tools.ps1` handle
+version preparation and explicit publication. Batch files contain launch logic
+only. GymLog's Gradle root remains `app/`.
+
+Run helper tests without a build, phone, Bluetooth wizard, or clipboard access:
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File scripts\windows\tests\bluetooth_apk.Tests.ps1
-powershell -NoProfile -ExecutionPolicy Bypass -File scripts\windows\tests\install_connection.Tests.ps1
+Get-ChildItem scripts/windows/tests -Filter '*.Tests.ps1' | ForEach-Object {
+    powershell -STA -NoProfile -ExecutionPolicy Bypass -File $_.FullName
+    if ($LASTEXITCODE -ne 0) { throw "Helper test failed: $($_.Name)" }
+}
 ```
-
-## Internal helpers
-
-The `helpers` directory contains shared implementation and is not intended to
-be run directly:
-
-- `helpers\android_env.bat` locates Java, the Android SDK, and ADB, and keeps
-  disposable Gradle output outside the repository.
-- `helpers\bluetooth_apk.ps1` validates the APK and opens the visible Windows Bluetooth file-transfer wizard.
-- `helpers\install.ps1` implements installation and `helpers\adb_devices.ps1` shares device selection and USB/Wi-Fi/Bluetooth fallback policy.
-- helpers\release.bat builds, signs, and tags an explicit release version.
-- helpers\release_version.ps1 implements the shared version bump, copy, and push flow.
-- `helpers\google_drive_sync_status.ps1` performs a short, bounded query for a
-  Windows per-file sync status.
-
-Keeping these implementation files in `helpers` leaves the main scripts list
-focused on commands intended for direct use. `gradlew.bat` remains in `app\`,
-the Android Gradle project root.
-
-Finished local builds are written under `app\artifacts\`. Disposable Gradle
-intermediates remain under `%LOCALAPPDATA%\GymLog\build\app` by default.

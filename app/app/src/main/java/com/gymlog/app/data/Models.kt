@@ -110,7 +110,28 @@ data class MachineSummary(
     val setWheelValues: List<Int>? = null,
 )
 
-fun MachineSummary.weightIncreases(): List<WeightIncrease> = weightChanges
+fun MachineSummary.recordedMetric(set: SetRecord): Double =
+    if (machine.trackingMode.usesResistanceLevel()) set.reps.toDouble() else set.weight
+
+/** Only recorded trainings establish a baseline; editing the next setting does not. */
+fun MachineSummary.recordedMetricHistory(zone: java.time.ZoneId = java.time.ZoneId.systemDefault()): List<WeightChange> {
+    val clock = GymClock(zoneId = zone)
+    val sessions = recentSets.groupBy { clock.trainingDayStart(it.performedAt) }.values
+        .map { it.maxBy(SetRecord::performedAt) }.sortedBy(SetRecord::performedAt)
+    return buildList {
+        sessions.forEach { set ->
+            val value = recordedMetric(set)
+            if (lastOrNull()?.weight != value) add(WeightChange(value, set.performedAt))
+        }
+    }
+}
+
+fun MachineSummary.pendingMetricDirection(): Int = recentSets.maxByOrNull(SetRecord::performedAt)
+    ?.let { machine.currentWeight.compareTo(recordedMetric(it)) } ?: 0
+
+fun MachineSummary.recordedMetricChangeCount(): Int = (recordedMetricHistory().size - 1).coerceAtLeast(0)
+
+fun MachineSummary.weightIncreases(): List<WeightIncrease> = recordedMetricHistory()
     .sortedBy { it.changedAt }
     .zipWithNext()
     .mapNotNull { (previous, current) ->

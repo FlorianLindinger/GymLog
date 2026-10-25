@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -31,9 +32,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import java.time.Instant
-import java.time.ZoneId
-import java.time.format.DateTimeFormatter
 
 internal data class TimeValue(val timestamp: Long, val value: Double)
 
@@ -147,6 +145,8 @@ internal fun ChartRangeControls(
     onCustomSelected: () -> Unit,
     onTrendSelected: () -> Unit,
     modifier: Modifier = Modifier,
+    trendLabel: String = "Trend",
+    showTrendControl: Boolean = true,
 ) {
     val rows = listOf(
         listOf(ChartRange.ONE_WEEK, ChartRange.TWO_WEEKS, ChartRange.THREE_WEEKS, ChartRange.ONE_MONTH, ChartRange.TWO_MONTHS, ChartRange.THREE_MONTHS, ChartRange.FOUR_MONTHS),
@@ -160,10 +160,10 @@ internal fun ChartRangeControls(
                     val label = when (range) {
                         ChartRange.ALL -> "All"
                         ChartRange.CUSTOM -> "Custom"
-                        null -> "Trend"
+                        null -> trendLabel
                         else -> range.storageValue
                     }
-                    Text(
+                    if (range == null && !showTrendControl) Spacer(Modifier.weight(1f)) else Text(
                         text = label,
                         modifier = Modifier.weight(1f)
                             .background(
@@ -216,16 +216,13 @@ private fun ChartAxisLabels(
 
 @Composable
 private fun ChartDateLabels(start: Long, end: Long, width: Dp) {
-    val formatter = DateTimeFormatter.ofPattern("d MMM yy")
-    fun label(timestamp: Long) = Instant.ofEpochMilli(timestamp).atZone(ZoneId.systemDefault()).format(formatter)
     Box(Modifier.width(width).height(20.dp)) {
-        Text(label(start), Modifier.align(Alignment.TopStart), maxLines = 1, style = MaterialTheme.typography.labelSmall)
-        Text(label(start + (end - start) / 2L), Modifier.align(Alignment.TopCenter), maxLines = 1, style = MaterialTheme.typography.labelSmall)
-        Text(label(end), Modifier.align(Alignment.TopEnd), maxLines = 1, style = MaterialTheme.typography.labelSmall)
+        Text(formatChartDate(start), Modifier.align(Alignment.TopStart), maxLines = 1, style = MaterialTheme.typography.labelSmall)
+        Text(formatChartDate(start + (end - start) / 2L), Modifier.align(Alignment.TopCenter), maxLines = 1, style = MaterialTheme.typography.labelSmall)
+        Text(formatChartDate(end), Modifier.align(Alignment.TopEnd), maxLines = 1, style = MaterialTheme.typography.labelSmall)
     }
 }
 
-private const val X_GRID_COUNT = 7
 private const val CHART_INSET = 6f
 private const val DAY_MILLIS_SHARED = 24L * 60L * 60L * 1000L
 
@@ -247,6 +244,7 @@ internal fun TimeWindowChart(
     val visibleRange = calculateVisibleTimeRange(dataStart, dataEnd, window)
     val visibleStart = visibleRange.start
     val visibleEnd = visibleRange.end
+    val calendarTicks = calendarTimeTicks(visibleRange)
     fun visibleValues(axis: PlotAxis) = sortedSeries.filter { it.axis == axis }
         .flatMap { pointsInWindow(it.points, visibleRange) }
         .map(TimeValue::value)
@@ -286,9 +284,9 @@ internal fun TimeWindowChart(
                             val y = CHART_INSET + index * (size.height - CHART_INSET * 2f) / (leftRange.ticks.size - 1)
                             drawLine(gridColor, Offset(0f, y), Offset(size.width, y), strokeWidth = 2.2f)
                         }
-                        repeat(X_GRID_COUNT) { index ->
-                            val x = index * size.width / (X_GRID_COUNT - 1)
-                            drawLine(gridColor, Offset(x, 0f), Offset(x, size.height), strokeWidth = 2.2f)
+                        calendarTicks.forEach { tick ->
+                            val x = ((tick.timestamp - visibleStart).toDouble() / visibleRange.duration * size.width).toFloat()
+                            drawLine(gridColor.copy(alpha = if (tick.major) 0.72f else 0.28f), Offset(x, 0f), Offset(x, size.height), strokeWidth = if (tick.major) 2.2f else 1f)
                         }
                         drawRect(xAxisColor, style = Stroke(width = 2.6f))
                     }
@@ -358,15 +356,10 @@ internal fun TimeWindowChart(
                 Box(Modifier.width(labelWidth + labelGap + tickWidth))
                 Column {
                     Canvas(Modifier.width(plotWidth).height(8.dp)) {
-                        repeat(X_GRID_COUNT) { index ->
-                            val x = index * size.width / (X_GRID_COUNT - 1)
-                            val major = index == 0 || index == (X_GRID_COUNT - 1) / 2 || index == X_GRID_COUNT - 1
-                            drawLine(
-                                xAxisColor,
-                                Offset(x, 0f),
-                                Offset(x, if (major) size.height else size.height * 0.5f),
-                                strokeWidth = if (major) 3.2f else 1.8f,
-                            )
+                        calendarTicks.forEach { tick ->
+                            val x = ((tick.timestamp - visibleStart).toDouble() / visibleRange.duration * size.width).toFloat()
+                            drawLine(xAxisColor, Offset(x, 0f), Offset(x, if (tick.major) size.height else size.height * 0.5f),
+                                strokeWidth = if (tick.major) 3.2f else 1.8f)
                         }
                     }
                     ChartDateLabels(visibleStart, visibleEnd, plotWidth)

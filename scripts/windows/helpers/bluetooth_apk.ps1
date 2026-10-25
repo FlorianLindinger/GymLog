@@ -10,6 +10,16 @@ function Find-BluetoothFileTransfer {
     return $wizard
 }
 
+function Set-PersistentClipboardText([string]$Text) {
+    Add-Type -AssemblyName System.Windows.Forms -ErrorAction Stop
+    # Copy=true flushes the clipboard data so it survives this PowerShell process.
+    # Retry briefly if another application currently owns the clipboard.
+    [System.Windows.Forms.Clipboard]::SetDataObject($Text, $true, 10, 100)
+    if ([System.Windows.Forms.Clipboard]::GetText([System.Windows.Forms.TextDataFormat]::UnicodeText) -cne $Text) {
+        throw 'The clipboard did not retain the APK path.'
+    }
+}
+
 function Send-ApkViaBluetooth([string]$File) {
     if (-not $File -or -not (Test-Path -LiteralPath $File -PathType Leaf)) {
         throw 'APK not found. Build the app first, then retry Bluetooth transfer.'
@@ -17,6 +27,17 @@ function Send-ApkViaBluetooth([string]$File) {
     $apk = Get-Item -LiteralPath $File
     if ($apk.Extension -ine '.apk') { throw 'Select an .apk file. An Android App Bundle (.aab) cannot be installed on the phone directly.' }
     $wizard = Find-BluetoothFileTransfer
+    try {
+        try { Set-PersistentClipboardText $apk.FullName }
+        catch {
+            Set-Clipboard -Value $apk.FullName -ErrorAction Stop
+            if ((Get-Clipboard -Raw -ErrorAction Stop) -cne $apk.FullName) { throw 'Clipboard verification failed.' }
+        }
+        Write-Host 'APK path copied to the clipboard. Use Ctrl+V in the Browse file-name field.'
+    } catch {
+        Write-Host 'Could not copy the APK path to the clipboard. Copy the printed path below manually.'
+        Write-Host "Clipboard error: $($_.Exception.Message)"
+    }
     Write-Host 'Bluetooth APK transfer (installation is completed on the phone)'
     Write-Host '1. Turn on Bluetooth and pair the phone with this PC in Windows Settings.'
     Write-Host '2. In Bluetooth File Transfer, choose Send files and select your phone.'

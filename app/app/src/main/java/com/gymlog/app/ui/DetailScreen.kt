@@ -54,13 +54,16 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.gymlog.app.R
 import com.gymlog.app.data.ChartRange
+import com.gymlog.app.data.usesResistanceLevel
+import com.gymlog.app.data.recordedMetricHistory
+import com.gymlog.app.data.recordedMetricChangeCount
+import com.gymlog.app.data.recordedMetric
 import com.gymlog.app.data.TrackingMode
 import com.gymlog.app.data.AreaAssignment
 import com.gymlog.app.data.BodyArea
 import com.gymlog.app.data.GymRepository
 import com.gymlog.app.data.MachineSummary
 import com.gymlog.app.data.SetRecord
-import com.gymlog.app.data.WeightChange
 import java.time.Duration
 import java.time.Instant
 import java.time.ZoneId
@@ -96,7 +99,8 @@ fun DetailScreen(
     var customChartStart by remember(machine.id) { mutableStateOf(chartPreferences.getLong("${machine.id}_start", 0L).takeIf { it > 0L }) }
     var customChartEnd by remember(machine.id) { mutableStateOf(chartPreferences.getLong("${machine.id}_end", 0L).takeIf { it > 0L }) }
     val currentUnitSets = currentTrainingUnitSets(summary)
-    val first = summary.weightChanges.lastOrNull()?.weight ?: machine.currentWeight
+    val entryBatches = remember(summary.recentSets) { groupSetBatches(summary.recentSets) }
+    val first = summary.recordedMetricHistory().firstOrNull()?.weight ?: machine.currentWeight
     val trainedDays = summary.recentSets.map { trainingDate(it.performedAt) }.distinct().size
 
     Column(
@@ -109,7 +113,7 @@ fun DetailScreen(
         Button(onClick = { quickEntry = true }, modifier = Modifier.fillMaxWidth()) {
             Text(
                 when {
-                    machine.trackingMode == TrackingMode.STRENGTH -> if (currentUnitSets.isEmpty()) "Add level entry" else "Change level entry"
+                    machine.trackingMode.usesResistanceLevel() -> if (currentUnitSets.isEmpty()) "Add training entry" else "Change training entry"
                     machine.trackingMode == TrackingMode.DURATION -> if (currentUnitSets.isEmpty()) "Add training" else "Change training"
                     else -> if (currentUnitSets.isEmpty()) "Add sets" else "Change sets"
                 },
@@ -125,10 +129,11 @@ fun DetailScreen(
                     modifier = Modifier.weight(1f),
                     style = MaterialTheme.typography.headlineMedium,
                     fontWeight = FontWeight.Bold,
+                    color = sessionTrendColor(summary),
                 )
                 Column(horizontalAlignment = Alignment.End) {
                     Text(
-                        weightChangeDescription(summary.weightChanges, machine.trackingMode),
+                        weightChangeDescription(summary),
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         textAlign = TextAlign.End,
@@ -181,27 +186,32 @@ fun DetailScreen(
             Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 Text("Recent Entries", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
                 Text(
-                    "${(summary.weightChanges.size - 1).coerceAtLeast(0)} ${metricName(machine.trackingMode)} changes · $trainedDays day${if (trainedDays == 1) "" else "s"} trained",
+                    "${summary.recordedMetricChangeCount()} ${metricName(machine.trackingMode)} changes · $trainedDays day${if (trainedDays == 1) "" else "s"} trained",
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     style = MaterialTheme.typography.labelSmall,
                 )
                 if (summary.recentSets.isEmpty()) Text("No entries recorded yet.", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                groupSetBatches(summary.recentSets).take(12).forEachIndexed { index, batch ->
+                entryBatches.take(30).forEachIndexed { index, batch ->
                     val ordered = batch.sortedBy { it.performedAt }
                     val batchKey = ordered.first().performedAt
                     if (index > 0) HorizontalDivider()
-                    Row(Modifier.fillMaxWidth().padding(vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Text(
-                            formatRecentEntry(ordered, machine.trackingMode, batchKey),
-                            modifier = Modifier.weight(1f),
-                            style = MaterialTheme.typography.labelSmall,
-                            fontWeight = FontWeight.Medium,
-                            fontFamily = FontFamily.Monospace,
-                            maxLines = 1,
-                            softWrap = false,
-                        )
-                        Text(if (expandedBatch == batchKey) "Close" else "Edit", Modifier.clickable { expandedBatch = if (expandedBatch == batchKey) null else batchKey }.padding(horizontal = 6.dp, vertical = 3.dp), color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelMedium)
+                    val previous = entryBatches.getOrNull(index + 1)
+                    val metric = if (machine.trackingMode.usesResistanceLevel()) ordered.last().reps.toDouble() else ordered.last().weight
+                    val previousMetric = previous?.maxByOrNull { it.performedAt }?.let { summary.recordedMetric(it) }
+                    val volume = ordered.sumOf { it.reps * it.weight }
+                    val previousVolume = previous?.sumOf { it.reps * it.weight }
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        Text(formatTimestamp(batchKey), Modifier.weight(1f), style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(if (expandedBatch == batchKey) "Close" else "Edit",
+                            Modifier.clickable { expandedBatch = if (expandedBatch == batchKey) null else batchKey }.padding(horizontal = 6.dp, vertical = 3.dp),
+                            color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelMedium)
                     }
+                    Text(formatRecentEntry(ordered, machine.trackingMode),
+                        style = MaterialTheme.typography.bodySmall, color = historyComparisonColor(metric, previousMetric))
+                    if (machine.trackingMode != TrackingMode.DURATION) Text(
+                        "Volume: ${formatAxisValue(volume)} a.u.", style = MaterialTheme.typography.labelSmall,
+                        color = historyComparisonColor(volume, previousVolume))
                     if (expandedBatch == batchKey) ordered.forEachIndexed { setIndex, set ->
                         Row(Modifier.fillMaxWidth().padding(start = 12.dp, top = 1.dp, bottom = 1.dp), verticalAlignment = Alignment.CenterVertically) {
                             Text(
@@ -367,7 +377,7 @@ private fun SessionMetricsChart(
             showTrend,
         )
     } else {
-        DualAxisSessionPlot(orderedSets, groupSetBatches(sets).asReversed(), window, strength = trackingMode == TrackingMode.STRENGTH, showTrend = showTrend)
+        DualAxisSessionPlot(orderedSets, groupSetBatches(sets).asReversed(), window, trackingMode = trackingMode, showTrend = showTrend)
     }
 }
 
@@ -376,29 +386,25 @@ private fun DualAxisSessionPlot(
     sets: List<SetRecord>,
     sessions: List<List<SetRecord>>,
     window: ChartWindow,
-    strength: Boolean,
+    trackingMode: TrackingMode,
     showTrend: Boolean,
 ) {
     val repsColor = Color(0xFFFFA726)
     val weightColor = MaterialTheme.colorScheme.primary
     val volumeColor = Color(0xFF00BCD4)
-    Row(
-        Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.Center,
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text(if (strength) "Level" else "Reps/set", color = repsColor, style = MaterialTheme.typography.labelSmall)
-        Text(" · ", style = MaterialTheme.typography.labelSmall)
-        Text(if (strength) "Minutes" else "Weight", color = weightColor, style = MaterialTheme.typography.labelSmall)
-        Text(" · ", style = MaterialTheme.typography.labelSmall)
-        Text("Volume/training", color = volumeColor, style = MaterialTheme.typography.labelSmall)
-    }
     val reps = sessions.map { session ->
         TimeValue(session.maxOf { it.performedAt }, session.map { it.reps }.average())
     }
     val weight = sets.map { TimeValue(it.performedAt, it.weight) }
     val volume = sessions.map { session ->
         TimeValue(session.maxOf { it.performedAt }, session.sumOf { it.weight * it.reps })
+    }
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
+        ChartLegendEntry(if (trackingMode == TrackingMode.WATTS) "Watts" else if (trackingMode == TrackingMode.STRENGTH) "Level" else "Reps/set",
+            reps, window, showTrend, repsColor, TextAlign.Start, Modifier.weight(1f))
+        ChartLegendEntry("Volume/training [a.u.]", volume, window, showTrend, volumeColor, TextAlign.Center, Modifier.weight(1.5f))
+        ChartLegendEntry(if (trackingMode.usesResistanceLevel()) "Minutes" else "Weight [kg]",
+            weight, window, showTrend, weightColor, TextAlign.End, Modifier.weight(1f))
     }
     val baseSeries = listOf(
         TimeSeries(reps, repsColor, PlotAxis.LEFT),
@@ -425,7 +431,7 @@ private fun AxisMetricPlot(
     color: Color,
     showTrend: Boolean,
 ) {
-    Text("Minutes", color = color, style = MaterialTheme.typography.labelSmall)
+    ChartLegendEntry("Minutes", points, window, showTrend, color, TextAlign.Start, Modifier.fillMaxWidth())
     TimeWindowChart(
         series = listOf(TimeSeries(points, color)) +
             if (showTrend) listOf(trendTimeSeries(points, color, PlotAxis.LEFT, window)) else emptyList(),
@@ -437,19 +443,41 @@ private fun AxisMetricPlot(
 private fun formatAxisValue(value: Double): String = if (value % 1.0 == 0.0) value.toInt().toString()
 else String.format(Locale.US, "%.1f", value)
 
-private fun weightChangeDescription(changes: List<WeightChange>, trackingMode: TrackingMode): String {
-    val metric = metricName(trackingMode)
-    val latest = changes.firstOrNull() ?: return "No $metric changes yet"
-    val previous = changes.getOrNull(1) ?: return "Initial $metric set ${timeSince(latest.changedAt)} ago"
-    val delta = latest.weight - previous.weight
-    val amount = if (delta % 1.0 == 0.0) delta.toInt().toString() else String.format(Locale.US, "%.1f", delta)
-    val signed = if (delta > 0) "+$amount" else amount
-    val unit = when (trackingMode) {
+private fun weightChangeDescription(summary: MachineSummary): String {
+    val latest = summary.recentSets.maxByOrNull { it.performedAt } ?: return "No recorded entry yet"
+    val delta = summary.machine.currentWeight - summary.recordedMetric(latest)
+    if (delta == 0.0) return "Matches last recorded entry"
+    return "Next: ${if (delta > 0) "+" else ""}${formatAxisValue(delta)} ${when (summary.machine.trackingMode) {
         TrackingMode.WEIGHT -> "kg"
+        TrackingMode.WATTS -> "W"
         TrackingMode.DURATION -> "min"
-        else -> if (kotlin.math.abs(delta) == 1.0) "level" else "levels"
+        else -> "levels"
+    }} vs last entry"
+}
+
+@Composable
+private fun ChartLegendEntry(label: String, points: List<TimeValue>, window: ChartWindow, showTrend: Boolean,
+    color: Color, alignment: TextAlign, modifier: Modifier) {
+    Column(modifier) {
+        Text(label, Modifier.fillMaxWidth(), color = color, textAlign = alignment, style = MaterialTheme.typography.labelSmall)
+        if (showTrend) Text(formatMonthlyTrend(points, window), Modifier.fillMaxWidth(), color = color,
+            textAlign = alignment, style = MaterialTheme.typography.labelSmall)
     }
-    return "Changed by $signed $unit ${timeSince(latest.changedAt)} ago"
+}
+
+internal fun formatMonthlyTrend(points: List<TimeValue>, window: ChartWindow): String {
+    val fit = trendTimeSeries(points, Color.Black, PlotAxis.LEFT, window).points
+    if (fit.size < 2) return ""
+    val elapsed = fit.last().timestamp - fit.first().timestamp
+    if (elapsed <= 0) return ""
+    val monthly = (fit.last().value - fit.first().value) / elapsed * 86_400_000.0 * 30.44
+    return String.format(Locale.US, "%+.2g/mon.", if (kotlin.math.abs(monthly) < 0.0000001) 0.0 else monthly)
+}
+
+private fun historyComparisonColor(current: Double, previous: Double?): Color = when {
+    previous == null || current == previous -> Color(0xFF9E9E9E)
+    current > previous -> Color(0xFF66BB6A)
+    else -> Color(0xFFEF5350)
 }
 
 private fun chartCutoff(window: ChartRange): Long? =
@@ -531,13 +559,16 @@ fun MetricValueDialog(
         title = { Text("Change ${metricName(trackingMode)}") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedTextField(value, { value = it.filter { char -> char.isDigit() || char == '.' || char == ',' } }, label = { Text(when (trackingMode) { TrackingMode.WEIGHT -> "New Weight (kg)"; TrackingMode.DURATION -> "New Duration (min)"; else -> "New Level" }) }, singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = if (trackingMode == TrackingMode.WEIGHT) KeyboardType.Decimal else KeyboardType.Number))
-                if (trackingMode == TrackingMode.WEIGHT) {
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        androidx.compose.material3.FilledTonalButton(onClick = { value = formatMetricDialogValue((parsed ?: current) + 3.0) }) { Text("+3 kg") }
-                        androidx.compose.material3.FilledTonalButton(onClick = { value = formatMetricDialogValue((parsed ?: current) + 5.0) }) { Text("+5 kg") }
-                    }
+                OutlinedTextField(value, { value = it.filter { char -> char.isDigit() || char == '.' || char == ',' } }, label = { Text(when (trackingMode) { TrackingMode.WATTS -> "New Power (W)"; TrackingMode.WEIGHT -> "New Weight (kg)"; TrackingMode.DURATION -> "New Duration (min)"; else -> "New Level" }) }, singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = if (trackingMode == TrackingMode.WEIGHT) KeyboardType.Decimal else KeyboardType.Number))
+                val steps = when (trackingMode) {
+                    TrackingMode.WEIGHT -> listOf(3, 5)
+                    TrackingMode.WATTS -> listOf(10)
+                    TrackingMode.DURATION -> listOf(1, 2, 3)
+                    TrackingMode.STRENGTH -> listOf(1)
                 }
+                MetricStepButtons(steps, when (trackingMode) {
+                    TrackingMode.WEIGHT -> "kg"; TrackingMode.WATTS -> "W"; TrackingMode.DURATION -> "min"; else -> ""
+                }) { delta -> value = formatMetricDialogValue(((parsed ?: current) + delta).coerceAtLeast(0.0)) }
                 if (onSaveCurrentAndNext != null) {
                     Text("This exercise already has entries in the current training session.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     Button(onClick = { parsed?.let(onSave) }, enabled = parsed != null && parsed >= 0, modifier = Modifier.fillMaxWidth()) { Text("Change for Next Session") }
@@ -611,24 +642,27 @@ private fun timeSince(timestamp: Long): String {
     }
 }
 
-private fun formatRecentEntry(sets: List<SetRecord>, trackingMode: TrackingMode, timestamp: Long): String {
+private fun formatRecentEntry(sets: List<SetRecord>, trackingMode: TrackingMode): String {
     val first = sets.first()
-    val metric = if (isDirectMetric(trackingMode)) {
-        formatTrainingEntry(first.weight, trackingMode, first.reps)
-    } else {
-        formatMetric(first.weight, trackingMode)
-    }
-    val date = formatTimestamp(timestamp)
-    val volume = sets.sumOf { it.weight * it.reps }
-    return when (trackingMode) {
-        TrackingMode.STRENGTH -> "${metric.padEnd(18)} - ${formatAxisValue(volume).padStart(6)} level·min - $date"
-        TrackingMode.DURATION -> "${metric.padEnd(12)} - ${formatAxisValue(sets.sumOf { it.weight }).padStart(6)} min - $date"
-        else -> {
-            val repetitions = sets.joinToString(",") { it.reps.toString() }
-            "${metric.padEnd(10)} - ${repetitions.padEnd(10)} - ${formatAxisValue(volume).padStart(7)} kg - $date"
+    return if (isDirectMetric(trackingMode)) formatTrainingEntry(first.weight, trackingMode, first.reps)
+        else "${formatMetric(first.weight, trackingMode)} | ${sets.joinToString(", ") { it.reps.toString() }} reps"
+}
+
+@Composable
+internal fun MetricStepButtons(steps: List<Int>, unit: String, onStep: (Int) -> Unit) {
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        listOf(-1, 1).forEach { sign ->
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                steps.forEach { step ->
+                    androidx.compose.material3.FilledTonalButton(onClick = { onStep(sign * step) }, modifier = Modifier.weight(1f),
+                        contentPadding = PaddingValues(horizontal = 4.dp, vertical = 6.dp)) {
+                        Text("${if (sign > 0) "+" else "-"}$step $unit")
+                    }
+                }
+            }
         }
     }
 }
 
-private fun formatTimestamp(timestamp: Long): String = DateTimeFormatter.ofPattern("dd.MM.yy")
+private fun formatTimestamp(timestamp: Long): String = DateTimeFormatter.ofPattern("d MMM yy", Locale.ENGLISH)
     .format(Instant.ofEpochMilli(timestamp).atZone(ZoneId.systemDefault()))

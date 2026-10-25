@@ -57,6 +57,9 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import android.widget.NumberPicker
+import com.gymlog.app.data.usesResistanceLevel
+import com.gymlog.app.data.pendingMetricDirection
+import com.gymlog.app.data.recordedMetric
 import com.gymlog.app.data.TrackingMode
 import com.gymlog.app.data.MachineSummary
 import com.gymlog.app.data.BodyArea
@@ -481,7 +484,7 @@ private fun MachineCard(
                     modifier = Modifier.weight(1f),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
+                    maxLines = 3,
                     overflow = TextOverflow.Ellipsis,
                 )
                 if (!metricInHeader) {
@@ -547,7 +550,7 @@ private fun completedTrainingDateLabel(date: LocalDate, today: LocalDate): Strin
     0L -> "today"
     1L -> "yesterday"
     in 2L..7L -> "last ${date.dayOfWeek.getDisplayName(java.time.format.TextStyle.FULL, Locale.ENGLISH)}"
-    else -> date.format(DateTimeFormatter.ofPattern("d MMM"))
+    else -> date.format(DateTimeFormatter.ofPattern("d MMM", Locale.ENGLISH))
 }
 private fun trainingDayStart(timestamp: Long, zone: ZoneId = ZoneId.systemDefault()): Long {
     val local = Instant.ofEpochMilli(timestamp).atZone(zone)
@@ -556,7 +559,7 @@ private fun trainingDayStart(timestamp: Long, zone: ZoneId = ZoneId.systemDefaul
 }
 
 private fun sessionPatternText(summary: MachineSummary): AnnotatedString {
-    val batches = groupSetBatches(summary.recentSets)
+    val batches = groupSetBatches(summary.recentSets).take(8)
     val patterns = batches.map { batch ->
         batch.sortedBy { it.performedAt }.joinToString(",") { set ->
             if (isDirectMetric(summary.machine.trackingMode)) "${formatNumber(set.weight)} min" else set.reps.toString()
@@ -565,8 +568,8 @@ private fun sessionPatternText(summary: MachineSummary): AnnotatedString {
     fun trend(index: Int): Int {
         val newer = batches.getOrNull(index)?.firstOrNull() ?: return 0
         val older = batches.getOrNull(index + 1)?.firstOrNull() ?: return 0
-        val newerMetric = if (summary.machine.trackingMode == TrackingMode.STRENGTH) newer.reps.toDouble() else newer.weight
-        val olderMetric = if (summary.machine.trackingMode == TrackingMode.STRENGTH) older.reps.toDouble() else older.weight
+        val newerMetric = summary.recordedMetric(newer)
+        val olderMetric = summary.recordedMetric(older)
         return newerMetric.compareTo(olderMetric)
     }
     fun AnnotatedString.Builder.appendTrendMarker(trend: Int) {
@@ -611,17 +614,10 @@ fun QuickTrainingDialog(initialMinutes: Int, isChange: Boolean = false, onDismis
         onDismissRequest = onDismiss,
         title = { Text(if (isChange) "Change Training" else "Log Training") },
         text = {
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedButton(onClick = { value = ((level ?: 0) - 1).coerceAtLeast(0).toString() }) { Text("−1") }
-                OutlinedTextField(
-                    value = value,
-                    onValueChange = { value = it.filter(Char::isDigit) },
-                    modifier = Modifier.weight(1f),
-                    label = { Text("Minutes") },
-                    singleLine = true,
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                )
-                OutlinedButton(onClick = { value = ((level ?: 0) + 1).toString() }) { Text("+1") }
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                OutlinedTextField(value, { value = it.filter(Char::isDigit) }, label = { Text("Minutes") },
+                    modifier = Modifier.fillMaxWidth(), singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number))
+                MetricStepButtons(listOf(1, 2, 3), "min") { delta -> value = ((level ?: 0) + delta).coerceAtLeast(0).toString() }
             }
         },
         confirmButton = { Button(onClick = { level?.let(onAdd) }, enabled = level != null && level > 0) { Text(if (isChange) "Change Training" else "Save Training") } },
@@ -629,23 +625,10 @@ fun QuickTrainingDialog(initialMinutes: Int, isChange: Boolean = false, onDismis
     )
 }
 
-private fun sessionTrendColor(summary: MachineSummary): Color {
-    if (summary.machine.trackingMode == TrackingMode.DURATION) return Color.White
-    val zone = ZoneId.systemDefault()
-    val latest = summary.weightChanges.firstOrNull() ?: return Color.White
-    val before = summary.weightChanges.getOrNull(1) ?: return Color.White
-    val currentTraining = trainingDate(System.currentTimeMillis(), zone)
-    val previousTraining = summary.recentSets
-        .map { it.performedDate(zone) }
-        .filter { it != currentTraining }
-        .maxOrNull()
-    val recentTrainingDates = setOfNotNull(currentTraining, previousTraining)
-    if (trainingDate(latest.changedAt, zone) !in recentTrainingDates) return Color.White
-    return when {
-        latest.weight > before.weight -> Color(0xFF66BB6A)
-        latest.weight < before.weight -> Color(0xFFEF5350)
-        else -> Color.White
-    }
+internal fun sessionTrendColor(summary: MachineSummary): Color = when (summary.pendingMetricDirection()) {
+    1 -> Color(0xFF66BB6A)
+    -1 -> Color(0xFFEF5350)
+    else -> Color(0xFF9E9E9E)
 }
 
 private const val TRAINING_UNIT_MILLIS = 6L * 60L * 60L * 1000L
@@ -760,11 +743,13 @@ fun AddMachineDialog(onDismiss: () -> Unit, onAdd: (String, Double, TrackingMode
                 TextButton(onClick = { showProfile = true }) { Text("Choose / edit body regions & intensity") }
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     FilterChip(selected = trackingMode == TrackingMode.WEIGHT, onClick = { trackingMode = TrackingMode.WEIGHT }, label = { Text("kg") })
+                    FilterChip(selected = trackingMode == TrackingMode.WATTS, onClick = { trackingMode = TrackingMode.WATTS }, label = { Text("Watts") })
                     FilterChip(selected = trackingMode == TrackingMode.STRENGTH, onClick = { trackingMode = TrackingMode.STRENGTH }, label = { Text("Level") })
                 }
-                if (trackingMode == TrackingMode.STRENGTH) {
+                FilterChip(selected = trackingMode == TrackingMode.DURATION, onClick = { trackingMode = TrackingMode.DURATION }, label = { Text("Minutes") })
+                if (trackingMode.usesResistanceLevel()) {
                     Text(
-                        "Trainings for Level exercises are recorded in minutes.",
+                        "Level and Watts exercises record training duration in minutes.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -808,9 +793,10 @@ private fun formatElapsed(totalMillis: Long): String {
     return if (hours > 0) "${hours}h${minutes.toString().padStart(2, '0')}" else "${minutes}m"
 }
 
-fun isDirectMetric(trackingMode: TrackingMode): Boolean = trackingMode == TrackingMode.STRENGTH || trackingMode == TrackingMode.DURATION
+fun isDirectMetric(trackingMode: TrackingMode): Boolean = trackingMode.usesResistanceLevel() || trackingMode == TrackingMode.DURATION
 
 fun metricName(trackingMode: TrackingMode): String = when (trackingMode) {
+    TrackingMode.WATTS -> "power"
     TrackingMode.WEIGHT -> "weight"
     TrackingMode.DURATION -> "duration"
     else -> "level"
@@ -819,6 +805,7 @@ fun metricName(trackingMode: TrackingMode): String = when (trackingMode) {
 fun metricTitle(trackingMode: TrackingMode): String = metricName(trackingMode).replaceFirstChar { it.uppercase() }
 
 fun currentMetricLabel(trackingMode: TrackingMode): String = when (trackingMode) {
+    TrackingMode.WATTS -> "Current Power (W)"
     TrackingMode.WEIGHT -> "Current Weight (kg)"
     TrackingMode.DURATION -> "Current Duration (min)"
     else -> "Current Level"
@@ -827,12 +814,14 @@ fun currentMetricLabel(trackingMode: TrackingMode): String = when (trackingMode)
 private fun formatNumber(value: Double): String = if (value % 1.0 == 0.0) value.toInt().toString() else String.format(Locale.US, "%.1f", value)
 
 fun formatMetric(value: Double, trackingMode: TrackingMode): String = when (trackingMode) {
+    TrackingMode.WATTS -> "${formatNumber(value)} W"
     TrackingMode.WEIGHT -> formatWeight(value)
     TrackingMode.DURATION -> "${formatNumber(value)} min"
     else -> "Level ${formatNumber(value)}"
 }
 
 fun formatTrainingEntry(value: Double, trackingMode: TrackingMode, level: Int? = null): String = when (trackingMode) {
+    TrackingMode.WATTS -> "${level ?: 0} W | ${formatNumber(value)} min"
     TrackingMode.STRENGTH -> "Level ${(level ?: 0).toString().padStart(2)} · ${formatNumber(value).padStart(3)} min"
     TrackingMode.DURATION -> "${formatNumber(value)} min"
     else -> formatMetric(value, trackingMode)
