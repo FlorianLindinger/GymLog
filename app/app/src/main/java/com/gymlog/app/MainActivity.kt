@@ -60,6 +60,7 @@ class MainActivity : ComponentActivity() {
             var bodyData by remember { mutableStateOf(if (BuildConfig.DEBUG && intent.getBooleanExtra("demo_body_data", false)) demoBodyData() else BodyDataSnapshot()) }
             var healthSyncStatus by remember { mutableStateOf("Not synced yet.") }
             var healthSyncing by remember { mutableStateOf(false) }
+            var checkingHealthPermissions by remember { mutableStateOf(false) }
             var lastHealthSyncElapsed by remember { mutableStateOf<Long?>(null) }
             val healthGateway = remember { HealthConnectGateway(this) }
             val scope = rememberCoroutineScope()
@@ -81,6 +82,23 @@ class MainActivity : ComponentActivity() {
                     }
                 }
             }
+            fun autoSyncHealthData(force: Boolean = false) {
+                if (healthSyncing || checkingHealthPermissions) return
+                if (!force && !shouldAutoSyncBody(lastHealthSyncElapsed, SystemClock.elapsedRealtime())) return
+                if (healthGateway.sdkStatus() != HealthConnectClient.SDK_AVAILABLE) return
+                checkingHealthPermissions = true
+                scope.launch {
+                    try {
+                        if (healthGateway.hasPermissions()) readHealthData()
+                    } catch (exception: kotlinx.coroutines.CancellationException) {
+                        throw exception
+                    } catch (exception: Exception) {
+                        healthSyncStatus = "Health Connect sync failed: ${exception.message}"
+                    } finally {
+                        checkingHealthPermissions = false
+                    }
+                }
+            }
             val healthPermissionLauncher = rememberLauncherForActivityResult(
                 PermissionController.createRequestPermissionResultContract(),
             ) { granted ->
@@ -88,12 +106,7 @@ class MainActivity : ComponentActivity() {
                 else healthSyncStatus = "Health Connect permission was not granted."
             }
             LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
-                if (shouldAutoSyncBody(lastHealthSyncElapsed, SystemClock.elapsedRealtime()) &&
-                    healthGateway.sdkStatus() == HealthConnectClient.SDK_AVAILABLE) {
-                    scope.launch {
-                        if (healthGateway.hasPermissions()) readHealthData()
-                    }
-                }
+                autoSyncHealthData()
             }
             val exportLauncher = rememberLauncherForActivityResult(
                 ActivityResultContracts.CreateDocument("application/json"),
@@ -139,6 +152,7 @@ class MainActivity : ComponentActivity() {
                     bodyData = bodyData,
                     healthSyncStatus = healthSyncStatus,
                     healthSyncing = healthSyncing,
+                    onAutoHealthSync = { autoSyncHealthData(force = true) },
                     onHealthSync = {
                         when (healthGateway.sdkStatus()) {
                             HealthConnectClient.SDK_AVAILABLE -> scope.launch {

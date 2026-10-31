@@ -6,18 +6,32 @@ Notable changes to GymLog are recorded here. Planned work belongs in `TODO.md`.
 
 ### Changed
 
+- Windows launchers are organized around three everyday commands: USB.bat, WiFi.bat, and Bluetooth.bat. Each uses only its named transport, with no fallback. Build-only, install-only, diagnostics and release commands moved under advanced/; old combined launchers are inactive archived sources. All launchers keep result windows open and color-code progress, success, errors and pending Bluetooth actions.
+- Exercise overview scrolling avoids rebuilding card history and warnings when rows re-enter the list. Single-line text sizing now estimates from measured width instead of doing twelve binary-search layouts. Current-training filtering uses numeric day boundaries instead of converting every historical timestamp to a date.
+- Body plots replace time bins with independently toggleable trailing moving averages: a fixed period in days and a fraction of the displayed interval. Both can overlay independently toggleable raw data, globally or per plot. Existing bin averaging migrates to the equivalent interval fraction.
+- Body reference labels name All-time or the history interval (e.g. 2mon history). History low/high default to the 5th/95th percentiles, with a configurable 0-50% cutoff shown in the labels when nonzero; 0 restores exact extrema. All-time low/high stay exact, and means/fits continue using raw data.
+- Body refreshes Health Connect on entry, on foreground return, and every minute while visible. The periodic timer stops outside Body and in the background; automatic refreshes use existing permissions and skip overlapping reads and permission checks.
+- Body Settings adds Order and hide plots, with saved arrow ordering, individual visibility switches, and a reset option. Default order is Weight, Muscle Mass, Fat Mass, Fat %, then Muscle Mass %.
+- Time-entry buttons in the exercise overview now say `+ Time` instead of `+ Training`.
+- Trend warnings always use the Wathan best-set 1RM formula. Removed the per-exercise Volume/1RM choice; custom warning thresholds remain available. The Menu metric switch now controls charts and entry summaries only, and legacy exercise metric overrides no longer affect either warnings or chart display.
+- Exercise weight-axis labels follow the most common recent recorded weight increment (such as 3, 5, or 2.5 kg), using larger multiples when needed. Labels align with recorded loads; charts without an observed change retain automatic ticks.
+- Body-region names stay on one line and use an ellipsis when space is limited in exercise details, profile selectors, the body guide, and statistics.
+- Reduce live-training timer wakeups to displayed minute changes and the idle transition, while caching training-history summaries, exercise overlap, warnings, and chart calculations across redraws. Battery savings have not been measured on a device.
+- Unfinished Manual bottom exercises stay above completed exercises. Completed exercises from every ordering group appear last, from first to last done, while the current exercise stays first.
+- Exercise-detail change buttons preview the recorded sets or minutes they will edit.
+
 - Body global and per-plot settings use wider dialogs, distinct section cards, Global/Custom badges, consistent switches, grouped low/mean/high chips, and a separate Health Connect section.
 
 - Body plots add independently toggleable dashed mean lines for all-time and history windows, with Low / Mean / High values above the plot. History references can follow each plot's exact interval or retain a separate selection, globally or per plot.
 
-- 1RM defaults on when no metric choice is saved; existing choices are retained. Its exercise-chart legend opens an explanation. Level/watts workload labels now state their intensity-by-minute units.
+- 1RM chart display defaults on when no global metric choice is saved; the saved global choice is retained. Its exercise-chart legend opens an explanation. Level/watts workload labels now state their intensity-by-minute units.
 - A separate `WIP stats` button beside Stats opens an extensive dashboard with equal-period comparisons, weekly goals, a training calendar, selectable trend charts, exercise progress/frequency/warning explorers, personal records, weighted body-region sets, and calculation notes. The existing Stats screen remains available.
 
-- The global Volume/1RM switch is directly in Menu with a `?` explanation. Progress Warnings explicitly names its current metric, and custom exercises retain their own switch. Help & Explanations is scrollable and covers warning overrides, ordering, training days, Stats, Body plots and sync, history/undo, and backups.
+- The global chart Volume/1RM switch is directly in Menu with an outlined help button. The exercise-chart metric legend also looks like a button and opens its explanation without a question mark. Progress Warnings explicitly names its fixed 1RM metric. Help & Explanations is scrollable and covers warning overrides, ordering, training days, Stats, Body plots and sync, history/undo, and backups.
 
 - Exercise overview history uses compact minute labels such as `13m`. Exercise Order opens from Menu instead of the bottom navigation row.
 
-- Global and per-exercise Progress Warnings settings offer a Wathan-based `1RM` metric in place of volume for weight exercises. Charts, entry summaries, warning text, and setting labels follow the selected metric; the menu controls the default metric.
+- Global and per-exercise Progress Warnings settings configure thresholds for Wathan-based `1RM` trends in weight exercises. The Menu metric switch controls charts and entry summaries independently.
 
 - Every exercise can follow global progress warnings or save its own settings. Blank and zero disable warnings globally or per exercise, including the volume window. Overrides persist through backup/restore, plan copies, and deletion undo.
 
@@ -27,19 +41,19 @@ Notable changes to GymLog are recorded here. Planned work belongs in `TODO.md`.
 
 - Body interval controls include `5Y` globally and per plot, including high/low history windows, keeping both button rows equally filled.
 
-- Exercise cards indicate overlap with a smooth green/yellow/orange/red outline, without overlap or lifetime training-count text.
+- Exercise cards indicate overlap using seven fixed color bins: dark green, green, yellow, orange, red-orange, red, and dark red. The overview no longer shows the overlap context header.
 - Progress warnings fit on one line with compact week and volume text. Volume checks use a saved, configurable training window; training-count warnings have been removed.
 
-- Equal-overlap automatic exercise ordering now applies tie priority before lifetime training counts, and Exercise Order previews the automatic ranking.
+- Within each overlap bin, automatic exercise ordering prefers fewer distinct training days in the last two calendar months, then tie priority. Exercise Order previews the automatic ranking.
 - Body-region guide visibility is remembered globally, with the guide shown by default.
 - Exercise overview titles, status, and history shrink to fit, with the metric always at the top right and Level abbreviated to `Lv.`.
 - Choosing an exercise profile preserves an explicitly selected tracking mode, including Watts.
 
 - Windows batch launchers now share the PowerShell helper structure used by `sleep_was_never_an_option`, with portable JDK/SDK discovery and device tools that do not require a build environment. Logging retains existing logs and does not force-stop GymLog.
-- Windows release launchers prepare and verify versions locally by default; publication requires `-Publish` and atomically pushes main and its version tag. Existing installer aliases remain available.
+- Windows release launchers under `advanced/release/` prepare and verify versions locally by default; publication requires `-Publish` and atomically pushes main and its version tag.
 - Body plots open their settings when tapped, with compact headers and fit rates at the top right. Interval count, total count, mean, and range each have a visibility switch, with global defaults and per-plot overrides.
 - Body starts directly with interval controls and plots. Global Settings contains Sync Health Connect, sync status, and the last sync time. Concurrent reads are prevented, and progress clears on success or failure.
-- Body has a direct Settings button for global interval, averaging/bin count, fit visibility, summary statistics, high/low references, and target visibility.
+- Body has a direct Settings button for global interval, raw data and moving averages, fit visibility, summary statistics, high/low references, and target visibility.
 - Body chart colors distinguish measurements (blue), fit (yellow), target (green), all-time high/low (purple), and history-window high/low (orange). Each reference label matches its lines.
 - All-time high, all-time low, history-window high, and history-window low have independent switches in global and per-plot settings, including custom history windows. Existing combined settings migrate to the corresponding pair of switches.
 - Y axes include short, lighter minor ticks at sensible subdivisions, such as 0.5 between major ticks spaced by 2.5.
@@ -49,7 +63,7 @@ Notable changes to GymLog are recorded here. Planned work belongs in `TODO.md`.
 - Body fit rates use `/mon.`. Target estimates include remaining weeks alongside months until over a year, then show years/months and omit months from 10 years onward.
 - Exercise charts place `Volume/training [a.u.]` between the left and right axis labels, with monthly trends rounded to two significant digits.
 - Show more training history in the overview and up to 30 entries in exercise and training history.
-- Automatic exercise ordering compares weighted body-region overlap with the current and previous distinct exercises, then uses tie priority and fewer lifetime training days when overlap ties. Manual ordering stays available.
+- Automatic exercise ordering considers all distinct exercises in the current training, with fixed exponential weights of 100%, 50%, 25%, 12.5%, and so on. Contributions accumulate without normalization by exercise count, with each region capped at full load. Manual ordering stays available.
 - Body-region intensity now has Low, Medium, and High levels, with separate statistics and preserved legacy profile weights.
 - Show hours per recorded training in the last 30 days, omitting rest-day zeroes and preserving fractional hours in the latest duration.
 - Body plots use compact automatic Y-axis limits with round ticks inside the frame, including 10, 12.5, 15, 17.5, and 20 for data around 10–20. Each plot can independently fix either Y limit or leave it automatic. Other charts retain round ticks and nonnegative limits; trends and target bands are clipped at plot edges.
@@ -62,7 +76,7 @@ Notable changes to GymLog are recorded here. Planned work belongs in `TODO.md`.
 - Persistent installer consoles with `GYMLOG_NO_PAUSE=1` for automation, verified clipboard copying for Bluetooth APK paths, a Wi-Fi pairing/connection launcher, SHA-256 checksums for copied debug APKs, and signed local release builds.
 - A patch-release launcher and Windows helper tests for installer exit codes, clipboard fallback, environment discovery, and version preparation.
 - Global Body plot settings and independent per-plot overrides. Following the global target setting controls visibility only; target values and acceptance ranges remain per plot, with previous saved values preserved.
-- Optional Body averaging across equal time bins in the selected interval, defaulting to 20 bins. Empty bins are skipped; fits and high/low values use original measurements.
+- Optional Body moving averages use a fixed duration or a fraction of the selected interval, with independently toggleable raw data. Fits and references use original measurements.
 - Per-plot Body high/low values and reference lines for all-time history, a selected history window, or both. The history window defaults to two months and supports presets and custom dates.
 - Watts-based exercise tracking with recorded power and training minutes, including backup and restore support.
 - Quick adjustment buttons for weight (±3/5 kg), power (±10 W), and duration (±1/2/3 minutes).
@@ -71,14 +85,16 @@ Notable changes to GymLog are recorded here. Planned work belongs in `TODO.md`.
 - Body-region editing within exercise details, profile selection during exercise creation, and color-coded estimated overlap. The region selector immediately offers matching profiles and a collapsible front/back guide with 15 named, numbered regions using the current region colors.
 - Removed the redundant bottom “Show muscle reference” control from the region selector.
 - Regression tests and [profile/ranking documentation](docs/exercise-profiles.md).
-- Renamed primary installer commands/window titles to include USB, Wi-Fi and Bluetooth, with automatic Bluetooth fallback after USB/Wi-Fi detection, compatibility shortcuts, and `-NoBluetoothFallback` for ADB-only automation.
-- Bluetooth APK transfer via `-Bluetooth` on both Windows installers, plus dedicated Bluetooth shortcuts. Installation is confirmed manually on the phone; install-only transfer needs no Android SDK or USB debugging.
+- Separate USB, Wi-Fi and Bluetooth launchers use transport-specific selection without fallback; obsolete combined launchers are archived as inactive source files.
+- Bluetooth APK transfer uses `Bluetooth.bat` or `advanced/send_bluetooth.bat`. Installation is confirmed manually on the phone; install-only transfer needs no Android SDK or USB debugging.
 - Bluetooth helper tests with a mocked wizard launch; no phone or radio is contacted.
 - A changelog for tracking future changes and the existing app baseline.
 - A changelog link in the README.
 
 ### Fixed
 
+- Showing hidden exercises scrolls to their first row without the removed overlap header shifting the target.
+- Changing weight or level for the next session preserves the current training's recorded values when reps or minutes are edited afterward. The configured value applies on the next training day.
 - Exercise setting colors compare against the last recorded entry. Matching values and exercises without a recorded baseline stay gray, including after reverting a pending change or recording a previously changed setting.
 - Change counts and increase statistics use recorded training transitions, excluding setup changes before the first entry and temporary adjustments that were never recorded.
 - Updating the current training and next session also updates recorded entries when the next-session setting already matches the selected value. Logging a minutes-only entry updates its setting baseline.

@@ -1,28 +1,31 @@
 param([string]$WindowsPath = (Join-Path $PSScriptRoot '..'))
 $ErrorActionPreference = 'Stop'
-if ($env:OS -ne 'Windows_NT') {
-    Write-Output 'SKIP: installer console integration checks require Windows cmd.exe.'
-    return
-}
+if ($env:OS -ne 'Windows_NT') { Write-Output 'SKIP: console integration checks require Windows cmd.exe.'; return }
 $script:InstallerAssertions = 0
 function Assert-Installer($value, [string]$message) {
     $script:InstallerAssertions++
     if (-not $value) { throw $message }
 }
-$names = @(
-    'install_via_usb_wifi_or_bluetooth.bat', 'build_and_install_via_usb_wifi_or_bluetooth.bat'
+$testRoot = Join-Path ([IO.Path]::GetTempPath()) ('gymlog-console-tests-' + [Guid]::NewGuid().ToString('N'))
+$savedPause = $env:GYMLOG_NO_PAUSE
+$savedExit = $env:GYMLOG_TEST_INSTALL_EXIT
+$launchers = @(
+    @('USB.bat','build-install','USB'), @('WiFi.bat','build-install','WiFi'), @('Bluetooth.bat','build-install','Bluetooth'),
+    @('advanced/build.bat','build','USB'), @('advanced/verify.bat','verify','USB'), @('advanced/device_check.bat','device','USB'),
+    @('advanced/connect_wifi.bat','wifi','WiFi'), @('advanced/launch_and_stream_gym_log_logs.bat','logs','USB'),
+    @('advanced/screenshot.bat','screenshot','USB'), @('advanced/install_usb.bat','install','USB'),
+    @('advanced/install_wifi.bat','install','WiFi'), @('advanced/send_bluetooth.bat','install','Bluetooth'),
+    @('advanced/release/build_release.bat','release','USB'), @('advanced/release/release_patch.bat','patch','USB'),
+    @('advanced/release/release_minor.bat','minor','USB'), @('advanced/release/release_major.bat','major','USB'),
+    @('advanced/release/release_no_bump.bat','none','USB')
 )
-$testRoot = Join-Path ([IO.Path]::GetTempPath()) ('installer-window-tests-' + [Guid]::NewGuid().ToString('N'))
-$helpers = Join-Path $testRoot 'helpers'
-New-Item -ItemType Directory -Path $helpers -Force | Out-Null
-$previousPause = $env:GYMLOG_NO_PAUSE
-$previousExit = $env:GYMLOG_TEST_INSTALL_EXIT
-function Invoke-InstallerFixture([string]$Name, [int]$Code, [bool]$NoPause) {
+function Invoke-LauncherFixture($entry, [int]$Code, [bool]$NoPause) {
     $env:GYMLOG_TEST_INSTALL_EXIT = [string]$Code
     $env:GYMLOG_NO_PAUSE = if ($NoPause) { '1' } else { $null }
     $info = New-Object Diagnostics.ProcessStartInfo
     $info.FileName = $env:ComSpec
-    $info.Arguments = '/d /c call "' + (Join-Path $testRoot $Name) + '"'
+    $info.Arguments = '/d /c call "' + (Join-Path $testRoot $entry[0]) + '" -Apk "fixture path with spaces.apk"'
+    $info.WorkingDirectory = [IO.Path]::GetTempPath()
     $info.UseShellExecute = $false
     $info.CreateNoWindow = $true
     $info.RedirectStandardInput = $true
@@ -31,55 +34,65 @@ function Invoke-InstallerFixture([string]$Name, [int]$Code, [bool]$NoPause) {
     $process = New-Object Diagnostics.Process
     $process.StartInfo = $info
     try {
-        if (-not $process.Start()) { throw 'Could not start installer fixture.' }
+        if (-not $process.Start()) { throw 'Could not start console fixture.' }
         $prefix = ''
         if (-not $NoPause) {
-            # Observe the actual command prompt waiting before sending its exit command.
             do {
                 $line = $process.StandardOutput.ReadLineAsync()
-                if (-not $line.Wait(10000)) { $process.Kill();throw 'Installer fixture did not reach its persistent console.' }
-                if ($null -eq $line.Result) { throw 'Installer closed before reaching its persistent console.' }
+                if (-not $line.Wait(10000)) { $process.Kill(); throw 'Fixture did not reach its persistent console.' }
+                if ($null -eq $line.Result) { throw 'Launcher closed before its persistent console.' }
                 $prefix += $line.Result + "`n"
             } until ($line.Result.Contains('This window stays open.'))
-            Assert-Installer (-not $process.WaitForExit(300)) "$Name must remain open until the user closes the command prompt"
+            Assert-Installer (-not $process.WaitForExit(100)) "$($entry[0]) must remain open on both success and failure"
         }
         $process.StandardInput.WriteLine('exit')
         $process.StandardInput.Close()
-        if (-not $process.WaitForExit(10000)) { $process.Kill();throw 'Installer fixture did not finish within 10 seconds.' }
+        if (-not $process.WaitForExit(10000)) { $process.Kill(); throw 'Console fixture did not finish.' }
         $output = $prefix + $process.StandardOutput.ReadToEnd() + $process.StandardError.ReadToEnd()
-        Assert-Installer ($process.ExitCode -eq $Code) "$Name must preserve exit code $Code. Output: $output"
-        $expectedCommand = if ($Name.StartsWith('build_')) { 'build-install' } else { 'install' }
-        Assert-Installer ($output.Contains("MOCK_INSTALL_COMMAND=$expectedCommand")) "$Name must still invoke the correct command"
-        Assert-Installer (($output -match 'This window stays open\.') -eq (-not $NoPause)) "$Name must retain the final console unless automation opts out"
+        Assert-Installer ($process.ExitCode -eq $Code) "$($entry[0]) lost exit code $Code. Output: $output"
+        Assert-Installer ($output.Contains("MOCK_COMMAND=$($entry[1])")) "$($entry[0]) must route to its intended command. Output: $output"
+        Assert-Installer ($output.Contains('MOCK_APK=fixture path with spaces.apk')) "$($entry[0]) must preserve quoted arguments"
+        if ($entry[1] -notin @('patch','minor','major','none')) {
+            Assert-Installer ($output.Contains("MOCK_TRANSPORT=$($entry[2])")) "$($entry[0]) must select its explicit transport"
+        }
+        $status = if ($Code -ne 0) { '[ERROR]' } elseif ($entry[2] -eq 'Bluetooth') { '[ACTION REQUIRED]' } else { '[SUCCESS]' }
+        Assert-Installer ($output.Contains($status)) "$($entry[0]) must show an accurate final status"
+        Assert-Installer (($output -match 'This window stays open\.') -eq (-not $NoPause)) 'Only automation opt-out may close the console immediately'
     } finally { $process.Dispose() }
 }
 try {
-    foreach ($name in $names) { Copy-Item -LiteralPath (Join-Path $WindowsPath $name) -Destination (Join-Path $testRoot $name) }
+    foreach ($folder in @('helpers','advanced','advanced/release')) { New-Item -ItemType Directory -Path (Join-Path $testRoot $folder) -Force | Out-Null }
+    Copy-Item -LiteralPath (Join-Path $WindowsPath 'helpers/launch.bat') -Destination (Join-Path $testRoot 'helpers/launch.bat')
+    foreach ($entry in $launchers) { Copy-Item -LiteralPath (Join-Path $WindowsPath $entry[0]) -Destination (Join-Path $testRoot $entry[0]) }
     @'
-param([string]$Command, [switch]$Bluetooth)
-Write-Output "MOCK_INSTALL_COMMAND=$Command"
+param([string]$Command,[string]$Transport,[string]$Apk)
+Write-Output "MOCK_COMMAND=$Command"
+Write-Output "MOCK_TRANSPORT=$Transport"
+Write-Output "MOCK_APK=$Apk"
 exit ([int]$env:GYMLOG_TEST_INSTALL_EXIT)
-'@ | Set-Content -LiteralPath (Join-Path $helpers 'android.ps1') -Encoding ASCII
-    foreach ($name in $names) {
-        Invoke-InstallerFixture $name 0 $true
-        Invoke-InstallerFixture $name 7 $true
-    }
-    foreach ($name in $names[0..1]) {
-        Invoke-InstallerFixture $name 0 $false
-        Invoke-InstallerFixture $name 7 $false
+'@ | Set-Content -LiteralPath (Join-Path $testRoot 'helpers/android.ps1') -Encoding ASCII
+    @'
+param([string]$Bump,[string]$Apk)
+Write-Output "MOCK_COMMAND=$Bump"
+Write-Output "MOCK_APK=$Apk"
+exit ([int]$env:GYMLOG_TEST_INSTALL_EXIT)
+'@ | Set-Content -LiteralPath (Join-Path $testRoot 'helpers/release_version.ps1') -Encoding ASCII
+    $top = @(Get-ChildItem -LiteralPath $WindowsPath -Filter '*.bat' | Sort-Object Name | Select-Object -ExpandProperty Name)
+    Assert-Installer (($top -join ',') -eq 'Bluetooth.bat,USB.bat,WiFi.bat') 'Only the three everyday transport launchers should be visible at the top level'
+    $shared = Get-Content -LiteralPath (Join-Path $WindowsPath 'helpers/launch.bat') -Raw
+    foreach ($color in @('0B','0A','0C','0E')) { Assert-Installer ($shared.Contains("color $color")) 'Progress, success, errors and pending actions need distinct colors' }
+    foreach ($entry in $launchers) {
+        Invoke-LauncherFixture $entry 0 $true
+        Invoke-LauncherFixture $entry 7 $true
+        Invoke-LauncherFixture $entry 0 $false
+        Invoke-LauncherFixture $entry 7 $false
     }
 } finally {
-    $env:GYMLOG_NO_PAUSE = $previousPause
-    $env:GYMLOG_TEST_INSTALL_EXIT = $previousExit
-    foreach ($name in $names) {
-        $file = Join-Path $testRoot $name
-        if (Test-Path -LiteralPath $file -PathType Leaf) { Remove-Item -LiteralPath $file }
-    }
-    foreach ($name in @('android.ps1')) {
-        $file = Join-Path $helpers $name
-        if (Test-Path -LiteralPath $file -PathType Leaf) { Remove-Item -LiteralPath $file }
-    }
-    Remove-Item -LiteralPath $helpers
-    Remove-Item -LiteralPath $testRoot
+    $env:GYMLOG_NO_PAUSE = $savedPause
+    $env:GYMLOG_TEST_INSTALL_EXIT = $savedExit
+    $resolved = [IO.Path]::GetFullPath($testRoot)
+    $temp = [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd('\') + '\'
+    if (-not $resolved.StartsWith($temp, [StringComparison]::OrdinalIgnoreCase) -or (Split-Path $resolved -Leaf) -notlike 'gymlog-console-tests-*') { throw 'Unsafe fixture cleanup path' }
+    if (Test-Path -LiteralPath $resolved) { Remove-Item -LiteralPath $resolved -Recurse -Force }
 }
-Write-Output "PASS: $script:InstallerAssertions installer console assertions; no build, clipboard, UI or device contacted."
+Write-Output "PASS: $script:InstallerAssertions launcher routing, color, argument, persistence and exit-code assertions; no device/build/UI contacted."

@@ -23,17 +23,26 @@ function Get-DeviceConnectionHelp([string[]]$Lines) {
         $help += 'No Android device detected by ADB. The device list is empty or has no usable connection.'
     }
     $help += 'USB: enable Developer options > USB debugging, unlock the phone, and connect directly with a USB data cable. Try another cable/port. On Windows, check Device Manager for a missing phone ADB driver.'
-    $help += 'Wi-Fi: first pair and connect with connect_wifi.bat using the IP and ports shown in Android Wireless debugging.'
-    $help += 'Bluetooth alternative: run install_via_usb_wifi_or_bluetooth.bat -Bluetooth to send the APK and finish installation on the phone without ADB.'
-    $help += 'Once connected, run device_check.bat, then install_via_usb_wifi_or_bluetooth.bat to install the already-built APK without rebuilding.'
+    $help += 'Wi-Fi: use WiFi.bat -PairAddress IP:PAIRING_PORT -ConnectAddress IP:CONNECTION_PORT, using the addresses shown in Android Wireless debugging.'
+    $help += 'Choose USB.bat, WiFi.bat, or Bluetooth.bat explicitly. Connection types never fall back to one another.'
+    $help += 'Install an already-built APK with advanced/install_usb.bat, advanced/install_wifi.bat, or advanced/send_bluetooth.bat.'
     $help += 'More help: scripts/windows/README.md (repository root).'
     $help += "ADB reports:`n$($Lines -join "`n")"
     return $help -join "`n"
 }
 
-function Select-AndroidDevice([string]$Adb, [string]$Serial, [switch]$PreferUsb) {
+function Get-AdbTransport([string]$Serial) {
+    if ($Serial -match ':|_adb(?:-tls-connect)?\._tcp') { return 'WiFi' }
+    if ($Serial -match '^emulator-') { return 'Emulator' }
+    return 'USB'
+}
+
+function Select-AndroidDevice([string]$Adb, [string]$Serial, [ValidateSet('Any','USB','WiFi')][string]$Transport = 'Any') {
     if ($Serial) {
         Assert-DeviceSerial $Serial
+        if ($Transport -ne 'Any' -and (Get-AdbTransport $Serial) -ne $Transport) {
+            throw "Selected serial '$Serial' is not a $Transport connection. Use the matching launcher."
+        }
         $result = Invoke-Adb $Adb @('-s', $Serial, 'get-state') -AllowFailure
         if ($result.ExitCode -ne 0 -or ($result.Lines -join '').Trim() -ne 'device') {
             $devices = Invoke-Adb $Adb @('devices', '-l')
@@ -44,35 +53,20 @@ function Select-AndroidDevice([string]$Adb, [string]$Serial, [switch]$PreferUsb)
     try { $result = Invoke-Adb $Adb @('devices', '-l') }
     catch { $_.Exception.Data['NoUsableDevice']=$true; throw }
     $devices = @($result.Lines | ForEach-Object { if ($_ -match '^(\S+)\s+device(?:\s|$)') { $Matches[1] } })
+    if ($Transport -ne 'Any') { $devices = @($devices | Where-Object { (Get-AdbTransport $_) -eq $Transport }) }
     if ($devices.Count -eq 0) {
-        $failure = New-Object InvalidOperationException (Get-DeviceConnectionHelp $result.Lines)
+        $failure = New-Object InvalidOperationException ("No authorized $Transport connection is available. No other transport will be tried.`n" + (Get-DeviceConnectionHelp $result.Lines))
         $failure.Data['NoUsableDevice'] = $true
         throw $failure
-    }
-    if ($PreferUsb) {
-        # Network serials are IP:port or an Android mDNS service name.
-        # Local emulators stay in the local/USB group and still require an
-        # explicit serial when there is more than one local target.
-        $usb = @($devices | Where-Object { $_ -notmatch ':|_adb(?:-tls-connect)?\._tcp' })
-        if ($usb.Count -gt 0) { $devices = $usb }
     }
     if ($devices.Count -gt 1) { throw "Multiple devices are connected; pass a serial explicitly: $($devices -join ', ')" }
     Assert-DeviceSerial $devices[0]
     return $devices[0]
 }
 
-function Resolve-InstallConnection([scriptblock]$AdbResolver, [string]$Serial, [switch]$NoBluetoothFallback) {
-    try { $adb = & $AdbResolver }
-    catch {
-        if ($Serial -or $NoBluetoothFallback) { throw }
-        return [pscustomobject]@{ Adb=$null; Serial=$null; Reason=$_.Exception.Message }
-    }
-    try { $selected = Select-AndroidDevice $adb $Serial -PreferUsb }
-    catch {
-        # An explicit device or ambiguous selection must not switch targets.
-        if ($Serial -or $NoBluetoothFallback -or -not $_.Exception.Data['NoUsableDevice']) { throw }
-        return [pscustomobject]@{ Adb=$null; Serial=$null; Reason=$_.Exception.Message }
-    }
-    return [pscustomobject]@{ Adb=$adb; Serial=$selected; Reason=$null }
+function Resolve-InstallConnection([scriptblock]$AdbResolver, [string]$Serial, [ValidateSet('USB','WiFi')][string]$Transport = 'USB') {
+    $adb = & $AdbResolver
+    $selected = Select-AndroidDevice $adb $Serial -Transport $Transport
+    return [pscustomobject]@{ Adb=$adb; Serial=$selected }
 }
 

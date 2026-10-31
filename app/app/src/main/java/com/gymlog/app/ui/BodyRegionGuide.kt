@@ -55,7 +55,8 @@ internal fun BodyRegionGuide(colors: Map<BodyArea, Long>, modifier: Modifier = M
                                 .border(1.dp, MaterialTheme.colorScheme.onSurface.copy(alpha = .2f), CircleShape), contentAlignment = Alignment.Center) {
                                 Text("${area.ordinal + 1}", color = regionInk(color), style = MaterialTheme.typography.labelSmall)
                             }
-                            Text(regionGuideName(area), style = MaterialTheme.typography.labelSmall)
+                            Text(regionGuideName(area), Modifier.weight(1f), style = MaterialTheme.typography.labelSmall,
+                                maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
                         }
                     }
                     if (pair.size == 1) Box(Modifier.weight(1f))

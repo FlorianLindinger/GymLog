@@ -246,7 +246,8 @@ internal fun WipStatsScreen(
                 snapshot.regions.forEach { region ->
                     Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
                         Row {
-                            Text(region.area.label, Modifier.weight(1f), style = MaterialTheme.typography.bodySmall)
+                            Text(region.area.label, Modifier.weight(1f), style = MaterialTheme.typography.bodySmall,
+                                maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
                             Text("${dashboardNumber(region.weightedSets)} sets", style = MaterialTheme.typography.labelSmall)
                         }
                         DashboardBar((region.weightedSets / maximum).toFloat(), Color(region.color), Modifier.fillMaxWidth())
@@ -285,7 +286,7 @@ internal fun WipStatsScreen(
             Text("Strength change uses best-set Wathan 1RM for each exercise. The plan summary is the median percentage change of comparable weight exercises, rather than adding kilograms across unrelated lifts. No percentage is invented for zero or missing baselines. Level progress uses absolute level steps.")
             Text("Exercise baselines use the previous period's last training when available; otherwise the first of at least two trainings in this range. Personal records compare the period's best with all earlier history. New exercises establish a baseline rather than claiming a record.")
             Text("Weekly targets count complete Monday-Sunday weeks only. The calendar shows the last 12 weeks of the selected range; shading represents number of logged entries. Body-region totals weight recorded sets by current profiles and do not measure fatigue or recovery.")
-            Text("Warning badges describe the current situation using each exercise's saved global/custom warning settings, including its Volume/1RM choice. The 1RM strength explorer and workload-volume chart let you inspect both dimensions separately.")
+            Text("Warning badges use each exercise's global/custom thresholds and always calculate trends from best-set Wathan 1RM. The 1RM strength explorer and workload-volume chart let you inspect both dimensions separately.")
         } }, confirmButton = { TextButton(onClick = { showMethods = false }) { Text("Close") } })
 }
 

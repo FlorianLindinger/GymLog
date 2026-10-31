@@ -95,6 +95,23 @@ function Assert-WifiAddress([string]$Address) {
     if ([int]$Matches[1] -lt 1 -or [int]$Matches[1] -gt 65535) { throw 'Port must be between 1 and 65535.' }
 }
 
+function Connect-AndroidWifi([string]$Adb, [string]$PairAddress, [string]$ConnectAddress) {
+    if (-not $PairAddress -and -not $ConnectAddress) { throw 'Supply the IP:port from Android Wireless debugging. See scripts/windows/README.md.' }
+    # Validate both addresses before pairing or connecting.
+    if ($PairAddress) { Assert-WifiAddress $PairAddress }
+    if ($ConnectAddress) { Assert-WifiAddress $ConnectAddress }
+    if ($PairAddress) {
+        Write-Host '[WIFI] Enter the pairing code at the ADB prompt; it is not saved.' -ForegroundColor Cyan
+        & $Adb pair $PairAddress
+        if ($LASTEXITCODE -ne 0) { throw 'Wireless pairing failed.' }
+    }
+    if ($ConnectAddress) {
+        $connection = Invoke-Adb $Adb @('connect', $ConnectAddress)
+        $connection.Lines | ForEach-Object { Write-Host $_ }
+        if (($connection.Lines -join ' ') -notmatch '(?:already )?connected to ') { throw 'ADB did not confirm a Wi-Fi connection.' }
+    }
+}
+
 function Copy-DebugApk {
     $source = Join-Path $env:GYMLOG_BUILD_DIR 'outputs/apk/debug/app-debug.apk'
     if (-not (Test-Path -LiteralPath $source)) { throw "APK missing: $source" }

@@ -270,6 +270,7 @@ internal fun TimeWindowChart(
     yMax: Double? = null,
     bodyCalendarLabels: Boolean = false,
     mirrorLeftTicksOnRight: Boolean = false,
+    matchWeightSteps: Boolean = false,
 ) {
     val sortedSeries = remember(series) { series.map { item -> item.copy(points = item.points.sortedBy(TimeValue::timestamp)) } }
     val allPoints = remember(sortedSeries) { sortedSeries.flatMap(TimeSeries::points) }
@@ -287,7 +288,12 @@ internal fun TimeWindowChart(
         .map(TimeValue::value)
     val bandValues = remember(bands) { bands.flatMap { listOf(it.center - it.tolerance, it.center, it.center + it.tolerance) } }
     val leftRange = remember(visibleSeries, bandValues, compactYAxis, yMin, yMax) { chartAxisRange(visibleValues(PlotAxis.LEFT) + bandValues, compactYAxis, yMin, yMax) }
-    val rightRange = remember(visibleSeries) { chartAxisRange(visibleValues(PlotAxis.RIGHT)) }
+    val rightRange = remember(visibleSeries, sortedSeries, matchWeightSteps) {
+        val values = visibleValues(PlotAxis.RIGHT)
+        if (matchWeightSteps) weightChartAxisRange(values,
+            sortedSeries.filter { it.axis == PlotAxis.RIGHT && it.showPoints }.flatMap { it.points }.map { it.value })
+        else chartAxisRange(values)
+    }
     val independentRange = remember(visibleSeries) { chartAxisRange(visibleValues(PlotAxis.INDEPENDENT)) }
     val leftMinor = remember(leftRange) { minorChartTicks(leftRange) }
     val rightMinor = remember(rightRange) { minorChartTicks(rightRange) }

@@ -275,7 +275,8 @@ private fun BodyAreaStatsCard(stats: List<BodyAreaTrainingStat>) {
             stats.forEach { stat ->
                 Row(Modifier.fillMaxWidth(), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
                     Box(Modifier.width(12.dp).height(12.dp).background(Color(stat.color), CircleShape))
-                    Text(stat.area.label, Modifier.weight(1f).padding(start = 5.dp), style = MaterialTheme.typography.bodySmall, maxLines = 1)
+                    Text(stat.area.label, Modifier.weight(1f).padding(start = 5.dp), style = MaterialTheme.typography.bodySmall,
+                        maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
                     Text(stat.full.toString(), Modifier.width(34.dp), style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.End)
                     Text(stat.half.toString(), Modifier.width(34.dp), style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.End)
                     Text(stat.low.toString(), Modifier.width(34.dp), style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.End)

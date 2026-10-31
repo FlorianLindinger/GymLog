@@ -3,8 +3,7 @@ param(
     [Parameter(Mandatory)][ValidateSet('build','verify','release','install','build-install','device','logs','screenshot','wifi')][string]$Command,
     [Parameter(Position=0)][string]$Serial,
     [string]$Apk,
-    [switch]$Bluetooth,
-    [switch]$NoBluetoothFallback,
+    [ValidateSet('USB','WiFi','Bluetooth')][string]$Transport = 'USB',
     [string]$PairAddress,
     [string]$ConnectAddress
 )
@@ -12,15 +11,30 @@ $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'android_env.ps1')
 
 try {
-    if ($Bluetooth -and ($Command -notin @('install','build-install') -or $Serial -or $PairAddress -or $ConnectAddress -or $NoBluetoothFallback)) {
-        throw 'Use -Bluetooth only with install/build-install and without an ADB serial or Wi-Fi address.'
-    }
     $isInstall = $Command -in @('install','build-install')
+    if ($isInstall -and $Transport -eq 'Bluetooth' -and ($Serial -or $PairAddress -or $ConnectAddress)) {
+        throw 'Bluetooth transfer does not use an ADB serial or a Wi-Fi address.'
+    }
+    if ($isInstall -and $Transport -ne 'WiFi' -and ($PairAddress -or $ConnectAddress)) {
+        throw 'Wi-Fi addresses are only supported by the WiFi launcher.'
+    }
+    $selected = $null
     if ($isInstall) {
         $action = if ($Command -eq 'build-install') { 'Build and install' } else { 'Install' }
-        Write-Host "GymLog - $action via USB, Wi-Fi or Bluetooth"
+        Write-Host "GymLog - $action via $Transport" -ForegroundColor Cyan
+        if ($Transport -ne 'Bluetooth') {
+            $adb = Find-Adb
+            if ($Transport -eq 'WiFi' -and ($PairAddress -or $ConnectAddress)) {
+                Connect-AndroidWifi $adb $PairAddress $ConnectAddress
+            }
+            $connection = Resolve-InstallConnection { Find-Adb } $Serial -Transport $Transport
+            $adb = $connection.Adb
+            $selected = $connection.Serial
+            Write-Host "[$Transport] Connected: $selected" -ForegroundColor Green
+        }
     }
     if ($Command -in @('build','verify','release','build-install')) {
+        Write-Host '[BUILD] Preparing the Android build tools...' -ForegroundColor Cyan
         Initialize-Build
         if ($Command -eq 'release') {
             Build-SignedRelease
@@ -40,39 +54,20 @@ try {
     }
     if ($isInstall) {
         if (-not $Apk) { $Apk = Join-Path $script:RepoRoot 'app/artifacts/debug/app-debug.apk' }
-        if (-not (Test-Path -LiteralPath $Apk -PathType Leaf)) { throw 'APK not found. Run build.bat first or pass -Apk PATH.' }
+        if (-not (Test-Path -LiteralPath $Apk -PathType Leaf)) { throw 'APK not found. Run advanced/build.bat first or pass -Apk PATH.' }
     }
-    $selected = $null
-    if ($isInstall -and -not $Bluetooth) {
-        $connection = Resolve-InstallConnection { Find-Adb } $Serial -NoBluetoothFallback:$NoBluetoothFallback
-        if ($connection.Serial) { $adb=$connection.Adb; $selected=$connection.Serial }
-        else {
-            Write-Host $connection.Reason
-            Write-Host 'USB/Wi-Fi installation is unavailable. Falling back to Bluetooth APK transfer.'
-            $Bluetooth = $true
-        }
-    }
-    if ($Bluetooth) {
+    if ($isInstall -and $Transport -eq 'Bluetooth') {
         . (Join-Path $PSScriptRoot 'bluetooth_apk.ps1')
         Send-ApkViaBluetooth $Apk
         exit 0
     }
     if (-not $isInstall) { $adb = Find-Adb }
     if ($Command -eq 'wifi') {
-        if (-not $PairAddress -and -not $ConnectAddress) { throw 'Supply -PairAddress IP:PAIRING_PORT and/or -ConnectAddress IP:CONNECTION_PORT. See scripts/windows/README.md.' }
-        if ($PairAddress) {
-            Assert-WifiAddress $PairAddress
-            Write-Host 'Enter the pairing code at the ADB prompt; it is not saved by this helper.'
-            & $adb pair $PairAddress
-            if ($LASTEXITCODE -ne 0) { throw 'Wireless pairing failed.' }
+        if (-not $PairAddress -and -not $ConnectAddress) {
+            $PairAddress = Read-Host 'Pairing IP:port (leave blank if already paired)'
+            $ConnectAddress = Read-Host 'Connection IP:port'
         }
-        if ($ConnectAddress) {
-            Assert-WifiAddress $ConnectAddress
-            $connection = Invoke-Adb $adb @('connect', $ConnectAddress)
-            $connection.Lines | ForEach-Object { Write-Host $_ }
-            # adb connect can report a connection failure with exit code zero.
-            if (($connection.Lines -join ' ') -notmatch '(?:already )?connected to ') { throw 'ADB did not confirm a connection.' }
-        }
+        Connect-AndroidWifi $adb $PairAddress $ConnectAddress
         (Invoke-Adb $adb @('devices','-l')).Lines | ForEach-Object { Write-Host $_ }
         exit 0
     }
@@ -89,14 +84,15 @@ try {
     }
     if ($Command -in @('install','build-install')) {
         if (-not $Apk) { $Apk = Join-Path $script:RepoRoot 'app/artifacts/debug/app-debug.apk' }
-        if (-not (Test-Path -LiteralPath $Apk -PathType Leaf)) { throw 'APK not found. Run build.bat first or pass -Apk PATH.' }
+        if (-not (Test-Path -LiteralPath $Apk -PathType Leaf)) { throw 'APK not found. Run advanced/build.bat first or pass -Apk PATH.' }
+        Write-Host "[INSTALL] Updating GymLog via $Transport..." -ForegroundColor Cyan
         $install = Invoke-Adb $adb @('-s',$selected,'install','-r',[IO.Path]::GetFullPath($Apk))
         $install.Lines | ForEach-Object { Write-Host $_ }
         if (($install.Lines -join "`n") -notmatch '(?m)^Success\r?$') { throw 'ADB did not confirm installation success. Existing app data was not removed.' }
         $launch = Invoke-Adb $adb @('-s',$selected,'shell','am','start','-n',"$script:Package/.MainActivity")
         $launch.Lines | ForEach-Object { Write-Host $_ }
         if (($launch.Lines -join "`n") -match '(?im)^Error(?:\s|:)|Exception') { throw 'APK installed, but Android could not launch this app. Check that you selected the correct APK.' }
-        Write-Host 'Installed and launched. Existing app data was preserved.'
+        Write-Host '[SUCCESS] Installed and launched. Existing app data was preserved.' -ForegroundColor Green
         exit 0
     }
     if ($Command -eq 'logs') {
@@ -134,4 +130,4 @@ try {
         }
         Write-Host "Screenshot: $destination"
     }
-} catch { [Console]::Error.WriteLine("ERROR: $($_.Exception.Message)"); exit 1 }
+} catch { Write-Host "[ERROR] $($_.Exception.Message)" -ForegroundColor Red; exit 1 }

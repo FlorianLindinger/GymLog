@@ -489,6 +489,10 @@ class GymRepository(context: Context, private val gymClock: GymClock = GymClock(
         }
         val now = gymClock.now()
         database.transaction {
+            val currentSets = loadSets(database, machineId, null, trainingDayStart(now)).sortedBy { it.performedAt }
+            val entryLevel = if (mode.usesResistanceLevel()) {
+                trainingEntryMetric(recordedLevel.toDouble(), mode, currentSets).toInt()
+            } else recordedLevel
             if (mode == TrackingMode.DURATION) database.update("machines", ContentValues().apply {
                 put("current_weight", minutes.toDouble())
             }, "id=?", arrayOf(machineId.toString()))
@@ -499,7 +503,7 @@ class GymRepository(context: Context, private val gymClock: GymClock = GymClock(
             )
             database.insertOrThrow("sets", null, ContentValues().apply {
                 put("machine_id", machineId)
-                put("reps", recordedLevel)
+                put("reps", entryLevel)
                 put("weight", minutes.toDouble())
                 put("performed_at", now)
             })
@@ -510,6 +514,7 @@ class GymRepository(context: Context, private val gymClock: GymClock = GymClock(
         val database = db.writableDatabase
         val now = gymClock.now()
         database.transaction {
+            val currentSets = loadSets(database, machineId, null, trainingDayStart(now)).sortedBy { it.performedAt }
             database.delete(
                 "sets",
                 "machine_id=? AND performed_at>=?",
@@ -519,7 +524,7 @@ class GymRepository(context: Context, private val gymClock: GymClock = GymClock(
                 database.insertOrThrow("sets", null, ContentValues().apply {
                     put("machine_id", machineId)
                     put("reps", amount)
-                    put("weight", weight)
+                    put("weight", trainingEntryMetric(weight, TrackingMode.WEIGHT, currentSets, index))
                     put("performed_at", now + index)
                 })
             }
@@ -948,12 +953,12 @@ class GymRepository(context: Context, private val gymClock: GymClock = GymClock(
         return result
     }
 
-    private fun loadSets(database: SQLiteDatabase, id: Long, limit: Int?): List<SetRecord> {
+    private fun loadSets(database: SQLiteDatabase, id: Long, limit: Int?, since: Long? = null): List<SetRecord> {
         val result = mutableListOf<SetRecord>()
         val limitClause = limit?.let { " LIMIT $it" } ?: ""
         database.rawQuery(
-            "SELECT id,machine_id,reps,weight,performed_at FROM sets WHERE machine_id=? ORDER BY performed_at DESC,id DESC$limitClause",
-            arrayOf(id.toString()),
+            "SELECT id,machine_id,reps,weight,performed_at FROM sets WHERE machine_id=?${if (since != null) " AND performed_at>=?" else ""} ORDER BY performed_at DESC,id DESC$limitClause",
+            if (since != null) arrayOf(id.toString(), since.toString()) else arrayOf(id.toString()),
         ).use { cursor ->
             while (cursor.moveToNext()) result += SetRecord(cursor.getLong(0), cursor.getLong(1), cursor.getInt(2), cursor.getDouble(3), cursor.getLong(4))
         }

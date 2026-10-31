@@ -33,12 +33,12 @@ function Send-ApkViaBluetooth([string]$File) {
             Set-Clipboard -Value $apk.FullName -ErrorAction Stop
             if ((Get-Clipboard -Raw -ErrorAction Stop) -cne $apk.FullName) { throw 'Clipboard verification failed.' }
         }
-        Write-Host 'APK path copied to the clipboard. Use Ctrl+V in the Browse file-name field.'
+        Write-Host 'APK path copied to the clipboard. Use Ctrl+V in the Browse file-name field.' -ForegroundColor Green
     } catch {
-        Write-Host 'Could not copy the APK path to the clipboard. Copy the printed path below manually.'
+        Write-Host 'Could not copy the APK path to the clipboard. Copy the printed path below manually.' -ForegroundColor Yellow
         Write-Host "Clipboard error: $($_.Exception.Message)"
     }
-    Write-Host 'Bluetooth APK transfer (installation is completed on the phone)'
+    Write-Host 'Bluetooth APK transfer (installation is completed on the phone)' -ForegroundColor Cyan
     Write-Host '1. Turn on Bluetooth and pair the phone with this PC in Windows Settings.'
     Write-Host '2. In Bluetooth File Transfer, choose Send files and select your phone.'
     Write-Host '3. Click Browse and paste this exact APK path into the file-name field:'
@@ -49,7 +49,7 @@ function Send-ApkViaBluetooth([string]$File) {
     # The native wizard handles device selection, pairing and transfer consent.
     # Do not assume undocumented fsquirt arguments can preselect an APK.
     Start-Process -FilePath $wizard -WindowStyle Normal -ErrorAction Stop | Out-Null
-    Write-Host 'Bluetooth file-transfer wizard opened. Transfer and installation are pending; their success cannot be checked by this helper.'
+    Write-Host 'Bluetooth file-transfer wizard opened. Transfer and installation are pending; their success cannot be checked by this helper.' -ForegroundColor Yellow
 }
 
 if ($MyInvocation.InvocationName -ne '.') {

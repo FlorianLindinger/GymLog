@@ -130,6 +130,7 @@ fun GymLogApp(
     healthSyncStatus: String,
     healthSyncing: Boolean,
     onHealthSync: () -> Unit,
+    onAutoHealthSync: () -> Unit,
 ) {
     val viewModel: GymLogViewModel = androidx.lifecycle.viewmodel.compose.viewModel(factory = GymLogViewModel.factory(repository))
     val loadState by viewModel.uiState.collectAsState()
@@ -331,6 +332,7 @@ fun GymLogApp(
                 isSyncing = healthSyncing,
                 modifier = Modifier.padding(padding),
                 onSync = onHealthSync,
+                onAutoSync = onAutoHealthSync,
                 onGym = { screen = Screen.OVERVIEW },
             )
             Screen.HISTORY -> HistoryScreen(
@@ -464,15 +466,16 @@ fun GymLogApp(
                 TextButton(onClick = { showMenu = false; screen = Screen.PLANS }) { Text("Training Plans") }
                 TextButton(onClick = { showMenu = false; screen = Screen.ORDER }) { Text("Exercise Order") }
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    Text("Use 1RM instead of volume", Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
+                    OutlinedButton(
+                        onClick = { showMenu = false; showTrainingMetricHelp = true },
+                        modifier = Modifier.weight(1f).semantics { contentDescription = "Explain volume and 1RM" },
+                        contentPadding = PaddingValues(horizontal = 8.dp),
+                    ) { Text("Use 1RM instead of volume", style = MaterialTheme.typography.bodyMedium) }
                     Switch(checked = uiState.progressionSettings.useOneRepMax, onCheckedChange = { enabled ->
                         val updated = uiState.progressionSettings.copy(useOneRepMax = enabled)
                         repository.saveProgressionSettings(updated)
                         viewModel.replace(Result.success(uiState.copy(progressionSettings = updated)))
                     })
-                    TextButton(onClick = { showMenu = false; showTrainingMetricHelp = true },
-                        modifier = Modifier.semantics { contentDescription = "Explain volume and 1RM" },
-                        contentPadding = PaddingValues(horizontal = 8.dp)) { Text("?") }
                 }
                 TextButton(onClick = { showMenu = false; showProgressionSettings = true }) { Text("Progress Warnings") }
                 TextButton(onClick = { showMenu = false; screen = Screen.BACKUP }) { Text("Data, Backup & Sync") }
@@ -503,13 +506,13 @@ fun GymLogApp(
         text = {
             Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Text("Volume or 1RM", style = MaterialTheme.typography.titleSmall)
-                Text("Choose Use 1RM instead of volume directly in Menu. Tap ? beside it for details. " + TRAINING_METRIC_EXPLANATION)
+                Text("Choose Use 1RM instead of volume with the switch in Menu. Tap its outlined label for details. " + TRAINING_METRIC_EXPLANATION)
                 Text("Progress Warnings & Overrides", style = MaterialTheme.typography.titleSmall)
-                Text("Warnings show weeks without a kg increase and growth in the selected metric (Volume or 1RM). The trend window compares the first and last training once the window is full. Blank or 0 disables the corresponding warning; either a blank/0 window or minimum percentage disables the trend warning. Active windows need at least 2 trainings.")
-                Text("Every exercise has Progress Warnings in its details. Follow global warning settings uses future global changes. Turn it off for custom thresholds and a custom Volume/1RM choice. Blank custom fields disable warnings rather than inheriting global values. Warnings apply to weight exercises.")
+                Text("Warnings show weeks without a kg increase and growth in formula-based best-set 1RM. The trend window compares the first and last training once the window is full. The Menu metric switch only changes charts and entry summaries. Blank or 0 disables the corresponding warning; either a blank/0 window or minimum percentage disables the trend warning. Active windows need at least 2 trainings.")
+                Text("Every exercise has Progress Warnings in its details. Follow global warning settings uses future global changes. Turn it off for custom thresholds. Trend warnings always use the Wathan 1RM formula; there is no per-exercise metric setting. Blank custom fields disable warnings rather than inheriting global values. Warnings apply to weight exercises.")
                 Text("Exercise Ordering & Outlines", style = MaterialTheme.typography.titleSmall)
-                Text("Open Exercise Order from Menu. The current exercise stays first with a blue outline. Auto ranks unfinished exercises by least body-region overlap with the current and previous distinct exercises; the previous one has half the weight. Green blends through yellow and orange to red as overlap increases. Completed exercises have no overlap outline. Missing profiles count as zero overlap, so green can also mean an unconfigured profile.")
-                Text("Equal overlap prefers higher tie priority (+ raises it), then fewer recorded training days overall. Manual top and bottom use your arrow order. Hidden exercises still contribute recent training context.")
+                Text("Open Exercise Order from Menu. The current exercise stays first with a blue outline. Auto groups unfinished exercises into seven overlap bins. All distinct exercises in this training contribute with fixed weights of 100%, 50%, 25%, 12.5% and so on, without dividing by exercise count. The colors run from dark green through green, yellow, orange, red-orange and red to dark red. Completed exercises have no overlap outline. Missing profiles count as zero overlap, so dark green can also mean an unconfigured profile.")
+                Text("Within each overlap bin, fewer training days in the last two calendar months comes first, then tie priority (+ raises it). Unfinished manual top and bottom use your arrow order; completed exercises follow from first to last done. Hidden exercises still contribute recent training context.")
                 Text("Body Regions & Colors", style = MaterialTheme.typography.titleSmall)
                 Text("Choose Off, Low, Medium or High involvement in exercise details. Marker widths follow intensity. English/German exercise suggestions provide editable starting profiles. These are planning estimates, not recovery measurements. The body-region guide's Show/Hide choice is remembered for every exercise, even when profile edits are cancelled.")
                 Text("Training Days & Time", style = MaterialTheme.typography.titleSmall)
@@ -520,11 +523,11 @@ fun GymLogApp(
                 Text("WIP stats is a separate dashboard beside Stats. It compares equal calendar periods, tracks weekly goals, and offers a tappable training calendar, exercise charts and records. Its totals follow the selected interval and hidden-exercise switch. Tap How measured for the calculation rules.")
                 Text("The strength explorer uses best-set 1RM, while level and watts use peak intensity. Level changes are level steps, not percentages. Work/load for those entries is intensity x recorded minutes; the 1RM formula does not apply because they do not record repetitions. Tap the exercise chart's 1RM legend for details. New settings default to 1RM; saved choices are preserved.")
                 Text("Body Plot Settings", style = MaterialTheme.typography.titleSmall)
-                Text("Body Settings controls global plot defaults. Tap an individual plot for overrides; Follow global switches choose which settings inherit future global changes. Averaging groups displayed measurements into time bins; fits use original measurements. Blank Y-axis limits use automatic scaling. Targets and acceptance ranges belong to each plot; the global target switch controls visibility.")
+                Text("Body Settings controls global plot defaults. Order and hide plots saves your plot order and visibility; reset restores Weight, Muscle Mass, Fat Mass, Fat %, then Muscle Mass %. Tap an individual plot for overrides; Follow global switches choose which settings inherit future global changes. Raw data and two trailing moving averages can be toggled independently: one uses a period in days, the other a percentage of the displayed interval. Both averages can be overlaid. Fits use original measurements. Blank Y-axis limits use automatic scaling. Targets and acceptance ranges belong to each plot; the global target switch controls visibility.")
                 Text("Body Reference Lines", style = MaterialTheme.typography.titleSmall)
-                Text("Blue marks measurements, yellow the fit, green the target, purple all-time low/mean/high and orange history-window low/mean/high. Each has its own visibility switch; means are dashed. Low/Mean/High values appear above the plot. History can follow the plot interval, including Custom and All, or use a separate window ending at the plot's end date. Mean calculations use original measurements rather than averaged display bins.")
+                Text("Blue marks raw data, cyan the fixed-period moving average, pink the interval-fraction moving average, yellow the fit, green the target, purple all-time low/mean/high and orange history references. Reference text names All-time or the history interval, such as 2mon history. Each reference has its own visibility switch; means are dashed. History low/high default to the 5th/95th percentiles; choose a cutoff from 0 to 50%. A nonzero cutoff appears in the labels; 0 uses exact low/high. All-time records remain exact. History can follow the plot interval or use a separate window. Means and fits always use raw measurements.")
                 Text("Health Connect", style = MaterialTheme.typography.titleSmall)
-                Text("Sync Health Connect is at the top of Body Settings, with status and last sync time. It reads permitted body measurements. Automatic refresh on resume reuses a successful sync for 15 minutes; the Settings button requests a fresh sync. Body data and plot settings are independent of training plans.")
+                Text("Sync Health Connect is at the top of Body Settings, with status and last sync time. Body syncs on entry, on returning to the foreground, and every minute while visible, using existing permissions. Its refresh timer stops when you leave Body or background the app. Outside Body, automatic refresh on resume reuses a successful sync for 15 minutes. The Settings button requests a fresh sync and can request permissions. Body data and plot settings are independent of training plans.")
                 Text("History, Hidden Exercises & Undo", style = MaterialTheme.typography.titleSmall)
                 Text("Calendar & History lets you edit or delete individual entries, an exercise's day or a whole training day. Hiding an exercise retains its records; use Show hidden exercises to find it again. When an Undo message appears after a deletion, tap Undo while it is visible to restore the data.")
                 Text("Backups", style = MaterialTheme.typography.titleSmall)
@@ -740,7 +743,7 @@ private fun OrderScreen(
     ) {
         item {
             Text(
-                "The current exercise stays first, then Manual top in your arrow order. Auto ranks unfinished exercises by least estimated overlap with the current and previous distinct exercises (the previous one has half the weight). Equal overlap prefers higher tie priority, then fewer training days overall. Unknown overlap counts as zero. Manual bottom keeps your arrow order.",
+                "The current exercise stays first, then unfinished Manual top in your arrow order. Auto uses seven overlap bins, from dark green (least) to dark red (most). All distinct exercises in this training contribute with fixed weights of 100%, 50%, 25%, 12.5% and so on, without dividing by exercise count. Within each bin, fewer training days in the last two calendar months comes first, then tie priority. Unknown overlap counts as zero. Unfinished Manual bottom keeps your arrow order, followed by completed exercises from first to last done.",
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )

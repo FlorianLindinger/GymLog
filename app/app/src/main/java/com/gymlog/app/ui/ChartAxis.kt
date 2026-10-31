@@ -4,10 +4,52 @@ import java.math.BigDecimal
 import java.math.RoundingMode
 import kotlin.math.abs
 import kotlin.math.floor
+import kotlin.math.ceil
 import kotlin.math.log10
+import kotlin.math.roundToLong
 
 internal data class AxisRange(val min: Double, val max: Double, val ticks: List<Double>) {
     val span: Double get() = max - min
+}
+
+/** Infer the most common recent recorded change, ignoring unchanged sets and floating-point noise. */
+internal fun recordedWeightStep(weights: List<Double>): Double? = weights
+    .filter { it.isFinite() && it >= 0.0 }
+    .zipWithNext { a, b -> (abs(b - a) * 100).roundToLong() }
+    .filter { it >= 5L }
+    .takeLast(30)
+    .groupingBy { it }.eachCount().entries
+    .sortedWith(compareByDescending<Map.Entry<Long, Int>> { it.value }.thenBy { it.key })
+    .firstOrNull()?.key?.div(100.0)
+
+/** Align labels to actual recorded loads and integer multiples of the inferred machine increment. */
+internal fun weightChartAxisRange(values: List<Double>, recordedWeights: List<Double>): AxisRange {
+    val stepValue = recordedWeightStep(recordedWeights) ?: return chartAxisRange(values)
+    val finite = values.filter { it.isFinite() && it >= 0.0 }
+    if (finite.isEmpty()) return chartAxisRange(values)
+    val rawMin = finite.min()
+    val rawMax = finite.max()
+    val padding = if (rawMax == rawMin) maxOf(rawMax * .01, .1) else (rawMax - rawMin) * .025
+    val minimum = (rawMin - padding).coerceAtLeast(0.0)
+    val maximum = rawMax + padding
+    val span = maximum - minimum
+    val base = BigDecimal.valueOf(stepValue)
+    val anchor = BigDecimal.valueOf(recordedWeights.last { it.isFinite() && it >= 0.0 })
+    val idealMultiple = span / (stepValue * 4)
+    val factors = listOf(1.0, floor(idealMultiple), ceil(idealMultiple), ceil(idealMultiple) + 1)
+        .map { it.coerceAtLeast(1.0) }.distinct()
+    return factors.mapNotNull { factor ->
+        val step = base.multiply(BigDecimal.valueOf(factor))
+        val first = BigDecimal.valueOf(minimum).subtract(anchor).divide(step, 0, RoundingMode.FLOOR)
+            .max(anchor.negate().divide(step, 0, RoundingMode.CEILING))
+        val last = BigDecimal.valueOf(maximum).subtract(anchor).divide(step, 0, RoundingMode.CEILING)
+        val count = last.subtract(first).add(BigDecimal.ONE)
+        if (count > BigDecimal.valueOf(6L)) return@mapNotNull null
+        val ticks = List(count.toInt().coerceAtLeast(4)) {
+            anchor.add(first.add(BigDecimal.valueOf(it.toLong())).multiply(step)).toDouble()
+        }
+        AxisRange(minOf(minimum, ticks.first()), ticks.last(), ticks)
+    }.minBy { (it.span - span) / span + .15 * abs(it.ticks.size - 5) }
 }
 
 internal fun chartAxisRange(values: List<Double>, compact: Boolean = false, yMin: Double? = null, yMax: Double? = null): AxisRange {

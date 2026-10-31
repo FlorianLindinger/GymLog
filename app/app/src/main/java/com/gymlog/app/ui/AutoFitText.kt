@@ -11,8 +11,19 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.rememberTextMeasurer
-import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.sp
+
+/** Estimate from actual line width, then correct for fixed letter spacing and pixel rounding. */
+internal fun fittedSingleLineFontSize(preferredSize: Float, availableWidth: Int, measureWidth: (Float) -> Int): Float {
+    var candidate = preferredSize.takeIf { it.isFinite() && it > 0 }?.coerceAtLeast(1f) ?: 14f
+    val width = availableWidth.coerceAtLeast(1)
+    repeat(6) {
+        val measured = measureWidth(candidate)
+        if (measured <= width || candidate <= 1f) return candidate
+        candidate = (candidate * width / measured - .1f).coerceAtLeast(1f)
+    }
+    return 1f
+}
 
 /** Keep the full line visible, shrinking only when the available width requires it. */
 @Composable
@@ -35,24 +46,12 @@ internal fun AutoFitText(
     BoxWithConstraints(modifier) {
         val width = with(density) { maxWidth.roundToPx() }.coerceAtLeast(1)
         val fontSize = remember(text, style, width, density, measurer) {
-            fun fits(size: Float): Boolean = !measurer.measure(
+            fittedSingleLineFontSize(style.fontSize.value, width) { size -> measurer.measure(
                 text = text,
                 style = style.copy(fontSize = size.sp),
                 softWrap = false,
                 maxLines = 1,
-                constraints = Constraints(maxWidth = width),
-            ).didOverflowWidth
-
-            val preferred = style.fontSize.value
-            if (fits(preferred)) preferred else {
-                var low = 1f
-                var high = preferred
-                repeat(12) {
-                    val middle = (low + high) / 2f
-                    if (fits(middle)) low = middle else high = middle
-                }
-                low
-            }
+            ).size.width }
         }
         Text(text, style = style.copy(fontSize = fontSize.sp), color = color, maxLines = 1, softWrap = false)
     }

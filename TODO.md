@@ -1,11 +1,24 @@
 
+Deleting entry is weird bc delete button for all sets. I guess just button for change and delete 
+
+Rework recent entries 
+
+Add at least other conceivable gym things to list so they appear green. Like all all. Even leg stuff 
+
+Ask AI for reasonable warning limits for rm1 and weights
+
+It should say x weeks no increase when I increase for next session 
+
+waht is the x numbers no increase actually doing?. i guess it should be rather slope if i go up and dwon over that time. but percentage is bad i guess.. maybe it should just not count a decrease and then increase as no increase? hm maybe it should tho
+
+Plot for moving window. Total hours exercises. Total number of trainings. Is moving better than plot of individual. Or is per week averaging already fine. Number stats are already per interval selected but would sill be nice to see how those stats moved over time . Movin average 2 week total gym hourse plot.
+
+
 fix stats
 
 test deletes training hisroy and add way to change or add specifc one on specifc date...
 
 ask AI for more ideas
-
-do i want more body plot settings? more lines
 
 scrolling exercises overciew should be more smooth
 

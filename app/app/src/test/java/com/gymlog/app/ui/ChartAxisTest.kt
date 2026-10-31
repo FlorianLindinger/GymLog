@@ -2,10 +2,60 @@ package com.gymlog.app.ui
 
 import java.math.BigDecimal
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class ChartAxisTest {
+    @Test
+    fun weightStepsUseCommonRecordedChangesIgnoringRepeatedSetsAndNoise() {
+        assertEquals(3.0, recordedWeightStep(listOf(40.0, 40.0, 43.0, 43.00000001, 46.0, 52.0))!!, 0.0)
+        assertEquals(5.0, recordedWeightStep(listOf(40.0, 45.0, 50.0, 60.0, 55.0))!!, 0.0)
+        assertEquals(2.5, recordedWeightStep(listOf(42.5, 45.0, 47.5))!!, 0.0)
+        assertNull(recordedWeightStep(listOf(40.0, 40.0, Double.NaN)))
+        assertNull(recordedWeightStep(emptyList()))
+    }
+
+    @Test
+    fun inferredStepFollowsRecentChangesWhenMachineIncrementChanges() {
+        val old = (0..50).map { it * 5.0 }
+        val recent = (1..35).map { 250.0 + it * 3.0 }
+        assertEquals(3.0, recordedWeightStep(old + recent)!!, 0.0)
+    }
+
+    @Test
+    fun machineTicksFollowThreeFiveAndFractionalIncrementsAndRecordedOffsets() {
+        listOf(listOf(40.0, 43.0, 46.0), listOf(42.5, 47.5, 52.5), listOf(41.25, 43.75, 46.25)).forEach { weights ->
+            val range = weightChartAxisRange(weights, weights)
+            val increment = recordedWeightStep(weights)!!
+            assertEquals(increment, range.ticks[1] - range.ticks[0], .000001)
+            assertTrue(range.min >= 0 && range.min <= weights.min() && range.max >= weights.max())
+            assertTrue(weights.all { it in range.ticks })
+        }
+    }
+
+    @Test
+    fun widerWeightAxisUsesMultiplesAndIncludesTrendWithoutInferringFromIt() {
+        val weights = (0..50).map { 10.0 + it * 3.0 }
+        val values = weights + listOf(5.3, 181.4)
+        val range = weightChartAxisRange(values, weights)
+        val step = range.ticks[1] - range.ticks[0]
+        assertTrue(step > 3.0)
+        assertEquals(0.0, step % 3.0, .000001)
+        assertTrue(range.min >= 0 && range.min <= values.min() && range.max >= values.max())
+        assertTrue(range.ticks.size in 4..6)
+        assertTrue(range.ticks.all { kotlin.math.abs((it - weights.last()) % 3.0) < .000001 })
+    }
+
+    @Test
+    fun constantAndMissingWeightsKeepAutomaticTicks() {
+        listOf(emptyList(), listOf(40.0), listOf(40.0, 40.0)).forEach { weights ->
+            assertEquals(chartAxisRange(weights), weightChartAxisRange(weights, weights))
+        }
+        val range = weightChartAxisRange(listOf(0.0, 3.0), listOf(0.0, 3.0))
+        assertTrue(range.ticks.all { it >= 0.0 })
+    }
+
     @Test
     fun minorTicksUseReadableSubdivisionsAndStayInsideBoundsWithoutDuplicatingMajors() {
         val range = AxisRange(9.6, 20.4, listOf(10.0, 12.5, 15.0, 17.5, 20.0))

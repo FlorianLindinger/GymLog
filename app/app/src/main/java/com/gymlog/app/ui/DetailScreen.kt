@@ -51,6 +51,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.gymlog.app.R
 import com.gymlog.app.data.ChartRange
@@ -96,16 +97,17 @@ fun DetailScreen(
     var quickEntry by remember { mutableStateOf(false) }
     val machine = summary.machine
     val useOneRepMax = machine.trackingMode == TrackingMode.WEIGHT &&
-        (machine.progressionSettings ?: repository.loadProgressionSettings()).useOneRepMax
+        repository.loadProgressionSettings().useOneRepMax
     val context = LocalContext.current
     val chartPreferences = remember { context.getSharedPreferences("gym_chart_ranges", 0) }
     var showCustomChartRange by remember { mutableStateOf(false) }
     var customChartStart by remember(machine.id) { mutableStateOf(chartPreferences.getLong("${machine.id}_start", 0L).takeIf { it > 0L }) }
     var customChartEnd by remember(machine.id) { mutableStateOf(chartPreferences.getLong("${machine.id}_end", 0L).takeIf { it > 0L }) }
-    val currentUnitSets = currentTrainingUnitSets(summary)
+    val today = trainingDate(System.currentTimeMillis())
+    val currentUnitSets = remember(summary.recentSets, today) { currentTrainingUnitSets(summary) }
     val entryBatches = remember(summary.recentSets) { groupSetBatches(summary.recentSets) }
-    val first = summary.recordedMetricHistory().firstOrNull()?.weight ?: machine.currentWeight
-    val trainedDays = summary.recentSets.map { trainingDate(it.performedAt) }.distinct().size
+    val first = remember(summary) { summary.recordedMetricHistory().firstOrNull()?.weight ?: machine.currentWeight }
+    val trainedDays = remember(summary.recentSets) { summary.recentSets.map { trainingDate(it.performedAt) }.distinct().size }
 
     Column(
         modifier = modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(8.dp),
@@ -115,13 +117,18 @@ fun DetailScreen(
             ExerciseNoteCard(machine.notes) { onEditDetails(ExerciseEditField.OVERVIEW_NOTE) }
         }
         Button(onClick = { quickEntry = true }, modifier = Modifier.fillMaxWidth()) {
-            Text(
-                when {
-                    machine.trackingMode.usesResistanceLevel() -> if (currentUnitSets.isEmpty()) "Add training entry" else "Change training entry"
-                    machine.trackingMode == TrackingMode.DURATION -> if (currentUnitSets.isEmpty()) "Add training" else "Change training"
-                    else -> if (currentUnitSets.isEmpty()) "Add sets" else "Change sets"
-                },
-            )
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Text(
+                    when {
+                        machine.trackingMode.usesResistanceLevel() -> if (currentUnitSets.isEmpty()) "Add training entry" else "Change training entry"
+                        machine.trackingMode == TrackingMode.DURATION -> if (currentUnitSets.isEmpty()) "Add training" else "Change training"
+                        else -> if (currentUnitSets.isEmpty()) "Add sets" else "Change sets"
+                    },
+                )
+                if (currentUnitSets.isNotEmpty()) {
+                    Text(formatRecentEntry(currentUnitSets, machine.trackingMode), style = MaterialTheme.typography.bodySmall)
+                }
+            }
         }
         Card(modifier = Modifier.fillMaxWidth().clickable { showWeight = true }) {
             Row(
@@ -156,14 +163,14 @@ fun DetailScreen(
                     onCustomSelected = { showCustomChartRange = true },
                     onTrendSelected = { repository.setShowTrend(machine.id, !machine.showTrend); onChanged() },
                 )
-                val chartWindow = ChartWindow(
+                val chartWindow = remember(machine.id, summary.recentSets, machine.chartWindow, customChartStart, customChartEnd, today) { ChartWindow(
                     durationMillis = if (machine.chartWindow == ChartRange.CUSTOM) {
                         customChartStart?.let { start -> customChartEnd?.let { end -> (end - start).coerceAtLeast(1L) } }
                     } else chartWindowDuration(machine.chartWindow),
                     endMillis = if (machine.chartWindow == ChartRange.CUSTOM) customChartEnd else System.currentTimeMillis(),
                     startMillis = if (machine.chartWindow == ChartRange.CUSTOM) customChartStart else null,
                     key = "${machine.chartWindow.storageValue}:$customChartStart:$customChartEnd",
-                )
+                ) }
                 SessionMetricsChart(summary.recentSets, machine.trackingMode, machine.showTrend, chartWindow, useOneRepMax)
             }
         }
@@ -180,7 +187,9 @@ fun DetailScreen(
                     summary.areas.sortedByDescending { areaUsage[it.area] ?: 0.0 }.forEach { assignment ->
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Box(Modifier.width((34 * assignment.strength.value).dp).height(8.dp).background(Color(assignment.displayColor), RoundedCornerShape(8.dp)))
-                            Spacer(Modifier.width(6.dp)); Text(assignment.area.label, Modifier.weight(1f)); Text(assignment.strength.label, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Spacer(Modifier.width(6.dp))
+                            Text(assignment.area.label, Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Text(assignment.strength.label, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                     }
                 }
@@ -258,7 +267,6 @@ fun DetailScreen(
         current = machine.progressionSettings ?: repository.loadProgressionSettings(),
         title = "${machine.name} warnings",
         initiallyFollowGlobal = machine.progressionSettings == null,
-        globalUseOneRepMax = repository.loadProgressionSettings().useOneRepMax,
         onDismiss = { showWarningSettings = false },
         onFollowGlobal = {
             repository.saveExerciseProgressionSettings(machine.id, null)
@@ -389,7 +397,7 @@ private fun SessionMetricsChart(
     window: ChartWindow,
     useOneRepMax: Boolean,
 ) {
-    val orderedSets = sets.sortedBy { it.performedAt }
+    val orderedSets = remember(sets) { sets.sortedBy { it.performedAt } }
     if (orderedSets.isEmpty()) {
         Box(Modifier.fillMaxWidth().height(110.dp), contentAlignment = Alignment.Center) {
             Text("No training data yet.", color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -398,15 +406,15 @@ private fun SessionMetricsChart(
     }
     if (trackingMode == TrackingMode.DURATION) {
         AxisMetricPlot(
-            orderedSets.map { TimeValue(it.performedAt, it.weight) },
+            remember(orderedSets) { orderedSets.map { TimeValue(it.performedAt, it.weight) } },
             window,
             MaterialTheme.colorScheme.primary,
             showTrend,
         )
     } else {
-        val sessions = if (trackingMode == TrackingMode.WEIGHT) {
+        val sessions = remember(orderedSets, trackingMode) { if (trackingMode == TrackingMode.WEIGHT) {
             orderedSets.groupBy { trainingDate(it.performedAt) }.toSortedMap().values.toList()
-        } else groupSetBatches(sets).asReversed()
+        } else groupSetBatches(sets).asReversed() }
         DualAxisSessionPlot(orderedSets, sessions, window, trackingMode = trackingMode, showTrend = showTrend, useOneRepMax = useOneRepMax)
     }
 }
@@ -424,42 +432,48 @@ private fun DualAxisSessionPlot(
     val repsColor = Color(0xFFFFA726)
     val weightColor = MaterialTheme.colorScheme.primary
     val volumeColor = Color(0xFF00BCD4)
-    val reps = sessions.map { session ->
+    val reps = remember(sessions) { sessions.map { session ->
         TimeValue(session.maxOf { it.performedAt }, session.map { it.reps }.average())
-    }
-    val weight = sets.map { TimeValue(it.performedAt, it.weight) }
-    val volume = sessions.map { session ->
+    } }
+    val weight = remember(sets) { sets.map { TimeValue(it.performedAt, it.weight) } }
+    val volume = remember(sessions, useOneRepMax) { sessions.map { session ->
         TimeValue(session.maxOf { it.performedAt }, trainingPerformance(session, useOneRepMax))
-    }
+    } }
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
         ChartLegendEntry(if (trackingMode == TrackingMode.WATTS) "Watts" else if (trackingMode == TrackingMode.STRENGTH) "Level" else "Reps/set",
             reps, window, showTrend, repsColor, TextAlign.Start, Modifier.weight(1f))
         ChartLegendEntry(when {
-            useOneRepMax -> "1RM [kg] ?"
+            useOneRepMax -> "1RM [kg]"
             trackingMode == TrackingMode.WATTS -> "Work [W min]"
             trackingMode == TrackingMode.STRENGTH -> "Load [Lv. min]"
             else -> "Volume/training [a.u.]"
         }, volume, window, showTrend, volumeColor, TextAlign.Center,
-            Modifier.weight(1.5f).clickable { showMetricExplanation = true })
+            Modifier.weight(1.5f)
+                .border(1.dp, volumeColor.copy(alpha = 0.65f), RoundedCornerShape(8.dp))
+                .background(volumeColor.copy(alpha = 0.08f), RoundedCornerShape(8.dp))
+                .clickable(role = androidx.compose.ui.semantics.Role.Button) { showMetricExplanation = true }
+                .padding(horizontal = 5.dp, vertical = 4.dp))
         ChartLegendEntry(if (trackingMode.usesResistanceLevel()) "Minutes" else "Weight [kg]",
             weight, window, showTrend, weightColor, TextAlign.End, Modifier.weight(1f))
     }
-    val baseSeries = listOf(
+    val baseSeries = remember(reps, weight, volume, repsColor, weightColor, volumeColor) { listOf(
         TimeSeries(reps, repsColor, PlotAxis.LEFT),
         TimeSeries(weight, weightColor, PlotAxis.RIGHT),
         TimeSeries(volume, volumeColor, PlotAxis.INDEPENDENT, pointRadius = 3.8f),
-    )
+    ) }
+    val plottedSeries = remember(baseSeries, showTrend, window) {
+        baseSeries + if (showTrend) listOf(
+            trendTimeSeries(reps, repsColor, PlotAxis.LEFT, window),
+            trendTimeSeries(weight, weightColor, PlotAxis.RIGHT, window),
+            trendTimeSeries(volume, Color(0xFF007C91), PlotAxis.INDEPENDENT, window),
+        ) else emptyList()
+    }
     TimeWindowChart(
-        series = baseSeries + if (showTrend) {
-            listOf(
-                trendTimeSeries(reps, repsColor, PlotAxis.LEFT, window),
-                trendTimeSeries(weight, weightColor, PlotAxis.RIGHT, window),
-                trendTimeSeries(volume, Color(0xFF007C91), PlotAxis.INDEPENDENT, window),
-            )
-        } else emptyList(),
+        series = plottedSeries,
         window = window,
         leftColor = repsColor,
         rightColor = weightColor,
+        matchWeightSteps = trackingMode == TrackingMode.WEIGHT,
     )
     if (showMetricExplanation) TrainingMetricExplanationDialog { showMetricExplanation = false }
 }
@@ -472,8 +486,9 @@ private fun AxisMetricPlot(
 ) {
     ChartLegendEntry("Minutes", points, window, showTrend, color, TextAlign.Start, Modifier.fillMaxWidth())
     TimeWindowChart(
-        series = listOf(TimeSeries(points, color)) +
-            if (showTrend) listOf(trendTimeSeries(points, color, PlotAxis.LEFT, window)) else emptyList(),
+        series = remember(points, color, showTrend, window) { listOf(TimeSeries(points, color)) +
+            if (showTrend) listOf(trendTimeSeries(points, color, PlotAxis.LEFT, window)) else emptyList()
+        },
         window = window,
         leftColor = color,
     )
@@ -499,7 +514,7 @@ private fun ChartLegendEntry(label: String, points: List<TimeValue>, window: Cha
     color: Color, alignment: TextAlign, modifier: Modifier) {
     Column(modifier) {
         Text(label, Modifier.fillMaxWidth(), color = color, textAlign = alignment, style = MaterialTheme.typography.labelSmall)
-        if (showTrend) Text(formatMonthlyTrend(points, window), Modifier.fillMaxWidth(), color = color,
+        if (showTrend) Text(remember(points, window) { formatMonthlyTrend(points, window) }, Modifier.fillMaxWidth(), color = color,
             textAlign = alignment, style = MaterialTheme.typography.labelSmall)
     }
 }
@@ -609,7 +624,7 @@ fun MetricValueDialog(
                     TrackingMode.WEIGHT -> "kg"; TrackingMode.WATTS -> "W"; TrackingMode.DURATION -> "min"; else -> ""
                 }) { delta -> value = formatMetricDialogValue(((parsed ?: current) + delta).coerceAtLeast(0.0)) }
                 if (onSaveCurrentAndNext != null) {
-                    Text("This exercise already has entries in the current training session.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text("Next session keeps this training's recorded weight or level, including later rep or minute edits. The new value applies on your next training day.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     Button(onClick = { parsed?.let(onSave) }, enabled = parsed != null && parsed >= 0, modifier = Modifier.fillMaxWidth()) { Text("Change for Next Session") }
                     androidx.compose.material3.FilledTonalButton(onClick = { parsed?.let(onSaveCurrentAndNext) }, enabled = parsed != null && parsed >= 0, modifier = Modifier.fillMaxWidth()) { Text("Change This Session and Next") }
                 }

@@ -106,7 +106,8 @@ internal fun MuscleProfileFields(
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Box(Modifier.size(14.dp).background(Color(colors[area] ?: area.color), CircleShape)
                     .then(if (onColor != null) Modifier.clickable { onColor(area) } else Modifier))
-                Text(area.label, Modifier.weight(1f).padding(start = 6.dp), style = MaterialTheme.typography.bodySmall)
+                Text(area.label, Modifier.weight(1f).padding(start = 6.dp), style = MaterialTheme.typography.bodySmall,
+                    maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
             }
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                 (listOf<Strength?>(null) + Strength.entries).forEach { intensity ->

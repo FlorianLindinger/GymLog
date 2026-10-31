@@ -33,7 +33,7 @@ try {
     Copy-DebugApk
     if (-not $Publish) {
         Write-Host "Prepared v$version. Review app/app/build.gradle.kts and CHANGELOG.md, then commit your changes. No tag or push was performed."
-        Write-Host 'When ready, run release_no_bump.bat -Publish from a clean main branch.'
+        Write-Host 'When ready, run scripts/windows/advanced/release/release_no_bump.bat -Publish from a clean main branch.'
         exit 0
     }
     if ($Bump -ne 'none') {

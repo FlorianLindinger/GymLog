@@ -23,28 +23,32 @@ class ProgressionWarningsTest {
     fun warningsUseCompactTextAndOnlySeparateTwoWarnings() {
         val exercise = summary(10, 10, 10)
         val settings = ProgressionSettings(useOneRepMax = false, staleWeeks = 4, volumeWindowTrainings = 3)
-        assertEquals("4 weeks no kg increase · volume trend 0 %", progressionWarning(exercise, settings, clock))
-        assertEquals("volume trend 0 %", progressionWarning(exercise, settings.copy(staleWeeks = 0), clock))
+        assertEquals("4 weeks no kg increase · 1RM trend 0 %", progressionWarning(exercise, settings, clock))
+        assertEquals("1RM trend 0 %", progressionWarning(exercise, settings.copy(staleWeeks = 0), clock))
         assertEquals("4 weeks no kg increase", progressionWarning(exercise, settings.copy(volumeMinimumIncreasePercent = 0), clock))
         assertNull(progressionWarning(exercise, settings.copy(staleWeeks = 0, volumeMinimumIncreasePercent = 0), clock))
     }
 
     @Test
-    fun selectedWindowControlsVolumeComparisonAndRequiresEnoughTrainings() {
-        val exercise = summary(10, 20, 21)
+    fun selectedWindowControlsFormulaComparisonAndRequiresEnoughTrainings() {
+        val exercise = summary(1, 1, 1).let { summary ->
+            summary.copy(recentSets = summary.recentSets.mapIndexed { index, set ->
+                set.copy(weight = listOf(10.0, 20.0, 21.0)[index])
+            })
+        }
         val settings = ProgressionSettings(useOneRepMax = false, staleWeeks = 0, volumeWindowTrainings = 2, volumeMinimumIncreasePercent = 6)
-        assertEquals("volume trend 5 %", progressionWarning(exercise, settings, clock))
+        assertEquals("1RM trend 5 %", progressionWarning(exercise, settings, clock))
         assertNull(progressionWarning(exercise, settings.copy(volumeWindowTrainings = 3), clock))
         assertNull(progressionWarning(exercise, settings.copy(volumeWindowTrainings = 4), clock))
         assertNull(progressionWarning(exercise, settings.copy(volumeMinimumIncreasePercent = 5), clock))
     }
 
     @Test
-    fun volumeUsesAllSetsInEachTrainingDayAndIgnoresOlderTrainings() {
-        val exercise = summary(100, 10, 20).let { it.copy(recentSets = it.recentSets +
-            SetRecord(99, 1, 10, 10.0, start.toEpochMilli() + day + 1_000)) }
+    fun formulaUsesBestSetInEachTrainingDayAndIgnoresOlderTrainings() {
+        val exercise = summary(100, 10, 10).let { it.copy(recentSets = it.recentSets +
+            SetRecord(99, 1, 1, 1.0, start.toEpochMilli() + day + 1_000)) }
         val settings = ProgressionSettings(useOneRepMax = false, staleWeeks = 0, volumeWindowTrainings = 2)
-        assertEquals("volume trend 0 %", progressionWarning(exercise, settings, clock))
+        assertEquals("1RM trend 0 %", progressionWarning(exercise, settings, clock))
     }
 
     @Test
@@ -66,8 +70,8 @@ class ProgressionWarningsTest {
         val volumeOnly = customized.copy(machine = customized.machine.copy(progressionSettings = disabled.copy(
             volumeWindowTrainings = 3, volumeMinimumIncreasePercent = 5,
         )))
-        assertEquals("volume trend 0 %", progressionWarning(volumeOnly, global, clock))
-        assertEquals("4 weeks no kg increase · volume trend 0 %", progressionWarning(exercise, global, clock))
+        assertEquals("1RM trend 0 %", progressionWarning(volumeOnly, global, clock))
+        assertEquals("4 weeks no kg increase · 1RM trend 0 %", progressionWarning(exercise, global, clock))
         assertNull(progressionWarning(exercise, disabled, clock))
     }
 
@@ -86,14 +90,14 @@ class ProgressionWarningsTest {
     }
 
     @Test
-    fun oneRepMaxWarningUsesBestSetRatherThanTotalVolumeAndCanBeOverridden() {
+    fun formulaWarningIgnoresGlobalDisplayChoiceAndLegacyExerciseMetricOverride() {
         val exercise = summary(10, 10, 10).let { it.copy(recentSets = it.recentSets +
             SetRecord(99, 1, 10, 10.0, start.toEpochMilli() + 2 * day + 1_000)) }
         val global = ProgressionSettings(useOneRepMax = true, staleWeeks = 0, volumeWindowTrainings = 3)
         assertEquals("1RM trend 0 %", progressionWarning(exercise, global, clock))
-        assertNull(progressionWarning(exercise, global.copy(useOneRepMax = false), clock))
+        assertEquals("1RM trend 0 %", progressionWarning(exercise, global.copy(useOneRepMax = false), clock))
         val override = exercise.copy(machine = exercise.machine.copy(progressionSettings = global.copy(useOneRepMax = false)))
-        assertNull(progressionWarning(override, global, clock))
+        assertEquals("1RM trend 0 %", progressionWarning(override, global, clock))
         assertNull(progressionWarning(exercise, global.copy(volumeWindowTrainings = 0), clock))
     }
 }

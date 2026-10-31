@@ -21,6 +21,7 @@ internal data class BodyHighLowReference(
     val showLow: Boolean = true,
     val mean: Double? = null,
     val showMean: Boolean = false,
+    val tailPercent: Double = 0.0,
 ) {
     val visibleLines: List<BodyReferenceLine> get() = buildList {
         if (showLow) add(BodyReferenceLine(low.value))
@@ -41,8 +42,19 @@ internal fun bodyHighLowReferences(
     fun reference(label: String, values: List<TimeValue>, allTime: Boolean,
         showHigh: Boolean, showLow: Boolean, showMean: Boolean): BodyHighLowReference? {
         if (values.isEmpty()) return null
-        return BodyHighLowReference(label, values.minBy(TimeValue::value), values.maxBy(TimeValue::value),
-            allTime, showHigh, showLow, values.map(TimeValue::value).average(), showMean)
+        val tail = if (allTime) 0.0 else settings.historyPercentile.coerceIn(0.0, 50.0)
+        val ordered = if (tail > 0) values.sortedBy(TimeValue::value) else emptyList()
+        fun quantile(percent: Double): TimeValue {
+            val position = ordered.lastIndex * percent / 100.0
+            val lower = position.toInt()
+            val upper = (lower + 1).coerceAtMost(ordered.lastIndex)
+            return ordered[lower].copy(value = ordered[lower].value +
+                (ordered[upper].value - ordered[lower].value) * (position - lower))
+        }
+        return BodyHighLowReference(label,
+            if (tail == 0.0) values.minBy(TimeValue::value) else quantile(tail),
+            if (tail == 0.0) values.maxBy(TimeValue::value) else quantile(100.0 - tail),
+            allTime, showHigh, showLow, values.map(TimeValue::value).average(), showMean, tail)
     }
     return buildList {
         if (settings.showAllTimeHigh || settings.showAllTimeLow || settings.showAllTimeMean)
@@ -59,11 +71,45 @@ internal fun bodyHighLowReferences(
                 VisibleTimeRange(start, historyEnd)
             }
             val label = if (settings.highLowFollowPlot) plotLabel else
-                if (range == ChartRange.CUSTOM) "Custom history" else "${range.storageValue} history"
+                bodyHistoryLabel(range)
             reference(label, finite.filter { it.timestamp in historyRange.start..historyRange.end }, false,
                 settings.showHistoryHigh, settings.showHistoryLow, settings.showHistoryMean)?.let { add(it) }
         }
     }
+}
+
+internal fun bodyHistoryLabel(range: ChartRange): String = when (range) {
+    ChartRange.ALL -> "All history"
+    ChartRange.CUSTOM -> "Custom history"
+    else -> range.storageValue.replace("M", "mon").replace("Y", "yr").replace("W", "wk") + " history"
+}
+
+internal fun bodyReferenceText(reference: BodyHighLowReference, unit: String): String {
+    val lowPercent = if (reference.tailPercent > 0) " (${formatChartAxisValue(reference.tailPercent)}%)" else ""
+    val highPercent = if (reference.tailPercent > 0) " (${formatChartAxisValue(100 - reference.tailPercent)}%)" else ""
+    return "${reference.label}: " + listOfNotNull(
+        "Low$lowPercent ${formatBodyValue(reference.low.value)}".takeIf { reference.showLow },
+        reference.mean?.let { "Mean ${formatBodyValue(it)}" }?.takeIf { reference.showMean },
+        "High$highPercent ${formatBodyValue(reference.high.value)}".takeIf { reference.showHigh },
+    ).joinToString(" / ") + " $unit"
+}
+
+/** Trailing duration window with equal measurement weights; preceding data prevents a false left-edge reset. */
+internal fun bodyMovingAverage(points: List<TimeValue>, range: VisibleTimeRange, periodMillis: Long): List<TimeValue> {
+    val sorted = points.filter { it.value.isFinite() && it.timestamp <= range.end }.sortedBy { it.timestamp }
+    val period = periodMillis.coerceAtLeast(1L)
+    val result = mutableListOf<TimeValue>()
+    var left = 0
+    var right = 0
+    var sum = 0.0
+    while (right < sorted.size) {
+        val time = sorted[right].timestamp
+        do { sum += sorted[right++].value } while (right < sorted.size && sorted[right].timestamp == time)
+        val cutoff = if (time < Long.MIN_VALUE + period) Long.MIN_VALUE else time - period
+        while (left < right && sorted[left].timestamp < cutoff) sum -= sorted[left++].value
+        if (time >= range.start) result += TimeValue(time, sum / (right - left))
+    }
+    return result
 }
 
 internal fun averageTimeBins(points: List<TimeValue>, range: VisibleTimeRange, bins: Int): List<TimeValue> =

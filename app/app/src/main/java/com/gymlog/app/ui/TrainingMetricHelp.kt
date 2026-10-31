@@ -13,9 +13,9 @@ internal const val TRAINING_METRIC_EXPLANATION =
     "On: 1RM is the estimated maximum weight for one repetition, in kg, using the Wathan formula. " +
     "It uses the best set of each training, so extra sets do not add to 1RM. " +
     "The estimate is most useful with hard sets of 2-10 reps. " +
-    "This choice applies to weight-exercise charts, entry summaries and trend warnings. " +
+    "This choice applies to weight-exercise charts and entry summaries. Trend warnings always use the formula-based best-set 1RM, regardless of this display choice. " +
     "Level and watts record intensity and minutes, not repetitions: their load/work is intensity x minutes, not a 1RM estimate. " +
-    "Changing it recalculates the display from recorded sets. Exercises with custom warning settings keep their own choice."
+    "Changing it recalculates the display from recorded sets. Custom warning thresholds do not change the metric."
 
 @Composable
 internal fun TrainingMetricExplanationDialog(onDismiss: () -> Unit) {

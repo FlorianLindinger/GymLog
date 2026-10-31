@@ -20,7 +20,7 @@ data class BodyDataSnapshot(
     val syncedAt: Long? = null,
 )
 
-/** Resume refreshes share a 15-minute successful-read cooldown; explicit refreshes bypass it. */
+/** Outside Body, resume refreshes share a 15-minute cooldown; Body and manual refreshes bypass it. */
 internal fun shouldAutoSyncBody(lastSuccessElapsed: Long?, nowElapsed: Long): Boolean =
     lastSuccessElapsed == null || nowElapsed < lastSuccessElapsed || nowElapsed - lastSuccessElapsed >= 15L * 60L * 1000L
 

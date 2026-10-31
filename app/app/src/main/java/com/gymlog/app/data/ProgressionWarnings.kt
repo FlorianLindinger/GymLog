@@ -17,12 +17,12 @@ internal fun progressionWarning(
         if (effective.volumeMinimumIncreasePercent > 0 && effective.volumeWindowTrainings >= 2) {
             val window = effective.volumeWindowTrainings
             val volumes = summary.recentSets.groupBy { clock.trainingDayStart(it.performedAt) }
-                .toSortedMap().values.toList().takeLast(window).map { sets -> trainingPerformance(sets, effective.useOneRepMax) }
+                .toSortedMap().values.toList().takeLast(window).map { sets -> trainingPerformance(sets, useOneRepMax = true) }
             if (volumes.size == window && volumes.first() > 0.0) {
                 val growth = (volumes.last() - volumes.first()) / volumes.first() * 100.0
                 if (growth < effective.volumeMinimumIncreasePercent) {
                     val percent = if (growth % 1.0 == 0.0) growth.toInt().toString() else String.format(Locale.US, "%.1f", growth)
-                    add("${if (effective.useOneRepMax) "1RM" else "volume"} trend $percent %")
+                    add("1RM trend $percent %")
                 }
             }
         }

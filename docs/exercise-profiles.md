@@ -23,44 +23,43 @@ Adjust a suggested profile to reflect your machine, grip, technique, and experie
 
 ## Overlap and ranking
 
-The current exercise is the one with the latest recorded set in this training. The previous exercise is the latest **distinct** exercise before it, so several consecutive sets on one machine do not occupy both comparison slots. Only the current training, starting at 06:00 local time, supplies this context. Hidden exercises still contribute context when they were recently trained.
+The current exercise is the one with the latest recorded set in this training. All distinct exercises from the current training, starting at 06:00 local time, supply context in newest-first order. Repeated sets do not create extra context entries. Hidden exercises also contribute.
 
 For each region, estimated recent load is:
 
 ```text
-recent load = min(1, current intensity + 0.5 × previous intensity)
-overlap % = round(100 × sum(candidate intensity × recent load) / sum(candidate intensity))
+recent load = min(1, sum(exercise intensity * 0.5^recency index))
+overlap % = round(100 * sum(candidate intensity * recent load) / sum(candidate intensity))
 ```
 
-Thus the previous exercise has half the influence of the current one, and the overlap percentage accounts for all assigned regions and their intensities. This is a planning estimate. The outline blends smoothly from green at zero overlap through yellow and orange to red at full overlap. Missing profiles count as zero overlap and use green when unfinished and not current. The current exercise keeps its blue outline; completed exercises have no overlap outline. Overlap percentages and lifetime training counts are not displayed on the cards.
+The fixed weights are 100%, 50%, 25%, 12.5%, and so on. They are never normalized by the number of exercises performed, so additional overlapping work can add load. This is a planning estimate. Missing profiles count as zero overlap.
+
+Ranking and outlines share seven bins: 0-14% dark green, 15-28% green, 29-42% yellow, 43-57% orange, 58-71% red-orange, 72-85% red, and 86-100% dark red. The current exercise keeps its blue outline; completed exercises have no overlap outline. The overview has no overlap text header.
 
 Ordering follows these rules:
 
 1. Keep the current exercise first.
-2. Keep Manual top exercises in their chosen arrow order.
-3. Auto sorted exercises put unfinished exercises before those already done. Within each group, lower overlap comes first; unknown overlap is treated as zero, alongside known zero-overlap exercises.
-4. Equal overlap prefers higher tie priority, then fewer recorded training days across the active plan's full history. Multiple sets on one training day count once. Saved order and stable name/ID ordering resolve remaining ties. The Auto sorted section in Exercise Order previews this ranking; + raises priority and - lowers it.
-5. Keep Manual bottom exercises in their chosen arrow order.
+2. Keep unfinished Manual top exercises in their chosen arrow order.
+3. Rank unfinished Auto exercises by overlap bin, from least to most overlap.
+4. Within each bin, prefer fewer distinct training days in the last two calendar months. A training day starts at 06:00 local time; the window includes the entire training day at its start. Multiple sets count once. Tie priority, saved order, and stable name/ID ordering resolve ties. The Auto sorted section in Exercise Order previews this ranking; + raises tie priority and - lowers it.
+5. Keep unfinished Manual bottom exercises in their chosen arrow order.
+6. Put all remaining completed exercises last, ordered by their last set from first to last done.
 
-Manual top/bottom provide an explicit override of automatic ranking. The overview shows the comparison exercises and uses outline color to indicate overlap.
+Manual top/bottom override automatic ranking for unfinished exercises.
 
 ## Progress warnings
 
-Weight-tracked exercises show warnings on one line: `4 weeks no kg increase` and/or `volume trend 2 %`, separated by a middle dot only when both apply. The warning text shrinks to fit the card.
+Weight-tracked exercises show warnings on one line: `4 weeks no kg increase` and/or `1RM trend 2 %`, separated by a middle dot only when both apply. Trend warnings always use formula-based best-set 1RM, regardless of the chart display choice or legacy per-exercise metric overrides.
 
-**Progress Warnings** settings let you choose the weeks without a kg increase, minimum volume increase percentage, and volume window in trainings (default 5, minimum 2). Blank or zero disables the corresponding warning. For volume warnings, either a blank/zero window or blank/zero minimum percentage disables the warning; an enabled window requires at least two trainings. The training-count warning has been removed.
+**Progress Warnings** settings let you choose weeks without a kg increase, the minimum 1RM increase percentage, and the trend window in trainings (default 5, minimum 2). Blank or zero disables the corresponding warning. Either a blank/zero window or minimum percentage disables trend warnings. Once a full window is available, its first and last training days are compared; training days start at 06:00 local time.
 
-Volume is total kg times reps per training day (06:00 local boundary). Once a full window is available, the first and last training's volumes are compared. Every exercise has a **Progress Warnings** button in its details. It follows global warnings by default. Turn off **Follow global warning settings** to save custom thresholds or disable warnings for that exercise. Turn it back on to inherit future global changes. Custom settings survive plan duplication, deletion undo, and JSON backup/restore.
+Every exercise has **Progress Warnings** in its details. It follows global thresholds by default. Turn off **Follow global warning settings** to customize thresholds or disable warnings for that exercise. There is no per-exercise Volume/1RM choice. Custom thresholds survive plan duplication, deletion undo, and JSON backup/restore. Legacy metric fields remain readable for compatibility but do not affect warnings or exercise display overrides.
 
-The selected window persists and is included in JSON backup/restore; older backups use the five-training default.
+### Chart metric and formula
 
-### Optional 1RM metric
+The **Use 1RM instead of volume** switch in **Menu** controls weight-exercise charts and entry summaries only. Its outlined label and the exercise-chart metric button open an explanation. Volume is total weight times reps. Level/watts workload remains intensity times minutes, with **Load [Lv. min]** and **Work [W min]** labels.
 
-Enable **Use 1RM instead of volume** directly in **Menu**. The adjacent **?** explains the metric. Exercise **Progress Warnings** still allows a custom metric when **Follow global warning settings** is off. Both global and per-exercise warning dialogs explicitly name the currently used trend metric. It is on by default for unconfigured settings and follows the existing global/custom setting choice. Explicitly saved choices are preserved. For weight exercises, the exercise chart, entry summary and trend warning use **1RM** instead of volume. Tap the chart's **1RM [kg] ?** legend to read the explanation. Level/watts entries have intensity and minutes, so their workload is intensity times minutes rather than a 1RM estimate; their chart labels are **Load [Lv. min]** and **Work [W min]**. Labels become **1RM [kg]** and **1RM trend x %**, and the window/percentage field labels change with the choice. Blank/zero still disables warnings, independently of displaying 1RM.
-
-1RM means estimated one-repetition maximum: the load you might lift once. GymLog uses the Wathan equation, `100 * weight / (48.8 + 53.8 * exp(-0.075 * reps))`, taking the highest estimate among sets in each training day. A recorded single uses its actual load. Additional sets do not add to 1RM. Exercise entry summaries show the best estimate in that entry; chart and warning windows use the best set for the whole training day.
-
-Wathan is a practical default, not a universally best predictor. [LeSuer et al. (1997)](https://paulogentil.com/pdf/The%20Accuracy%20of%20Prediction%20Equations%20for%20Estimating%201-RM%20Performance%20in%20the%20Bench%20Press%2C%20Squat%2C%20and%20Deadlift.pdf) found good bench/squat prediction in novice men and women using sets of ten or fewer repetitions to fatigue, while all tested equations underestimated deadlifts. Estimates are most useful for hard, lower-rep sets. The selected method is included in global and per-exercise backups; older backups without a metric choice use the current 1RM default.
+1RM estimates the load for one repetition. GymLog uses the Wathan equation, `100 * weight / (48.8 + 53.8 * exp(-0.075 * reps))`, taking the highest estimate among sets in each training day. A recorded single uses its actual load. Additional sets do not add to 1RM. Entry summaries show the best estimate in that entry; charts and warnings use the best set for the whole training day.
 
 ## Catalogue reference notes
 

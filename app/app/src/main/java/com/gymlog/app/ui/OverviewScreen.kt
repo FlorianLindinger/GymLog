@@ -1,7 +1,6 @@
 package com.gymlog.app.ui
 
 import androidx.compose.animation.animateColorAsState
-import androidx.compose.ui.graphics.lerp
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -115,7 +114,10 @@ fun OverviewScreen(
 ) {
     val zone = ZoneId.systemDefault()
     val now = System.currentTimeMillis()
-    val latestTrainingEntry = (machines + hiddenMachines).flatMap { it.recentSets }.maxOfOrNull { it.performedAt }
+    val latestTrainingEntry = remember(machines, hiddenMachines) {
+        (machines + hiddenMachines).maxOfOrNull { it.recentSets.maxOfOrNull { set -> set.performedAt } ?: Long.MIN_VALUE }
+            ?.takeIf { it != Long.MIN_VALUE }
+    }
     val todayTrainingDate = trainingDate(now, zone)
     val hasCurrentTraining = latestTrainingEntry?.let { trainingDate(it, zone) == todayTrainingDate } == true
     val trainingUnitCutoff = if (hasCurrentTraining) trainingDayStart(now, zone) else Long.MAX_VALUE
@@ -125,6 +127,17 @@ fun OverviewScreen(
     val scope = rememberCoroutineScope()
     val rankedMachines = remember(machines, trainingUnitCutoff, recentExercises) {
         rankOverviewMachines(machines, trainingUnitCutoff, recentExercises)
+    }
+    val rankedHidden = remember(hiddenMachines, trainingUnitCutoff, recentExercises, showHidden) {
+        if (showHidden) rankOverviewMachines(hiddenMachines, trainingUnitCutoff, recentExercises) else emptyList()
+    }
+    // Keep history-derived content above LazyColumn so recycling a card does not rebuild it during a fling.
+    val cardContent = remember(machines, hiddenMachines, showHidden, progressionSettings, todayTrainingDate) {
+        (machines + if (showHidden) hiddenMachines else emptyList()).associate { summary ->
+            summary.machine.id to MachineCardContent(sessionPatternText(summary),
+                progressionWarning(summary, progressionSettings), sessionTrendColor(summary),
+                currentTrainingUnitSets(summary, now, zone))
+        }
     }
     Box(modifier.fillMaxSize()) {
         Column(Modifier.fillMaxSize().padding(bottom = 50.dp)) {
@@ -157,13 +170,6 @@ fun OverviewScreen(
                 contentPadding = PaddingValues(horizontal = 8.dp, vertical = 6.dp),
                 verticalArrangement = Arrangement.spacedBy(6.dp),
             ) {
-                if (recentExercises.isNotEmpty()) {
-                    item {
-                        Text("Overlap: " + recentExercises.mapIndexed { index, exercise ->
-                            exercise.machine.name + if (index == 1) " (half weight)" else ""
-                        }.joinToString(" + "), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                }
                 items(rankedMachines, key = { it.machine.id }, contentType = { "machine" }) { summary ->
                     MachineCard(
                         summary, recentExercises, trainingUnitCutoff, areaFrequency, onMachine, { machine, reps ->
@@ -171,7 +177,7 @@ fun OverviewScreen(
                             onQuickSet(machine, reps)
                             if (firstEntry) scope.launch { listState.animateScrollToItem(0) }
                         }, onDeleteCurrentExerciseSets,
-                        onMetricChange, onMetricChangeForSession, progressionSettings,
+                        onMetricChange, onMetricChangeForSession, cardContent.getValue(summary.machine.id),
                         modifier = Modifier,
                         onLongPress = {},
                         isDragging = false,
@@ -186,16 +192,15 @@ fun OverviewScreen(
                                 onShowHiddenChanged(reveal)
                                 if (reveal) scope.launch {
                                     delay(80)
-                                    listState.animateScrollToItem(rankedMachines.size + 1 + if (recentExercises.isEmpty()) 0 else 1)
+                                    listState.animateScrollToItem(rankedMachines.size + 1)
                                 }
                             },
                             modifier = Modifier.fillMaxWidth(),
                         ) { Text(if (showHidden) "Hide hidden exercises" else "Show hidden exercises") }
                     }
                     if (showHidden) {
-                        val rankedHidden = rankOverviewMachines(hiddenMachines, trainingUnitCutoff, recentExercises)
                         items(rankedHidden, key = { "hidden_${it.machine.id}" }) { summary ->
-                            MachineCard(summary, recentExercises, trainingUnitCutoff, areaFrequency, onMachine, { machine, reps -> onQuickSet(machine, reps) }, onDeleteCurrentExerciseSets, onMetricChange, onMetricChangeForSession, progressionSettings)
+                            MachineCard(summary, recentExercises, trainingUnitCutoff, areaFrequency, onMachine, { machine, reps -> onQuickSet(machine, reps) }, onDeleteCurrentExerciseSets, onMetricChange, onMetricChangeForSession, cardContent.getValue(summary.machine.id))
                         }
                     }
                 }            }
@@ -226,32 +231,24 @@ private fun OverviewButtonLabel(text: String) {
 @Composable
 private fun TrainingDurationCard(machines: List<MachineSummary>, activePlanName: String, zone: ZoneId, onClick: () -> Unit) {
     var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
+    val session = remember(machines, zone) { trainingTimerSnapshot(machines, zone) }
     val lifecycleState by LocalLifecycleOwner.current.lifecycle.currentStateAsState()
     val isForeground = lifecycleState.isAtLeast(Lifecycle.State.RESUMED)
-    val latestSetTime = remember(machines) { machines.flatMap { it.recentSets }.maxOfOrNull { it.performedAt } }
-    LaunchedEffect(isForeground, latestSetTime) {
+    LaunchedEffect(isForeground, session) {
         now = System.currentTimeMillis()
-        while (isForeground && latestSetTime != null && now - latestSetTime < 10L * 60L * 1000L) {
-            delay(minOf(30_000L, (latestSetTime + 10L * 60L * 1000L - now).coerceAtLeast(1L)))
+        while (isForeground) {
+            val wait = nextTrainingTimerDelay(now, session.last, session.estimatedStart) ?: break
+            delay(wait)
             now = System.currentTimeMillis()
         }
     }
-    val allSets = machines.flatMap { it.recentSets }
-    val last = allSets.maxOfOrNull { it.performedAt }
-    val sessionSets = last?.let { latest -> allSets.filter { trainingDate(it.performedAt, zone) == trainingDate(latest, zone) } }.orEmpty()
-    val first = sessionSets.minOfOrNull { it.performedAt }
-    val firstSet = sessionSets.minByOrNull { it.performedAt }
-    val firstMode = firstSet?.let { set -> machines.firstOrNull { it.machine.id == set.machineId }?.machine?.trackingMode }
-    val estimatedLeadMillis = when {
-        firstSet == null -> 0L
-        isDirectMetric(firstMode ?: TrackingMode.WEIGHT) -> (firstSet.weight * 60_000L).toLong()
-        else -> sessionSets.size * 3L * 60_000L
-    }
-    val estimatedStart = first?.minus(estimatedLeadMillis)
+    val last = session.last
+    val first = session.first
+    val estimatedStart = session.estimatedStart
     val isActive = last != null && now - last < 10L * 60L * 1000L
     val durationMillis = if (estimatedStart == null || last == null) 0L else ((if (isActive) now else last) - estimatedStart).coerceAtLeast(0L)
-    val clock = DateTimeFormatter.ofPattern("HH:mm")
-    val completedExercises = machines.count { summary -> summary.recentSets.any { first != null && it.performedAt >= first } }
+    val clock = remember { DateTimeFormatter.ofPattern("HH:mm") }
+    val completedExercises = session.completedExercises
 
     Card(
         modifier = Modifier.fillMaxWidth().clickable(onClick = onClick),
@@ -315,15 +312,13 @@ fun ProgressionSettingsDialog(
     title: String = "Progress Warnings",
     initiallyFollowGlobal: Boolean = false,
     onFollowGlobal: (() -> Unit)? = null,
-    globalUseOneRepMax: Boolean = current.useOneRepMax,
     onSave: (ProgressionSettings) -> Unit,
 ) {
     var followGlobal by remember { mutableStateOf(initiallyFollowGlobal) }
     var weeks by remember(current) { mutableStateOf(current.staleWeeks.takeIf { it > 0 }?.toString().orEmpty()) }
     var volumeWindow by remember(current) { mutableStateOf(current.volumeWindowTrainings.takeIf { it > 0 }?.toString().orEmpty()) }
     var volumePercent by remember(current) { mutableStateOf(current.volumeMinimumIncreasePercent.takeIf { it > 0 }?.toString().orEmpty()) }
-    var useOneRepMax by remember(current) { mutableStateOf(current.useOneRepMax) }
-    val metricLabel = if (if (followGlobal) globalUseOneRepMax else useOneRepMax) "1RM" else "Volume"
+    val metricLabel = "1RM"
     var showMetricHelp by remember { mutableStateOf(false) }
     val parsedWeeks = parseWarningSetting(weeks)
     val parsedVolumeWindow = parseWarningSetting(volumeWindow)
@@ -339,16 +334,10 @@ fun ProgressionSettingsDialog(
                     Switch(checked = followGlobal, onCheckedChange = { followGlobal = it })
                 }
             }
-            Text("Trend warnings currently use $metricLabel.", style = MaterialTheme.typography.titleSmall)
+            Text("Trend warnings always use estimated 1RM from the Wathan formula, taking the best set in each training day.", style = MaterialTheme.typography.titleSmall)
             Text("Blank or 0 disables that warning. Trend warnings are disabled if either the window or minimum increase is blank or 0. Otherwise the window needs at least 2 trainings and compares the first and last once full.")
             if (!followGlobal) {
-                if (onFollowGlobal != null) {
-                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                        Text("Use 1RM instead of volume", Modifier.weight(1f))
-                        Switch(checked = useOneRepMax, onCheckedChange = { useOneRepMax = it })
-                        TextButton(onClick = { showMetricHelp = true }) { Text("?") }
-                    }
-                } else Text("Change the metric directly in Menu. Exercises with custom settings use their own choice.", style = MaterialTheme.typography.bodySmall)
+                TextButton(onClick = { showMetricHelp = true }) { Text("How 1RM is calculated") }
                 OutlinedTextField(weeks, { weeks = it.filter(Char::isDigit) },
                     label = { Text("Weeks Without Weight Increase") }, isError = parsedWeeks == null,
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), singleLine = true)
@@ -365,7 +354,7 @@ fun ProgressionSettingsDialog(
                 staleWeeks = parsedWeeks ?: 0,
                 volumeWindowTrainings = parsedVolumeWindow ?: 0,
                 volumeMinimumIncreasePercent = parsedVolumePercent ?: 0,
-                useOneRepMax = useOneRepMax,
+                useOneRepMax = current.useOneRepMax,
             ))
         }, enabled = followGlobal || fieldsValid) { Text("Save") } },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
@@ -373,11 +362,19 @@ fun ProgressionSettingsDialog(
     if (showMetricHelp) TrainingMetricExplanationDialog { showMetricHelp = false }
 }
 internal fun overlapOutlineColor(percent: Int?): Color {
-    val colors = listOf(Color(0xFF43A047), Color(0xFFFBC02D), Color(0xFFFB8C00), Color(0xFFE53935))
-    val position = (percent ?: 0).coerceIn(0, 100) / 100f * colors.lastIndex
-    val index = position.toInt().coerceAtMost(colors.lastIndex - 1)
-    return lerp(colors[index], colors[index + 1], position - index)
+    val colors = listOf(
+        Color(0xFF2E7D32), Color(0xFF66BB6A), Color(0xFFFDD835), Color(0xFFFB8C00),
+        Color(0xFFF4511E), Color(0xFFE53935), Color(0xFFB71C1C),
+    )
+    return colors[com.gymlog.app.data.exerciseOverlapBin(percent)]
 }
+
+private data class MachineCardContent(
+    val sessionPattern: AnnotatedString,
+    val warning: String?,
+    val metricColor: Color,
+    val currentSets: List<SetRecord>,
+)
 
 @OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
@@ -391,7 +388,7 @@ private fun MachineCard(
     onDeleteCurrentExerciseSets: (MachineSummary) -> Unit,
     onMetricChange: (MachineSummary, Double) -> Unit,
     onMetricChangeForSession: (MachineSummary, Double) -> Unit,
-    progressionSettings: ProgressionSettings,
+    content: MachineCardContent,
     modifier: Modifier = Modifier,
     onLongPress: () -> Unit = {},
     isDragging: Boolean = false,
@@ -400,12 +397,17 @@ private fun MachineCard(
     var quickReps by remember(summary.machine.id) { mutableStateOf(false) }
     var changeMetric by remember(summary.machine.id) { mutableStateOf(false) }
     var confirmDeleteSets by remember(summary.machine.id) { mutableStateOf(false) }
-    val trainedInUnit = summary.recentSets.any { it.performedAt >= trainingUnitCutoff }
-    val currentUnitSets = remember(summary.recentSets) { currentTrainingUnitSets(summary) }
+    val trainedInUnit = remember(summary.recentSets, trainingUnitCutoff) {
+        summary.recentSets.any { it.performedAt >= trainingUnitCutoff }
+    }
+    val currentUnitSets = content.currentSets
     val isChangingTrainingUnit = currentUnitSets.isNotEmpty()
     val isLastDone = recentExercises.firstOrNull()?.machine?.id == summary.machine.id
-    val sessionPattern = remember(summary.recentSets, summary.machine.trackingMode) { sessionPatternText(summary) }
-    val overlap = exerciseOverlap(summary, recentExercises)
+    val sessionPattern = content.sessionPattern
+    val overlap = remember(summary.areas, recentExercises) { exerciseOverlap(summary, recentExercises) }
+    val warning = content.warning
+    val metricColor = content.metricColor
+    val sortedAreas = remember(summary.areas, areaFrequency) { summary.areas.sortedByDescending { areaFrequency[it.area] ?: 0.0 } }
     val clash = if (!trainedInUnit) overlap.percent else null
     val clashAreas = if (!trainedInUnit) overlap.sharedAreas else emptySet()
     val outlineColor by animateColorAsState(
@@ -425,7 +427,7 @@ private fun MachineCard(
             if (summary.areas.isNotEmpty()) {
                 Spacer(Modifier.height(3.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(3.dp)) {
-                    summary.areas.sortedByDescending { areaFrequency[it.area] ?: 0.0 }.forEach { assignment ->
+                    sortedAreas.forEach { assignment ->
                         Box(
                             Modifier
                                 .width((38 * assignment.strength.value).dp)
@@ -455,19 +457,19 @@ private fun MachineCard(
                     formatMetric(summary.machine.currentWeight, summary.machine.trackingMode),
                     modifier = Modifier.clickable(enabled = !isReordering) { changeMetric = true }.padding(horizontal = 6.dp, vertical = 2.dp),
                     style = MaterialTheme.typography.titleSmall,
-                    color = sessionTrendColor(summary),
+                    color = metricColor,
                     maxLines = 1,
                     softWrap = false,
                 )
             }
-            progressionWarning(summary, progressionSettings)?.let { warning ->
+            warning?.let { warning ->
                 AutoFitText(warning, modifier = Modifier.fillMaxWidth(), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error)
             }
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
                     when {
                         isChangingTrainingUnit -> "Change"
-                        isDirectMetric(summary.machine.trackingMode) -> "+ Training"
+                        isDirectMetric(summary.machine.trackingMode) -> "+ Time"
                         else -> "+ Sets"
                     },
                     modifier = Modifier.clickable(enabled = !isReordering) { quickReps = true }.padding(horizontal = 8.dp, vertical = 2.dp),
@@ -618,9 +620,11 @@ internal fun sessionTrendColor(summary: MachineSummary): Color = when (summary.p
 
 private const val TRAINING_UNIT_MILLIS = 6L * 60L * 60L * 1000L
 
-fun currentTrainingUnitSets(summary: MachineSummary, now: Long = System.currentTimeMillis()): List<SetRecord> {
-    val day = trainingDate(now)
-    return summary.recentSets.filter { trainingDate(it.performedAt) == day }.sortedBy { it.performedAt }
+fun currentTrainingUnitSets(summary: MachineSummary, now: Long = System.currentTimeMillis(), zone: ZoneId = ZoneId.systemDefault()): List<SetRecord> {
+    val day = trainingDate(now, zone)
+    val start = day.atTime(6, 0).atZone(zone).toInstant().toEpochMilli()
+    val end = day.plusDays(1).atTime(6, 0).atZone(zone).toInstant().toEpochMilli()
+    return summary.recentSets.filter { it.performedAt >= start && it.performedAt < end }.sortedBy { it.performedAt }
 }
 fun previousTrainingUnitReps(summary: MachineSummary, current: List<SetRecord> = currentTrainingUnitSets(summary)): List<Int> {
     val currentIds = current.mapTo(mutableSetOf()) { it.id }
