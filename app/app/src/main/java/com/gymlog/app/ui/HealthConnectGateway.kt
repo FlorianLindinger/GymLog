@@ -55,21 +55,20 @@ class HealthConnectGateway(private val context: Context, private val clientOverr
      * last full read. This is a small query, so periodic refreshes can skip re-reading the whole history.
      */
     suspend fun hasChangesSinceLastRead(): Boolean {
+        // The stored token is deliberately not advanced: while nothing changes the scan stays empty, and
+        // any change leads to a full read that stores a fresh token.
         var token = changesToken ?: return true
         val health = client()
-        var changed = false
-        do {
+        while (true) {
             val response = health.getChanges(token)
             if (response.changesTokenExpired) {
                 changesToken = null
                 return true
             }
-            if (response.changes.isNotEmpty()) changed = true
+            if (response.changes.isNotEmpty()) return true
+            if (!response.hasMore) return false
             token = response.nextChangesToken
-        } while (response.hasMore)
-        // When something changed the caller does a full read, which takes a fresh token itself.
-        if (!changed) changesToken = token
-        return changed
+        }
     }
 
     private fun client(): HealthConnectClient = clientOverride ?: HealthConnectClient.getOrCreate(context)

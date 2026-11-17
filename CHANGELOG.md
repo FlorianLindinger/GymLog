@@ -13,6 +13,7 @@ Notable changes to GymLog are recorded here. Planned work belongs in `docs/TODO.
 - Strength-score trend warnings fit a line through every training day in the window instead of comparing only the first and latest day.
 - Database writes and backup/plan file reads and writes run off the main thread. A backup restored while the activity was recreated still offers Undo; plan export no longer fails after rotation.
 - Clearing every wheel in "Change Sets" now goes through the confirmed, undoable delete instead of silently removing the entry. Manual Health Connect sync reports permission-check failures instead of crashing.
+- Automatic Health Connect refreshes (every minute on Body, and on resume) first ask Health Connect's change log and re-read the full body history only when something changed. Exercise Order caches its ranking between redraws.
 - JSON backup code moved to GymBackupJson.kt; unused repository functions removed.
 - Highlight exercise notes through color and weight without changing padding or typography size. Show only the latest entry above the chart and full recent history below it.
 - Restore green/red overview history separators; use neutral colors within exercise history. Initialize new-session wheels from the latest recorded batch instead of stale saved wheel values.

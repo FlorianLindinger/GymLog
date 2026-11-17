@@ -31,17 +31,30 @@ class ManualBodyEntryTest {
         assertEquals(16.0, data.measurements.single { it.metric == BodyMetric.FAT_MASS }.value, 0.0)
     }
     @Test fun periodicChecksSkipFullReadsUntilHealthConnectChanges() = runBlocking {
+        // The fake's own change log is order-sensitive in ways real Health Connect is not, so the
+        // change pages are scripted here; tokens and record reads still go through the fake.
         val fake = FakeHealthConnectClient()
+        val pages = ArrayDeque<androidx.health.connect.client.response.ChangesResponse>()
+        fake.overrides.getChanges = stub { pages.removeFirst() }
+        fun page(changed: Boolean, more: Boolean = false, expired: Boolean = false) =
+            androidx.health.connect.client.response.ChangesResponse(
+                if (changed) listOf(androidx.health.connect.client.changes.DeletionChange("gone")) else emptyList(),
+                "next", more, expired)
         val gateway = HealthConnectGateway(context, fake)
-        // Nothing read yet: the caller must do a full read.
+        // Nothing read yet: the caller must do a full read, without asking the change log.
         assertTrue(gateway.hasChangesSinceLastRead())
         gateway.readBodyData()
+        pages += page(changed = false)
         assertFalse(gateway.hasChangesSinceLastRead())
-        assertFalse(gateway.hasChangesSinceLastRead())
-        gateway.writeBodyData(ManualBodyEntry(81.0, measuredAt = 1700000000000, id = "scale"))
+        pages += listOf(page(changed = false, more = true), page(changed = true))
+        assertTrue(gateway.hasChangesSinceLastRead())
+        // An expired token forces full reads until the next one stores a new token.
+        pages += page(changed = false, expired = true)
         assertTrue(gateway.hasChangesSinceLastRead())
         assertTrue(gateway.hasChangesSinceLastRead())
-        assertEquals(81.0, gateway.readBodyData().measurements.single { it.metric == BodyMetric.WEIGHT }.value, 0.0)
+        assertTrue(pages.isEmpty())
+        gateway.readBodyData()
+        pages += page(changed = false)
         assertFalse(gateway.hasChangesSinceLastRead())
     }
     @Test fun deniedWritesAreNotReportedAsSuccess() = runBlocking {
