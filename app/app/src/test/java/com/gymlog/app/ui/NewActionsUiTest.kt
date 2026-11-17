@@ -2,6 +2,7 @@ package com.gymlog.app.ui
 
 import android.content.Context
 import androidx.test.core.app.ApplicationProvider
+import androidx.compose.foundation.clickable
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createComposeRule
 import com.gymlog.app.data.*
@@ -81,6 +82,29 @@ class NewActionsUiTest {
         compose.onNodeWithText("Save days").assertIsEnabled().performClick()
         assertEquals(PriorDayFatigue(30, 20, 0), saved)
     }
+    @Test fun tappingAChartPointShowsItsValueWhileOtherTapsReachTheCard() {
+        var cardClicks = 0
+        val start = java.time.Instant.parse("2026-11-02T18:30:00Z").toEpochMilli()
+        val points = listOf(TimeValue(start, 10.0), TimeValue(start + 10 * 86_400_000L, 17.3))
+        compose.setContent { GymLogTheme {
+            androidx.compose.foundation.layout.Box(androidx.compose.ui.Modifier.clickable { cardClicks++ }) {
+                TimeWindowChart(listOf(TimeSeries(points, androidx.compose.ui.graphics.Color.Blue)), ChartWindow(null, key = "test"))
+            }
+        } }
+        val plot = compose.onNodeWithTag("chart_plot", useUnmergedTree = true)
+        // Halfway between the two points: nothing to select, so the card receives the tap.
+        plot.performTouchInput { click(center) }
+        compose.runOnIdle { assertEquals(1, cardClicks) }
+        compose.onNodeWithText("17.3", substring = true, useUnmergedTree = true).assertDoesNotExist()
+        val range = chartAxisRange(listOf(10.0, 17.3))
+        plot.performTouchInput {
+            val y = height - 6f - ((17.3 - range.min) / range.span).toFloat() * (height - 12f)
+            click(androidx.compose.ui.geometry.Offset(width - 1f, y))
+        }
+        compose.onNodeWithText("17.3", substring = true, useUnmergedTree = true).assertExists()
+        compose.onNodeWithText(formatChartPointTime(start + 10 * 86_400_000L), useUnmergedTree = true).assertExists()
+        compose.runOnIdle { assertEquals(1, cardClicks) }
+    }
     @Test fun compactRegionEditorSavesCustomPercentage() {
         var saved: List<AreaAssignment>? = null
         compose.setContent { GymLogTheme { MuscleProfileDialog("Custom exercise", emptyList(), onDismiss = {}, onSave = { saved = it }) } }
@@ -127,13 +151,18 @@ class NewActionsUiTest {
         val data = BodyDataSnapshot(listOf(BodyMeasurement(BodyMetric.WEIGHT, 80.0, now, "Test")))
         compose.setContent { GymLogTheme { BodyOverviewScreen(data, {}, "", false, onSync = {}, onAutoSync = {}, onGym = {}) } }
         compose.onNodeWithText("Weight (80 kg)").performClick()
-        compose.onNodeWithText("Scroll for plot settings. Changes preview above; Save applies them.").performScrollTo().assertIsDisplayed()
-        val force = hasText("Force show") and hasAnyAncestor(hasTestTag("visibility_showTargetLower"))
+        compose.onNodeWithText("Tap a section to change it. The preview updates live; Save applies.").assertExists()
+        val force = hasText("Show") and hasAnyAncestor(hasTestTag("visibility_showTargetLower"))
+        // Sections other than Time range start collapsed and show a summary instead.
+        compose.onNode(force).assertDoesNotExist()
+        compose.onNodeWithText("No target").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Target").performScrollTo().performClick()
         compose.onNode(force).performScrollTo().performClick().assertIsSelected()
         compose.onNodeWithText("Save").performClick()
         val prefs = ApplicationProvider.getApplicationContext<Context>().getSharedPreferences("body_graph_settings", 0)
         assertEquals("SHOW", prefs.getString("WEIGHT_visibility_showTargetLower", null))
         compose.onNodeWithText("Weight (80 kg)").performClick()
+        compose.onNodeWithText("Target").performScrollTo().performClick()
         compose.onNode(force).performScrollTo().assertIsSelected()
     }
 

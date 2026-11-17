@@ -19,7 +19,16 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.waitForUpOrCancellation
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalDensity
@@ -279,6 +288,14 @@ private fun BodyDateLabels(labels: List<TimeAxisLabel>, range: VisibleTimeRange,
 }
 
 private const val CHART_INSET = 6f
+
+/** A recorded point a tap can select: which series it belongs to and where it is drawn. */
+internal data class ChartPointPosition(val seriesIndex: Int, val point: TimeValue, val position: Offset)
+
+/** Nearest drawn point within [maxDistance] pixels of [tap], or null so the tap can fall through. */
+internal fun nearestChartPoint(tap: Offset, candidates: List<ChartPointPosition>, maxDistance: Float): ChartPointPosition? =
+    candidates.minByOrNull { (it.position - tap).getDistanceSquared() }
+        ?.takeIf { (it.position - tap).getDistance() <= maxDistance }
 private const val DAY_MILLIS_SHARED = 24L * 60L * 60L * 1000L
 
 @Composable
@@ -338,6 +355,12 @@ internal fun TimeWindowChart(
         }
     }
 
+    // Selected point (series index, timestamp); cleared when the visible data changes.
+    var selected by remember(visibleSeries, visibleRange) { mutableStateOf<Pair<Int, Long>?>(null) }
+    val tapRadius = with(density) { 28.dp.toPx() }
+    val tooltipBackground = MaterialTheme.colorScheme.inverseSurface
+    val tooltipText = MaterialTheme.colorScheme.inverseOnSurface
+
     BoxWithConstraints(modifier.fillMaxWidth()) {
         val labelWidth = if (compactYAxis) compactLabelWidth else 34.dp
         val labelGap = if (compactYAxis) 1.dp else 3.dp
@@ -367,7 +390,36 @@ internal fun TimeWindowChart(
                         drawLine(leftAxisColor, Offset(size.width, y), Offset(0f, y), strokeWidth = 3.5f)
                     }
                 }
-                Box(Modifier.width(plotWidth).height(height)) {
+                fun axisRangeOf(item: TimeSeries) = when (item.axis) {
+                    PlotAxis.LEFT -> leftRange
+                    PlotAxis.RIGHT -> rightRange
+                    PlotAxis.INDEPENDENT -> independentRange
+                }
+                Box(Modifier.width(plotWidth).height(height).testTag("chart_plot").pointerInput(visibleSeries, recordedPoints, visibleRange, leftRange, rightRange, independentRange) {
+                    // Only a tap close to a recorded point is consumed; any other tap reaches the parent,
+                    // so cards that open settings or enlarge the chart keep working.
+                    awaitEachGesture {
+                        val down = awaitFirstDown(requireUnconsumed = false)
+                        val up = waitForUpOrCancellation() ?: return@awaitEachGesture
+                        if ((up.position - down.position).getDistance() > viewConfiguration.touchSlop) return@awaitEachGesture
+                        val width = size.width.toFloat()
+                        val plotHeight = size.height.toFloat()
+                        val candidates = visibleSeries.flatMapIndexed { index, item ->
+                            if (!item.showPoints) emptyList() else recordedPoints[index].map { point ->
+                                val range = axisRangeOf(item)
+                                ChartPointPosition(index, point, Offset(
+                                    ((point.timestamp - visibleStart).toDouble() / visibleRange.duration * width).toFloat(),
+                                    plotHeight - CHART_INSET - ((point.value - range.min) / range.span).toFloat() * (plotHeight - CHART_INSET * 2f)))
+                            }
+                        }
+                        val hit = nearestChartPoint(up.position, candidates, tapRadius)
+                        val key = hit?.let { it.seriesIndex to it.point.timestamp }
+                        if (hit != null) {
+                            up.consume()
+                            selected = if (selected == key) null else key
+                        } else selected = null
+                    }
+                }) {
                     Canvas(Modifier.fillMaxSize()) {
                         leftRange.ticks.forEach { tick ->
                             val y = CHART_INSET + ((leftRange.max - tick) / leftRange.span).toFloat() * (size.height - CHART_INSET * 2f)
@@ -438,6 +490,37 @@ internal fun TimeWindowChart(
                                 }
                             }
                         }
+                        selected?.let { (_, timestamp) ->
+                            val guideX = x(timestamp)
+                            drawLine(xAxisColor.copy(alpha = .6f), Offset(guideX, 0f), Offset(guideX, size.height), strokeWidth = 1.5f, pathEffect = dashEffect)
+                            visibleSeries.forEachIndexed { index, item ->
+                                if (!item.showPoints) return@forEachIndexed
+                                recordedPoints[index].filter { it.timestamp == timestamp }.forEach { point ->
+                                    val center = Offset(guideX, y(point.value, axisRangeOf(item)))
+                                    drawCircle(item.color, item.pointRadius + 5f, center, style = Stroke(width = 3f))
+                                }
+                            }
+                        }
+                    }
+                    selected?.let { (_, timestamp) ->
+                        // Every point-series value recorded at the same moment, in its own series color.
+                        val values = visibleSeries.mapIndexedNotNull { index, item ->
+                            if (!item.showPoints) null else recordedPoints[index].firstOrNull { it.timestamp == timestamp }?.let { item.color to it.value }
+                        }
+                        val onLeftHalf = (timestamp - visibleStart).toDouble() / visibleRange.duration < 0.5
+                        Column(
+                            Modifier.align(if (onLeftHalf) Alignment.TopEnd else Alignment.TopStart).padding(4.dp).widthIn(max = 180.dp)
+                                .background(tooltipBackground.copy(alpha = .92f), RoundedCornerShape(6.dp)).padding(horizontal = 7.dp, vertical = 4.dp),
+                        ) {
+                            Text(formatChartPointTime(timestamp), style = MaterialTheme.typography.labelSmall, color = tooltipText)
+                            values.forEach { (color, value) ->
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Box(Modifier.width(8.dp).height(8.dp).background(color, RoundedCornerShape(4.dp)))
+                                    Text(" ${formatChartAxisValue(value)}", style = MaterialTheme.typography.labelMedium,
+                                        fontWeight = FontWeight.SemiBold, color = tooltipText)
+                                }
+                            }
+                        }
                     }
                 }
                 if (hasRightAxis || mirrorLeftTicksOnRight) {
@@ -477,4 +560,11 @@ internal fun TimeWindowChart(
             }
         }
     }
+}
+
+/** Date of a tapped point, with the time of day unless it is a whole-day point (local midnight). */
+internal fun formatChartPointTime(timestamp: Long, zone: java.time.ZoneId = java.time.ZoneId.systemDefault()): String {
+    val local = java.time.Instant.ofEpochMilli(timestamp).atZone(zone)
+    val pattern = if (local.toLocalTime() == java.time.LocalTime.MIDNIGHT) "EEE d MMM yyyy" else "EEE d MMM yyyy, HH:mm"
+    return local.format(java.time.format.DateTimeFormatter.ofPattern(pattern, java.util.Locale.ENGLISH))
 }

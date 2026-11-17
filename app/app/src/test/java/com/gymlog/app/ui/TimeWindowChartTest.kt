@@ -7,6 +7,24 @@ import org.junit.Test
 
 class TimeWindowChartTest {
     @Test
+    fun tapSelectsOnlyTheNearestPointInsideTheRadius() {
+        val a = ChartPointPosition(0, TimeValue(1, 5.0), androidx.compose.ui.geometry.Offset(10f, 10f))
+        val b = ChartPointPosition(1, TimeValue(2, 6.0), androidx.compose.ui.geometry.Offset(40f, 10f))
+        assertEquals(a, nearestChartPoint(androidx.compose.ui.geometry.Offset(20f, 12f), listOf(a, b), 28f))
+        assertEquals(b, nearestChartPoint(androidx.compose.ui.geometry.Offset(30f, 10f), listOf(a, b), 28f))
+        // Too far from every point: the tap must fall through to the parent.
+        org.junit.Assert.assertNull(nearestChartPoint(androidx.compose.ui.geometry.Offset(100f, 100f), listOf(a, b), 28f))
+        org.junit.Assert.assertNull(nearestChartPoint(androidx.compose.ui.geometry.Offset(0f, 0f), emptyList(), 28f))
+    }
+
+    @Test
+    fun pointTimeOmitsMidnightForWholeDayPoints() {
+        val zone = java.time.ZoneOffset.UTC
+        assertEquals("Mon 2 Nov 2026", formatChartPointTime(java.time.Instant.parse("2026-11-02T00:00:00Z").toEpochMilli(), zone))
+        assertEquals("Mon 2 Nov 2026, 18:30", formatChartPointTime(java.time.Instant.parse("2026-11-02T18:30:00Z").toEpochMilli(), zone))
+    }
+
+    @Test
     fun lineSegmentsReachBothLimitsWithoutExtrapolation() {
         val points = listOf(TimeValue(0, 0.0), TimeValue(5, 10.0), TimeValue(10, 0.0))
         assertEquals(listOf(TimeValue(2, 4.0), TimeValue(5, 10.0), TimeValue(8, 4.0)),

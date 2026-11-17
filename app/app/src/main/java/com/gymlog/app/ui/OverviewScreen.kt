@@ -104,6 +104,7 @@ fun OverviewScreen(
     onMenu: () -> Unit,
     onStats: () -> Unit,
     onWipStats: () -> Unit,
+    onCcStats: () -> Unit = {},
     onBody: () -> Unit,
     listState: LazyListState,
     scrollToExerciseId: Long?,
@@ -244,6 +245,7 @@ fun OverviewScreen(
                 FilledTonalButton(onClick = onMenu, modifier = Modifier.weight(1f), contentPadding = compactPadding) { OverviewButtonLabel("Menu") }
                 FilledTonalButton(onClick = onStats, modifier = Modifier.weight(1f), contentPadding = compactPadding) { OverviewButtonLabel("Stats") }
                 FilledTonalButton(onClick = onWipStats, modifier = Modifier.weight(1f), contentPadding = compactPadding) { OverviewButtonLabel("WIP stats") }
+                FilledTonalButton(onClick = onCcStats, modifier = Modifier.weight(1f), contentPadding = compactPadding) { OverviewButtonLabel("CC Stats") }
                 FilledTonalButton(onClick = onAdd, modifier = Modifier.weight(1f), contentPadding = compactPadding) { OverviewButtonLabel("+ Add") }
         }
     }
@@ -253,7 +255,7 @@ fun OverviewScreen(
 }
 @Composable
 private fun OverviewButtonLabel(text: String) {
-    Text(text, maxLines = 1, softWrap = false, style = if (text == "WIP stats") MaterialTheme.typography.labelSmall else MaterialTheme.typography.labelMedium)
+    Text(text, maxLines = 1, softWrap = false, style = if (text == "WIP stats" || text == "CC Stats") MaterialTheme.typography.labelSmall else MaterialTheme.typography.labelMedium)
 }
 
 @Composable

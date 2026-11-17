@@ -557,7 +557,7 @@ private fun BodyMetricCard(
                 bodyHistoryLabel(if (draft.globalInterval) globalRange else draft.interval))
             BodyGraph(sorted, previewFitPoints, resolved, primary, fitColor, targetColor, previewWindow,
                 references.flatMap { reference -> reference.visibleLines.map { line -> TimeBand(line.value, 0.0,
-                    if (reference.allTime) allTimeColor else historyColor, dashed = line.dashed) } }, height = 320.dp)
+                    if (reference.allTime) allTimeColor else historyColor, dashed = line.dashed) } }, height = 220.dp)
         }) {
         onSettings(it)
         editing = false
@@ -722,6 +722,11 @@ private fun BodySettingsSection(
     title: String,
     description: String? = null,
     badge: String? = null,
+    // With onToggle the section collapses to its header plus a one-line summary of the current choice,
+    // so the long settings list can be scanned without scrolling through every control.
+    summary: String? = null,
+    expanded: Boolean = true,
+    onToggle: (() -> Unit)? = null,
     content: @Composable ColumnScope.() -> Unit,
 ) {
     Card(
@@ -730,17 +735,28 @@ private fun BodySettingsSection(
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = .45f)),
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = .18f)),
     ) {
-        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text(title, Modifier.weight(1f), style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.primary)
+        Column(Modifier.padding(horizontal = 12.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(
+                (if (onToggle != null) Modifier.fillMaxWidth().defaultMinSize(minHeight = 40.dp).clickable(onClick = onToggle) else Modifier.fillMaxWidth()),
+                verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text(title, style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.primary)
+                    if (!expanded && summary != null) Text(summary, style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
+                }
                 if (badge != null) Text(badge,
                     Modifier.background(MaterialTheme.colorScheme.primaryContainer, RoundedCornerShape(8.dp))
                         .padding(horizontal = 8.dp, vertical = 3.dp),
                     style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onPrimaryContainer)
+                if (onToggle != null) Text(if (expanded) "\u25B4" else "\u25BE", style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
-            description?.let { BodySettingsHint(it) }
-            content()
+            if (expanded) {
+                description?.let { BodySettingsHint(it) }
+                content()
+            }
         }
     }
 }
@@ -749,16 +765,18 @@ private fun BodySettingsSection(
 private fun BodyVisibilityControl(label: String, key: String, value: Boolean, follows: Boolean,
     global: Boolean, settings: BodyChartSettings, onChange: (BodyChartSettings) -> Unit, onBoolean: (Boolean) -> Unit) {
     if (global) SettingCheck(label, value, onBoolean) else {
-        Column(Modifier.testTag("visibility_$key"), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            Text(label, style = MaterialTheme.typography.bodySmall)
+        Row(Modifier.fillMaxWidth().testTag("visibility_$key"), verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text(label, Modifier.weight(1f), style = MaterialTheme.typography.bodySmall)
             val selected = bodyVisibilityChoice(settings, key, follows, value)
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+            // One compact segmented control per line instead of three wide stacked buttons.
+            Row(Modifier.width(168.dp).background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(8.dp)).padding(2.dp)) {
                 BodyVisibility.entries.forEach { choice ->
-                    val title = when (choice) { BodyVisibility.FOLLOW_GLOBAL -> "Follow global"; BodyVisibility.SHOW -> "Force show"; BodyVisibility.HIDE -> "Force hide" }
-                    Text(title, Modifier.weight(1f).background(if (selected == choice) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(7.dp))
-                        .selectable(selected = selected == choice, role = Role.RadioButton, onClick = { onChange(settings.copy(visibility = settings.visibility + (key to choice))) }).padding(vertical = 8.dp),
+                    val title = when (choice) { BodyVisibility.FOLLOW_GLOBAL -> "Global"; BodyVisibility.SHOW -> "Show"; BodyVisibility.HIDE -> "Hide" }
+                    Text(title, Modifier.weight(1f).background(if (selected == choice) MaterialTheme.colorScheme.primary else Color.Transparent, RoundedCornerShape(6.dp))
+                        .selectable(selected = selected == choice, role = Role.RadioButton, onClick = { onChange(settings.copy(visibility = settings.visibility + (key to choice))) }).padding(vertical = 7.dp),
                         textAlign = TextAlign.Center, style = MaterialTheme.typography.labelSmall,
-                        color = if (selected == choice) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant)
+                        color = if (selected == choice) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
         }
@@ -840,23 +858,41 @@ private fun BodyChartSettingsDialog(
         BodyVisibilityControl(label, key, value, follows, global, draft, { draft = it }, change)
     }
     fun source(followsGlobal: Boolean) = if (global) "Default" else if (followsGlobal) "Global" else "Custom"
+    // Only the most-used section starts open; the others show a summary line until tapped.
+    var expanded by remember { mutableStateOf(setOf("Time range")) }
+    fun toggle(section: String): () -> Unit = { expanded = if (section in expanded) expanded - section else expanded + section }
+    fun onOff(value: Boolean) = if (value) "on" else "off"
+    val e = effectiveDraft
+    val rangeSummary = if (e.interval == ChartRange.CUSTOM && e.customStart != null && e.customEnd != null)
+        "${formatChartDate(e.customStart)} - ${formatChartDate(e.customEnd)}" else bodyPresetLabel(e.interval)
+    val dataSummary = listOfNotNull("raw".takeIf { e.showRawData },
+        "${formatChartAxisValue(validPeriod ?: e.averagePeriodDays)}-day avg".takeIf { e.periodAveraging },
+        "${formatChartAxisValue(validFraction ?: e.averageFractionPercent)} % avg".takeIf { e.averaging }).joinToString(" · ").ifEmpty { "nothing shown" }
+    val summaryCount = listOf(e.showIntervalCount, e.showTotalCount, e.showMean, e.showRange).count { it }
+    val referenceCount = listOf(e.showAllTimeLow, e.showAllTimeMean, e.showAllTimeHigh, e.showHistoryLow, e.showHistoryMean, e.showHistoryHigh).count { it }
+    val targetSummary = if (global) "Targets ${onOff(e.targetEnabled)}" else
+        e.target?.takeIf { e.targetEnabled }?.let { "${formatBodyValue(it)}${e.acceptance?.let { a -> " ±${formatBodyValue(a)}" } ?: ""} ${metric!!.unit}" } ?: "No target"
     AlertDialog(
         onDismissRequest = onDismiss,
         modifier = Modifier.padding(horizontal = 12.dp).widthIn(max = 640.dp).fillMaxWidth(),
         properties = DialogProperties(usePlatformDefaultWidth = false),
         title = {
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text(metric?.let { "${it.label} settings" } ?: "Global plot settings")
-                BodySettingsHint(if (global) "Defaults for plots that follow global settings" else "Follow global defaults or force individual items shown or hidden")
+                Text(metric?.let { "${it.label} plot" } ?: "Global plot settings")
+                BodySettingsHint(if (global) "Defaults for every plot that follows global settings" else "Each item can follow the global setting, or be shown or hidden for this plot only")
             }
         },
         text = {
-            Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                preview?.invoke(draft.copy(averagePeriodDays = validPeriod ?: current.averagePeriodDays, averageFractionPercent = validFraction ?: current.averageFractionPercent, yMin = minimum, yMax = maximum))
-                if (preview != null) BodySettingsHint("Scroll for plot settings. Changes preview above; Save applies them.")
+            Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                // Collapsed sections keep the list short enough that the preview stays in view while editing.
+                if (preview != null) {
+                    preview(draft.copy(averagePeriodDays = validPeriod ?: current.averagePeriodDays, averageFractionPercent = validFraction ?: current.averageFractionPercent, yMin = minimum, yMax = maximum))
+                    BodySettingsHint("Tap a section to change it. The preview updates live; Save applies.")
+                }
                 if (header != null) BodySettingsSection("Health Connect") { header() }
                 if (plotControls != null) BodySettingsSection("Plots") { plotControls() }
-                BodySettingsSection("Time range", "Which measurements appear in the plot", source(draft.globalInterval)) {
+                BodySettingsSection("Time range", "Which measurements appear in the plot", source(draft.globalInterval),
+                    rangeSummary, "Time range" in expanded, toggle("Time range")) {
                     if (!global) BodySettingsInheritance(draft.globalInterval, { draft = draft.copy(globalInterval = it) })
                     if (global || !draft.globalInterval) {
                         ChartRangeControls(draft.interval, draft.showFit,
@@ -867,7 +903,8 @@ private fun BodyChartSettingsDialog(
                         }
                     }
                 }
-                BodySettingsSection("Data and moving averages", "Show raw data, either average, or overlay all three", source(draft.globalAveraging)) {
+                BodySettingsSection("Data and moving averages", "Show raw data, either average, or overlay all three", source(draft.globalAveraging),
+                    dataSummary, "Data" in expanded, toggle("Data")) {
                     if (!global) BodySettingsInheritance(draft.globalAveraging, { draft = draft.copy(globalAveraging = it) })
                     run {
                         visibility("Show full raw data", "showRawData", draft.showRawData, draft.globalAveraging) { draft = draft.copy(showRawData = it) }
@@ -882,11 +919,13 @@ private fun BodyChartSettingsDialog(
                         BodySettingsHint("Each point averages measurements from the preceding window, including earlier data just outside the plot. Fits and reference lines always use raw measurements.")
                     }
                 }
-                BodySettingsSection("Trend fit", "Show the direction of change", source(draft.globalFit)) {
+                BodySettingsSection("Trend fit", "Show the direction of change", source(draft.globalFit),
+                    "Fit line ${onOff(e.showFit)}", "Fit" in expanded, toggle("Fit")) {
                     if (!global) BodySettingsInheritance(draft.globalFit, { draft = draft.copy(globalFit = it) })
                     visibility("Show fit", "showFit", draft.showFit, draft.globalFit) { draft = draft.copy(showFit = it) }
                 }
-                BodySettingsSection("Plot summary", "Values shown above the chart", source(draft.globalSummary)) {
+                BodySettingsSection("Plot summary", "Values shown above the chart", source(draft.globalSummary),
+                    "$summaryCount of 4 values shown", "Summary" in expanded, toggle("Summary")) {
                     if (!global) BodySettingsInheritance(draft.globalSummary, { draft = draft.copy(globalSummary = it) })
                     run {
                         visibility("Count in interval", "showIntervalCount", draft.showIntervalCount, draft.globalSummary) { draft = draft.copy(showIntervalCount = it) }
@@ -895,7 +934,9 @@ private fun BodyChartSettingsDialog(
                         visibility("Interval range", "showRange", draft.showRange, draft.globalSummary) { draft = draft.copy(showRange = it) }
                     }
                 }
-                if (!global) BodySettingsSection("Y axis (${metric!!.unit})", "Leave either limit blank for automatic scaling", "Custom") {
+                if (!global) BodySettingsSection("Y axis (${metric!!.unit})", "Leave either limit blank for automatic scaling",
+                    if (minimum != null || maximum != null) "Custom" else "Auto",
+                    "${minimum?.let(::formatChartAxisValue) ?: "auto"} – ${maximum?.let(::formatChartAxisValue) ?: "auto"}", "Axis" in expanded, toggle("Axis")) {
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         OutlinedTextField(yMin, { yMin = it }, modifier = Modifier.weight(1f), label = { Text("Minimum") },
                             isError = !boundsValid && yMin.isNotBlank(), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal), singleLine = true)
@@ -904,7 +945,8 @@ private fun BodyChartSettingsDialog(
                     }
                     if (!boundsValid) Text("Use nonnegative values; maximum must exceed minimum.", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
                 }
-                BodySettingsSection("Reference lines", "Solid low/high lines and dashed means", source(draft.globalHighLow)) {
+                BodySettingsSection("Reference lines", "Solid low/high lines and dashed means", source(draft.globalHighLow),
+                    if (referenceCount == 0) "None shown" else "$referenceCount line${if (referenceCount == 1) "" else "s"} shown", "References" in expanded, toggle("References")) {
                     if (!global) BodySettingsInheritance(draft.globalHighLow, { draft = draft.copy(globalHighLow = it) })
                     run {
                         BodyReferenceGroup("All-time", Color(0xFFCE93D8)) {
@@ -939,7 +981,8 @@ private fun BodyChartSettingsDialog(
                         }
                     }
                 }
-                BodySettingsSection("Target", "Green target and acceptance band", source(draft.globalTarget)) {
+                BodySettingsSection("Target", "Green target and acceptance band", source(draft.globalTarget),
+                    targetSummary, "Target" in expanded, toggle("Target")) {
                     if (!global) BodySettingsInheritance(draft.globalTarget, { draft = draft.copy(globalTarget = it) }, "Use global visibility")
                     if (global) {
                         SettingCheck("Show targets", draft.targetEnabled) { draft = draft.copy(targetEnabled = it) }
@@ -958,7 +1001,14 @@ private fun BodyChartSettingsDialog(
                 averageFractionPercent = validFraction ?: current.averageFractionPercent,
                 historyPercentile = validHistoryPercent ?: current.historyPercentile, yMin = minimum, yMax = maximum))
         }, enabled = boundsValid && targetsValid && averagesValid && historyPercentValid) { Text("Save") } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+        dismissButton = { Row {
+            // Per-plot only: drop every override but keep this plot's own target values.
+            if (!global) TextButton(onClick = {
+                draft = BodyChartSettings(target = draft.target, acceptance = draft.acceptance, targetEnabled = draft.targetEnabled)
+                yMin = ""; yMax = ""
+            }) { Text("Reset") }
+            TextButton(onClick = onDismiss) { Text("Cancel") }
+        } },
     )
     if (customHighLow) CustomBodyRangeDialog(
         maxTimestamp = System.currentTimeMillis(),

@@ -22,7 +22,8 @@ does not confirm that the APK was delivered or installed.
 ## Google Drive
 
 Run `build & install via Google Drive.bat` and select a folder synchronized by Google Drive for desktop.
-The folder picker preselects your last folder and lets you keep or change it.
+Your last folder is remembered: the script asks whether to use it again. Press Enter to keep it,
+or type n and Enter to pick another folder (the picker then preselects the old one).
 The choice is remembered locally in the Git-ignored `.tools/google-drive-folder.txt`.
 The destination is checked before building. Exports are numbered `GymLog-1.apk`,
 `GymLog-2.apk`, and so on, continuing after the highest existing number without

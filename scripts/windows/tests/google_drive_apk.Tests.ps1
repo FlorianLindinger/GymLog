@@ -8,6 +8,9 @@ $script:DialogResult = 'OK'
 $script:DialogChoice = ''
 $script:InitialFolder = ''
 $script:Disposed = 0
+$script:FolderAction = 'Choose'
+$script:Prompts = 0
+function Read-GoogleDriveFolderAction([string]$Previous) { $script:Prompts++; return $script:FolderAction }
 function New-GoogleDriveFolderDialog {
     $dialog = [pscustomobject]@{ SelectedPath=''; Description=''; ShowNewFolderButton=$false }
     $dialog | Add-Member ScriptMethod ShowDialog {
@@ -26,8 +29,13 @@ try {
     if ((Select-GoogleDriveFolder $folder) -ne $folder) { throw 'Explicit sync folder was not preserved.' }
     if ([IO.File]::ReadAllText((Get-GoogleDriveSettingsPath)) -ne $folder) { throw 'Selected folder was not saved.' }
     $env:GYMLOG_DRIVE_FOLDER = ''
+    $script:FolderAction = 'Use'
+    if ((Select-GoogleDriveFolder) -ne $folder -or $script:Disposed -ne 0 -or $script:Prompts -ne 1) {
+        throw 'An existing saved folder must be reused without opening the folder dialog.'
+    }
+    $script:FolderAction = 'Choose'
     if ((Select-GoogleDriveFolder) -ne $folder -or $script:InitialFolder -ne $folder) {
-        throw 'Ordinary GUI launch must offer the saved folder as its initial selection.'
+        throw 'Choosing another folder must open the dialog with the saved folder preselected.'
     }
     $changedFolder = Join-Path $root 'another sync folder'
     New-Item -ItemType Directory -Path $changedFolder | Out-Null
@@ -43,8 +51,11 @@ try {
     $script:DialogResult = 'OK'
     [IO.File]::WriteAllText((Get-GoogleDriveSettingsPath), (Join-Path $root 'missing'))
     $script:DialogChoice = $folder
+    $promptsBefore = $script:Prompts
+    $script:FolderAction = 'Use'
     Select-GoogleDriveFolder | Out-Null
     if ($script:InitialFolder) { throw 'A missing saved folder must not be preselected.' }
+    if ($script:Prompts -ne $promptsBefore) { throw 'A missing saved folder must go straight to the dialog.' }
     if ($script:Disposed -ne 4) { throw 'Every GUI dialog must be disposed, including cancellation.' }
     $env:GYMLOG_DRIVE_FOLDER = $folder
     if ((Select-GoogleDriveFolder) -ne $folder) { throw 'Environment sync folder was not honored.' }
@@ -83,4 +94,4 @@ try {
     if (-not $resolved.StartsWith($temp, [StringComparison]::OrdinalIgnoreCase) -or (Split-Path $resolved -Leaf) -notlike 'gymlog-drive-tests-*') { throw 'Unsafe fixture cleanup path' }
     if (Test-Path -LiteralPath $resolved) { Remove-Item -LiteralPath $resolved -Recurse -Force }
 }
-Write-Output 'PASS: remembered Drive folders, GUI preselection/change/cancel, sequential APK versions, binary copies and missing-path failures; only temporary files and mocked dialogs used.'
+Write-Output 'PASS: remembered Drive folders reused without a dialog, GUI preselection/change/cancel, sequential APK versions, binary copies and missing-path failures; only temporary files and mocked dialogs used.'
