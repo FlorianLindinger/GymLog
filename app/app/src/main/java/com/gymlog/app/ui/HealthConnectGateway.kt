@@ -12,7 +12,7 @@ import androidx.health.connect.client.time.TimeRangeFilter
 import java.time.Instant
 import kotlin.reflect.KClass
 
-class HealthConnectGateway(private val context: Context) {
+class HealthConnectGateway(private val context: Context, private val clientOverride: HealthConnectClient? = null) {
     companion object {
         val permissions = setOf(
             HealthPermission.getReadPermission(WeightRecord::class),
@@ -45,7 +45,18 @@ class HealthConnectGateway(private val context: Context) {
     }
     fun sdkStatus(): Int = HealthConnectClient.getSdkStatus(context)
 
-    private fun client(): HealthConnectClient = HealthConnectClient.getOrCreate(context)
+    private fun client(): HealthConnectClient = clientOverride ?: HealthConnectClient.getOrCreate(context)
+
+    fun writePermissions(entry: ManualBodyEntry): Set<String> = buildSet {
+        add(HealthPermission.getWritePermission(WeightRecord::class))
+        if (entry.fatPercent != null) add(HealthPermission.getWritePermission(BodyFatRecord::class))
+    }
+    suspend fun grantedPermissions(): Set<String> = client().permissionController.getGrantedPermissions()
+    suspend fun writeBodyData(entry: ManualBodyEntry) {
+        val records = manualBodyHealthRecords(entry)
+        val result = client().insertRecords(records)
+        check(result.recordIdsList.size == records.size) { "Health Connect did not confirm every record" }
+    }
 
     suspend fun hasPermissions(): Boolean =
         client().permissionController.getGrantedPermissions().containsAll(permissions)

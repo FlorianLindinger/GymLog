@@ -39,7 +39,7 @@ internal data class DashboardTotals(val trainings: List<DashboardTraining>) {
 internal data class DashboardExerciseDay(val date: LocalDate, val sets: List<SetRecord>, val mode: TrackingMode) {
     val metric: Double get() = when (mode) {
         TrackingMode.WEIGHT -> trainingPerformance(sets, true)
-        TrackingMode.STRENGTH, TrackingMode.WATTS -> sets.maxOfOrNull { it.reps.toDouble() } ?: 0.0
+        TrackingMode.STRENGTH, TrackingMode.WATTS -> trainingPerformance(sets, false, mode)
         TrackingMode.DURATION -> sets.sumOf { it.weight }
     }
     val volume get() = sets.sumOf { it.weight * it.reps }
@@ -56,13 +56,13 @@ internal data class DashboardExercise(
 ) {
     val mode get() = summary.machine.trackingMode
     val label get() = when (mode) {
-        TrackingMode.WEIGHT -> "1RM"
-        TrackingMode.WATTS -> "Peak power"
-        TrackingMode.STRENGTH -> "Peak level"
+        TrackingMode.WEIGHT -> "Strength score"
+        TrackingMode.WATTS -> "Est. 10-min power"
+        TrackingMode.STRENGTH -> "Est. 10-min level"
         TrackingMode.DURATION -> "Duration"
     }
     val unit get() = when (mode) {
-        TrackingMode.WEIGHT -> "kg"
+        TrackingMode.WEIGHT -> "pts"
         TrackingMode.WATTS -> "W"
         TrackingMode.STRENGTH -> "Lv."
         TrackingMode.DURATION -> "min"
@@ -140,7 +140,7 @@ internal fun buildStatsDashboard(
         if (count > 0) exercise.summary.areas.forEach { assignment ->
             val previousRegion = regions[assignment.area]
             regions[assignment.area] = DashboardRegion(assignment.area,
-                (previousRegion?.weightedSets ?: 0.0) + count * assignment.strength.value, assignment.displayColor)
+                (previousRegion?.weightedSets ?: 0.0) + count * assignment.intensity, assignment.displayColor)
         }
     }
     return StatsDashboardSnapshot(

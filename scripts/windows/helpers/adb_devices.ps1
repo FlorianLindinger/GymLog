@@ -23,8 +23,8 @@ function Get-DeviceConnectionHelp([string[]]$Lines) {
         $help += 'No Android device detected by ADB. The device list is empty or has no usable connection.'
     }
     $help += 'USB: enable Developer options > USB debugging, unlock the phone, and connect directly with a USB data cable. Try another cable/port. On Windows, check Device Manager for a missing phone ADB driver.'
-    $help += 'Wi-Fi: use WiFi.bat -PairAddress IP:PAIRING_PORT -ConnectAddress IP:CONNECTION_PORT, using the addresses shown in Android Wireless debugging.'
-    $help += 'Choose USB.bat, WiFi.bat, or Bluetooth.bat explicitly. Connection types never fall back to one another.'
+    $help += 'Wi-Fi: use "build & install via WiFi.bat" -PairAddress IP:PAIRING_PORT -ConnectAddress IP:CONNECTION_PORT, using the addresses shown in Android Wireless debugging.'
+    $help += 'Choose build & install via USB.bat, build & install via WiFi.bat, or build & install via Bluetooth.bat explicitly. Connection types never fall back to one another.'
     $help += 'Install an already-built APK with advanced/install_usb.bat, advanced/install_wifi.bat, or advanced/send_bluetooth.bat.'
     $help += 'More help: scripts/windows/README.md (repository root).'
     $help += "ADB reports:`n$($Lines -join "`n")"
@@ -51,7 +51,7 @@ function Select-AndroidDevice([string]$Adb, [string]$Serial, [ValidateSet('Any',
         return $Serial
     }
     try { $result = Invoke-Adb $Adb @('devices', '-l') }
-    catch { $_.Exception.Data['NoUsableDevice']=$true; throw }
+    catch { $_.Exception.Data['NoUsableDevice']=$true; $_.Exception.Data['AdbListingFailed']=$true; throw }
     $devices = @($result.Lines | ForEach-Object { if ($_ -match '^(\S+)\s+device(?:\s|$)') { $Matches[1] } })
     if ($Transport -ne 'Any') { $devices = @($devices | Where-Object { (Get-AdbTransport $_) -eq $Transport }) }
     if ($devices.Count -eq 0) {

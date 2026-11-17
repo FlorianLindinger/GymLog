@@ -81,8 +81,14 @@ internal fun bodyHighLowReferences(
 internal fun bodyHistoryLabel(range: ChartRange): String = when (range) {
     ChartRange.ALL -> "All history"
     ChartRange.CUSTOM -> "Custom history"
-    else -> range.storageValue.replace("M", "mon").replace("Y", "yr").replace("W", "wk") + " history"
+    else -> bodyRangeLabel(range) + " history"
 }
+
+internal fun bodyRangeLabel(range: ChartRange): String = chartWindowDuration(range)?.let { duration ->
+    formatBodyEta(duration / 86_400_000.0).replace(" weeks", "wk").replace(" week", "wk")
+        .replace(" mon.", "mon").replace(" years", "yr").replace(" year", "yr")
+        .replace(" months", "mon").replace(" month", "mon")
+} ?: range.storageValue
 
 internal fun bodyReferenceText(reference: BodyHighLowReference, unit: String): String {
     val lowPercent = if (reference.tailPercent > 0) " (${formatChartAxisValue(reference.tailPercent)}%)" else ""
@@ -95,21 +101,26 @@ internal fun bodyReferenceText(reference: BodyHighLowReference, unit: String): S
 }
 
 /** Trailing duration window with equal measurement weights; preceding data prevents a false left-edge reset. */
-internal fun bodyMovingAverage(points: List<TimeValue>, range: VisibleTimeRange, periodMillis: Long): List<TimeValue> {
-    val sorted = points.filter { it.value.isFinite() && it.timestamp <= range.end }.sortedBy { it.timestamp }
+internal fun bodyMovingAverage(points: List<TimeValue>, range: VisibleTimeRange, periodMillis: Long,
+    includeBoundaryNeighbors: Boolean = false): List<TimeValue> {
+    val finite = points.filter { it.value.isFinite() }.sortedBy { it.timestamp }
+    val end = if (includeBoundaryNeighbors) finite.firstOrNull { it.timestamp > range.end }?.timestamp ?: range.end else range.end
+    val sorted = finite.filter { it.timestamp <= end }
     val period = periodMillis.coerceAtLeast(1L)
     val result = mutableListOf<TimeValue>()
     var left = 0
     var right = 0
     var sum = 0.0
+    var previous: TimeValue? = null
     while (right < sorted.size) {
         val time = sorted[right].timestamp
         do { sum += sorted[right++].value } while (right < sorted.size && sorted[right].timestamp == time)
         val cutoff = if (time < Long.MIN_VALUE + period) Long.MIN_VALUE else time - period
         while (left < right && sorted[left].timestamp < cutoff) sum -= sorted[left++].value
-        if (time >= range.start) result += TimeValue(time, sum / (right - left))
+        val average = TimeValue(time, sum / (right - left))
+        if (time >= range.start) result += average else previous = average
     }
-    return result
+    return if (includeBoundaryNeighbors) listOfNotNull(previous) + result else result
 }
 
 internal fun averageTimeBins(points: List<TimeValue>, range: VisibleTimeRange, bins: Int): List<TimeValue> =

@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -67,10 +68,13 @@ import com.gymlog.app.data.BodyArea
 import com.gymlog.app.data.AreaAssignment
 import com.gymlog.app.data.ExerciseCatalog
 import com.gymlog.app.data.ExerciseTemplate
+import com.gymlog.app.data.PriorExerciseExposure
+import com.gymlog.app.data.priorExerciseExposures
 import com.gymlog.app.data.exerciseOverlap
 import com.gymlog.app.data.rankOverviewMachines
 import com.gymlog.app.data.recentTrainingExercises
 import com.gymlog.app.data.ProgressionSettings
+import com.gymlog.app.data.FatigueBands
 import com.gymlog.app.data.SetRecord
 import com.gymlog.app.data.parseWarningSetting
 import com.gymlog.app.data.progressionWarning
@@ -101,6 +105,8 @@ fun OverviewScreen(
     onWipStats: () -> Unit,
     onBody: () -> Unit,
     listState: LazyListState,
+    scrollToExerciseId: Long?,
+    onExerciseScrollHandled: () -> Unit,
     showHidden: Boolean,
     onShowHiddenChanged: (Boolean) -> Unit,
     onTrainingHeader: () -> Unit,
@@ -111,6 +117,7 @@ fun OverviewScreen(
     onMetricChange: (MachineSummary, Double) -> Unit,
     onMetricChangeForSession: (MachineSummary, Double) -> Unit,
     progressionSettings: ProgressionSettings,
+    fatigueBands: FatigueBands = FatigueBands(),
 ) {
     val zone = ZoneId.systemDefault()
     val now = System.currentTimeMillis()
@@ -124,12 +131,29 @@ fun OverviewScreen(
     val recentExercises = remember(machines, hiddenMachines, trainingUnitCutoff) {
         recentTrainingExercises(machines + hiddenMachines, trainingUnitCutoff)
     }
-    val scope = rememberCoroutineScope()
-    val rankedMachines = remember(machines, trainingUnitCutoff, recentExercises) {
-        rankOverviewMachines(machines, trainingUnitCutoff, recentExercises)
+    val priorExposures = remember(machines, hiddenMachines, todayTrainingDate) {
+        priorExerciseExposures(machines + hiddenMachines, now, zone)
     }
-    val rankedHidden = remember(hiddenMachines, trainingUnitCutoff, recentExercises, showHidden) {
-        if (showHidden) rankOverviewMachines(hiddenMachines, trainingUnitCutoff, recentExercises) else emptyList()
+    val scope = rememberCoroutineScope()
+    val rankedMachines = remember(machines, trainingUnitCutoff, recentExercises, priorExposures, progressionSettings, fatigueBands, todayTrainingDate) {
+        rankOverviewMachines(machines, trainingUnitCutoff, recentExercises, zone, now, priorExposures, progressionSettings, fatigueBands)
+    }
+    val rankedHidden = remember(hiddenMachines, trainingUnitCutoff, recentExercises, showHidden, priorExposures, progressionSettings, fatigueBands, todayTrainingDate) {
+        if (showHidden) rankOverviewMachines(hiddenMachines, trainingUnitCutoff, recentExercises, zone, now, priorExposures, progressionSettings, fatigueBands) else emptyList()
+    }
+    LaunchedEffect(scrollToExerciseId, rankedMachines, rankedHidden, recentExercises) {
+        val id = scrollToExerciseId ?: return@LaunchedEffect
+        // Wait for refreshed data to identify the saved exercise as current before scrolling.
+        if (recentExercises.firstOrNull()?.machine?.id != id) return@LaunchedEffect
+        val visibleIndex = rankedMachines.indexOfFirst { it.machine.id == id }
+        val hiddenIndex = rankedHidden.indexOfFirst { it.machine.id == id }
+        val index = when {
+            visibleIndex >= 0 -> visibleIndex
+            hiddenIndex >= 0 -> rankedMachines.size + 1 + hiddenIndex
+            else -> return@LaunchedEffect
+        }
+        listState.animateScrollToItem(index)
+        onExerciseScrollHandled()
     }
     // Keep history-derived content above LazyColumn so recycling a card does not rebuild it during a fling.
     val cardContent = remember(machines, hiddenMachines, showHidden, progressionSettings, todayTrainingDate) {
@@ -172,12 +196,10 @@ fun OverviewScreen(
             ) {
                 items(rankedMachines, key = { it.machine.id }, contentType = { "machine" }) { summary ->
                     MachineCard(
-                        summary, recentExercises, trainingUnitCutoff, areaFrequency, onMachine, { machine, reps ->
-                            val firstEntry = !hasCurrentTraining
-                            onQuickSet(machine, reps)
-                            if (firstEntry) scope.launch { listState.animateScrollToItem(0) }
-                        }, onDeleteCurrentExerciseSets,
+                        summary, recentExercises, trainingUnitCutoff, areaFrequency, onMachine, onQuickSet, onDeleteCurrentExerciseSets,
                         onMetricChange, onMetricChangeForSession, cardContent.getValue(summary.machine.id),
+                        priorExposures = priorExposures,
+                        fatigueBands = fatigueBands,
                         modifier = Modifier,
                         onLongPress = {},
                         isDragging = false,
@@ -196,11 +218,11 @@ fun OverviewScreen(
                                 }
                             },
                             modifier = Modifier.fillMaxWidth(),
-                        ) { Text(if (showHidden) "Hide hidden exercises" else "Show hidden exercises") }
+                        ) { Text(if (showHidden) "Hide hidden exercises (${hiddenMachines.size})" else "Show hidden exercises (${hiddenMachines.size})") }
                     }
                     if (showHidden) {
                         items(rankedHidden, key = { "hidden_${it.machine.id}" }) { summary ->
-                            MachineCard(summary, recentExercises, trainingUnitCutoff, areaFrequency, onMachine, { machine, reps -> onQuickSet(machine, reps) }, onDeleteCurrentExerciseSets, onMetricChange, onMetricChangeForSession, cardContent.getValue(summary.machine.id))
+                            MachineCard(summary, recentExercises, trainingUnitCutoff, areaFrequency, onMachine, { machine, reps -> onQuickSet(machine, reps) }, onDeleteCurrentExerciseSets, onMetricChange, onMetricChangeForSession, cardContent.getValue(summary.machine.id), priorExposures = priorExposures, fatigueBands = fatigueBands)
                         }
                     }
                 }            }
@@ -245,7 +267,7 @@ private fun TrainingDurationCard(machines: List<MachineSummary>, activePlanName:
     val last = session.last
     val first = session.first
     val estimatedStart = session.estimatedStart
-    val isActive = last != null && now - last < 10L * 60L * 1000L
+    val isActive = trainingTimerActive(now, last, estimatedStart)
     val durationMillis = if (estimatedStart == null || last == null) 0L else ((if (isActive) now else last) - estimatedStart).coerceAtLeast(0L)
     val clock = remember { DateTimeFormatter.ofPattern("HH:mm") }
     val completedExercises = session.completedExercises
@@ -316,14 +338,14 @@ fun ProgressionSettingsDialog(
 ) {
     var followGlobal by remember { mutableStateOf(initiallyFollowGlobal) }
     var weeks by remember(current) { mutableStateOf(current.staleWeeks.takeIf { it > 0 }?.toString().orEmpty()) }
-    var volumeWindow by remember(current) { mutableStateOf(current.volumeWindowTrainings.takeIf { it > 0 }?.toString().orEmpty()) }
+    var volumeWindow by remember(current) { mutableStateOf(current.volumeWindowDays.takeIf { it > 0 }?.toString().orEmpty()) }
     var volumePercent by remember(current) { mutableStateOf(current.volumeMinimumIncreasePercent.takeIf { it > 0 }?.toString().orEmpty()) }
-    val metricLabel = "1RM"
+    val metricLabel = "Strength score"
     var showMetricHelp by remember { mutableStateOf(false) }
     val parsedWeeks = parseWarningSetting(weeks)
     val parsedVolumeWindow = parseWarningSetting(volumeWindow)
     val parsedVolumePercent = parseWarningSetting(volumePercent)
-    val fieldsValid = parsedWeeks != null && parsedVolumeWindow != null && parsedVolumeWindow != 1 && parsedVolumePercent != null
+    val fieldsValid = parsedWeeks != null && parsedVolumeWindow != null && parsedVolumePercent != null
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(title) },
@@ -334,15 +356,15 @@ fun ProgressionSettingsDialog(
                     Switch(checked = followGlobal, onCheckedChange = { followGlobal = it })
                 }
             }
-            Text("Trend warnings always use estimated 1RM from the Wathan formula, taking the best set in each training day.", style = MaterialTheme.typography.titleSmall)
-            Text("Blank or 0 disables that warning. Trend warnings are disabled if either the window or minimum increase is blank or 0. Otherwise the window needs at least 2 trainings and compares the first and last once full.")
+            Text("Trend warnings use the all-set strength score: sum weight × reps^0.1 over every valid set in each training day. It is a comparison score, not a one-rep maximum.", style = MaterialTheme.typography.titleSmall)
+            Text("Blank or 0 disables that warning. Trend warnings are disabled if either the days or minimum increase is blank or 0. Compare the first and latest training days within the last X days, including today; at least 2 training days are needed. Default: 60 days.")
             if (!followGlobal) {
-                TextButton(onClick = { showMetricHelp = true }) { Text("How 1RM is calculated") }
+                TextButton(onClick = { showMetricHelp = true }) { Text("How Strength score is calculated") }
                 OutlinedTextField(weeks, { weeks = it.filter(Char::isDigit) },
                     label = { Text("Weeks Without Weight Increase") }, isError = parsedWeeks == null,
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), singleLine = true)
                 OutlinedTextField(volumeWindow, { volumeWindow = it.filter(Char::isDigit) },
-                    label = { Text("$metricLabel Trend Window (trainings)") }, isError = parsedVolumeWindow == null || parsedVolumeWindow == 1,
+                    label = { Text("$metricLabel Trend Window (days)") }, isError = parsedVolumeWindow == null,
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), singleLine = true)
                 OutlinedTextField(volumePercent, { volumePercent = it.filter(Char::isDigit) },
                     label = { Text("Minimum $metricLabel Trend Increase (%)") }, isError = parsedVolumePercent == null,
@@ -352,7 +374,7 @@ fun ProgressionSettingsDialog(
         confirmButton = { Button(onClick = {
             if (followGlobal) onFollowGlobal?.invoke() else onSave(ProgressionSettings(
                 staleWeeks = parsedWeeks ?: 0,
-                volumeWindowTrainings = parsedVolumeWindow ?: 0,
+                volumeWindowDays = parsedVolumeWindow ?: 0,
                 volumeMinimumIncreasePercent = parsedVolumePercent ?: 0,
                 useOneRepMax = current.useOneRepMax,
             ))
@@ -361,12 +383,11 @@ fun ProgressionSettingsDialog(
     )
     if (showMetricHelp) TrainingMetricExplanationDialog { showMetricHelp = false }
 }
-internal fun overlapOutlineColor(percent: Int?): Color {
+internal fun overlapOutlineColor(percent: Int?, bands: FatigueBands = FatigueBands()): Color {
     val colors = listOf(
-        Color(0xFF2E7D32), Color(0xFF66BB6A), Color(0xFFFDD835), Color(0xFFFB8C00),
-        Color(0xFFF4511E), Color(0xFFE53935), Color(0xFFB71C1C),
+        Color(0xFF43A047), Color(0xFFFDD835), Color(0xFFFB8C00), Color(0xFFE53935),
     )
-    return colors[com.gymlog.app.data.exerciseOverlapBin(percent)]
+    return colors[com.gymlog.app.data.exerciseOverlapBin(percent, bands)]
 }
 
 private data class MachineCardContent(
@@ -390,6 +411,8 @@ private fun MachineCard(
     onMetricChangeForSession: (MachineSummary, Double) -> Unit,
     content: MachineCardContent,
     modifier: Modifier = Modifier,
+    priorExposures: List<PriorExerciseExposure> = emptyList(),
+    fatigueBands: FatigueBands = FatigueBands(),
     onLongPress: () -> Unit = {},
     isDragging: Boolean = false,
     isReordering: Boolean = false,
@@ -404,14 +427,14 @@ private fun MachineCard(
     val isChangingTrainingUnit = currentUnitSets.isNotEmpty()
     val isLastDone = recentExercises.firstOrNull()?.machine?.id == summary.machine.id
     val sessionPattern = content.sessionPattern
-    val overlap = remember(summary.areas, recentExercises) { exerciseOverlap(summary, recentExercises) }
+    val overlap = remember(summary.areas, recentExercises, priorExposures) { exerciseOverlap(summary, recentExercises, priorExposures) }
     val warning = content.warning
     val metricColor = content.metricColor
     val sortedAreas = remember(summary.areas, areaFrequency) { summary.areas.sortedByDescending { areaFrequency[it.area] ?: 0.0 } }
     val clash = if (!trainedInUnit) overlap.percent else null
     val clashAreas = if (!trainedInUnit) overlap.sharedAreas else emptySet()
     val outlineColor by animateColorAsState(
-        targetValue = if (isLastDone) Color(0xFF1976D2) else overlapOutlineColor(clash),
+        targetValue = if (isLastDone) Color(0xFF1976D2) else overlapOutlineColor(clash, fatigueBands),
         label = "Exercise overlap outline",
     )
     Card(
@@ -430,7 +453,7 @@ private fun MachineCard(
                     sortedAreas.forEach { assignment ->
                         Box(
                             Modifier
-                                .width((38 * assignment.strength.value).dp)
+                                .width((38 * assignment.intensity).dp)
                                 .height(if (assignment.area in clashAreas) 7.dp else 3.dp)
                                 .background(
                                     Color(assignment.displayColor).copy(alpha = if (clashAreas.isEmpty() || assignment.area in clashAreas) 1f else .25f),
@@ -476,11 +499,9 @@ private fun MachineCard(
                     style = MaterialTheme.typography.labelLarge,
                     color = MaterialTheme.colorScheme.primary,
                 )
-                AutoFitText(
+                OverviewHistoryText(
                     sessionPattern,
                     modifier = Modifier.weight(1f),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
         }
@@ -545,25 +566,11 @@ private fun trainingDayStart(timestamp: Long, zone: ZoneId = ZoneId.systemDefaul
     return date.atTime(6, 0).atZone(zone).toInstant().toEpochMilli()
 }
 
-private fun sessionPatternText(summary: MachineSummary): AnnotatedString {
-    val batches = groupSetBatches(summary.recentSets).take(8)
+internal fun sessionPatternText(summary: MachineSummary): AnnotatedString {
+    val batches = groupSetBatches(summary.recentSets)
     val patterns = batches.map { batch ->
-        batch.sortedBy { it.performedAt }.joinToString(",") { set ->
-            if (isDirectMetric(summary.machine.trackingMode)) "${formatNumber(set.weight)}m" else set.reps.toString()
-        }
-    }
-    fun trend(index: Int): Int {
-        val newer = batches.getOrNull(index)?.firstOrNull() ?: return 0
-        val older = batches.getOrNull(index + 1)?.firstOrNull() ?: return 0
-        val newerMetric = summary.recordedMetric(newer)
-        val olderMetric = summary.recordedMetric(older)
-        return newerMetric.compareTo(olderMetric)
-    }
-    fun AnnotatedString.Builder.appendTrendMarker(trend: Int) {
-        when {
-            trend > 0 -> withStyle(SpanStyle(color = Color(0xFF66BB6A), fontWeight = FontWeight.Black)) { append("|") }
-            trend < 0 -> withStyle(SpanStyle(color = Color(0xFFEF5350), fontWeight = FontWeight.Black)) { append("|") }
-            else -> append("|")
+        batch.sortedWith(compareBy<SetRecord> { it.performedAt }.thenBy { it.id }).joinToString(",") { set ->
+            if (isDirectMetric(summary.machine.trackingMode)) formatNumber(set.weight) else set.reps.toString()
         }
     }
     return buildAnnotatedString {
@@ -573,7 +580,12 @@ private fun sessionPatternText(summary: MachineSummary): AnnotatedString {
             append(pattern)
             if (index < patterns.lastIndex) {
                 append(" ")
-                appendTrendMarker(trend(index))
+                // IDs break timestamp ties, including after an entry has been edited.
+                val entryOrder = compareBy<SetRecord> { it.performedAt }.thenBy { it.id }
+                val newer = batches[index].maxWithOrNull(entryOrder)
+                val older = batches[index + 1].maxWithOrNull(entryOrder)
+                val change = if (newer == null || older == null) 0 else summary.recordedMetric(newer).compareTo(summary.recordedMetric(older))
+                if (change == 0) append("|") else withStyle(SpanStyle(color = if (change > 0) Color(0xFF66BB6A) else Color(0xFFEF5350), fontWeight = FontWeight.Black)) { append("|") }
                 append(" ")
             }
         }
@@ -582,7 +594,7 @@ private fun sessionPatternText(summary: MachineSummary): AnnotatedString {
 
 fun groupSetBatches(sets: List<SetRecord>): List<List<SetRecord>> {
     val batches = mutableListOf<MutableList<SetRecord>>()
-    sets.sortedByDescending { it.performedAt }.forEach { set ->
+    sets.sortedWith(compareByDescending<SetRecord> { it.performedAt }.thenByDescending { it.id }).forEach { set ->
         val currentBatch = batches.lastOrNull()
         if (currentBatch == null || currentBatch.last().performedAt - set.performedAt > 100L) {
             batches += mutableListOf(set)
@@ -626,22 +638,19 @@ fun currentTrainingUnitSets(summary: MachineSummary, now: Long = System.currentT
     val end = day.plusDays(1).atTime(6, 0).atZone(zone).toInstant().toEpochMilli()
     return summary.recentSets.filter { it.performedAt >= start && it.performedAt < end }.sortedBy { it.performedAt }
 }
-fun previousTrainingUnitReps(summary: MachineSummary, current: List<SetRecord> = currentTrainingUnitSets(summary)): List<Int> {
-    val currentIds = current.mapTo(mutableSetOf()) { it.id }
-    val previousNewest = summary.recentSets.firstOrNull { it.id !in currentIds } ?: return emptyList()
-    return summary.recentSets
-        .filter { it.id !in currentIds && it.performedAt >= previousNewest.performedAt - TRAINING_UNIT_MILLIS }
-        .sortedBy { it.performedAt }
-        .map { it.reps }
-        .takeLast(5)
-}
+internal fun latestRecordedBatch(summary: MachineSummary, excludedIds: Set<Long> = emptySet()): List<SetRecord> =
+    groupSetBatches(summary.recentSets.filterNot { it.id in excludedIds }).firstOrNull().orEmpty()
+        .sortedWith(compareBy<SetRecord> { it.performedAt }.thenBy { it.id })
+
+fun previousTrainingUnitReps(summary: MachineSummary, current: List<SetRecord> = currentTrainingUnitSets(summary)): List<Int> =
+    latestRecordedBatch(summary, current.mapTo(mutableSetOf()) { it.id }).map { it.reps }.take(5)
 
 fun initialWheelReps(summary: MachineSummary, current: List<SetRecord> = currentTrainingUnitSets(summary)): List<Int> {
-    val base = when {
-        current.isNotEmpty() -> summary.setWheelValues ?: current.map { it.reps }
-        summary.setWheelValues != null -> summary.setWheelValues
-        else -> previousTrainingUnitReps(summary, current).ifEmpty { listOf(10, 10, 10) }
-    }
+    val recorded = if (current.isNotEmpty()) current.sortedWith(compareBy<SetRecord> { it.performedAt }.thenBy { it.id }).map { it.reps }
+        else previousTrainingUnitReps(summary, current)
+    val saved = summary.setWheelValues
+    val base = if (recorded.isNotEmpty()) saved?.takeIf { it.filter { value -> value > 0 } == recorded } ?: recorded
+        else saved ?: listOf(10, 10, 10)
     return (base.take(5) + List(5) { 0 }).take(5)
 }
 
@@ -654,13 +663,14 @@ fun QuickRepDialog(
     onAdd: (List<Int>) -> Unit,
     onDelete: (() -> Unit)? = null,
 ) {
-    val reps = remember(initialReps) { mutableStateListOf<Int>().apply { addAll((initialReps + List(5) { 0 }).take(5)) } }
+    val slots = maxOf(5, initialReps.size)
+    val reps = remember(initialReps) { mutableStateListOf<Int>().apply { addAll((initialReps + List(5) { 0 }).take(slots)) } }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(if (isChange) "Change Sets" else "Log Up to 5 Sets") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+                Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.SpaceEvenly) {
                     reps.indices.forEach { index ->
                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
                             AndroidView(
@@ -668,8 +678,8 @@ fun QuickRepDialog(
                                 factory = { context ->
                                     NumberPicker(context).apply {
                                         minValue = 0
-                                        maxValue = 15
-                                        displayedValues = arrayOf("None") + (1..15).map(Int::toString)
+                                        maxValue = maxOf(15, initialReps.getOrElse(index) { 0 })
+                                        displayedValues = arrayOf("None") + (1..maxValue).map(Int::toString)
                                         wrapSelectorWheel = true
                                         value = reps[index]
                                         setOnValueChangedListener { _, _, newValue -> reps[index] = newValue }
@@ -707,7 +717,7 @@ fun AddMachineDialog(onDismiss: () -> Unit, onAdd: (String, Double, TrackingMode
         if (weight.isBlank()) weight = "0"
         showCatalog = false
     }
-    val suggestions = remember(name) { if (name.length >= 2) ExerciseCatalog.search(name, limit = 3) else emptyList() }
+    val suggestions = remember(name) { if (name.isNotBlank()) ExerciseCatalog.search(name, limit = 3, allowWeakMatches = true) else emptyList() }
     val parsedWeight = weight.replace(',', '.').toDoubleOrNull()
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -722,7 +732,7 @@ fun AddMachineDialog(onDismiss: () -> Unit, onAdd: (String, Double, TrackingMode
                     singleLine = true,
                 )
                 if (selectedProfile == null && suggestions.isNotEmpty()) {
-                    Text("Suggested exercises", style = MaterialTheme.typography.labelMedium)
+                    Text("Best matching exercises (may be a weak match)", style = MaterialTheme.typography.labelMedium)
                     suggestions.forEach { suggestion ->
                         TextButton(onClick = { chooseTemplate(suggestion) }) { Text(suggestion.title) }
                     }

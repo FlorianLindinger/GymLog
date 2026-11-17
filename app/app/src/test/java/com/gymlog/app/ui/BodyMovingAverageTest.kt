@@ -8,6 +8,19 @@ import org.junit.Test
 
 class BodyMovingAverageTest {
     @Test
+    fun renderingNeighborsContinueBothAverageLinesAtThePlotLimits() {
+        val raw = listOf(TimeValue(0, 0.0), TimeValue(10, 10.0), TimeValue(20, 20.0), TimeValue(30, 30.0))
+        val range = VisibleTimeRange(12, 18)
+        val average = bodyMovingAverage(raw, range, 15, includeBoundaryNeighbors = true)
+        assertEquals(listOf(TimeValue(10, 5.0), TimeValue(20, 15.0)), average)
+        assertEquals(listOf(TimeValue(12, 7.0), TimeValue(18, 13.0)), pointsInWindow(average, range))
+        val withVisibleSample = VisibleTimeRange(10, 18)
+        assertEquals(bodyMovingAverage(raw, withVisibleSample, 15),
+            bodyMovingAverage(raw, withVisibleSample, 15, includeBoundaryNeighbors = true)
+                .filter { it.timestamp in withVisibleSample.start..withVisibleSample.end })
+    }
+
+    @Test
     fun trailingWindowsUseEarlierDataWithoutIncludingFutureMeasurements() {
         val points = listOf(TimeValue(0, 0.0), TimeValue(1, 10.0), TimeValue(2, 20.0), TimeValue(5, 50.0), TimeValue(6, 1000.0))
         assertEquals(listOf(TimeValue(2, 10.0), TimeValue(5, 50.0)), bodyMovingAverage(points, VisibleTimeRange(2, 5), 2))
@@ -60,7 +73,7 @@ class BodyMovingAverageTest {
         val reference = bodyHighLowReferences(listOf(TimeValue(0, 0.0), TimeValue(100, 100.0)), settings, 100).single()
         assertEquals(10.0, reference.low.value, .000001)
         assertEquals(90.0, reference.high.value, .000001)
-        assertTrue(bodyReferenceText(reference, "kg").startsWith("2mon history:"))
+        assertTrue(bodyReferenceText(reference, "kg").startsWith("8wk history:"))
         assertTrue(bodyReferenceText(reference, "kg").contains("(10%)"))
         val single = bodyHighLowReferences(listOf(TimeValue(0, 42.0)), settings, 0).single()
         assertEquals(42.0, single.low.value, 0.0)

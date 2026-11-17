@@ -57,10 +57,10 @@ try {
     $env:GYMLOG_BUILD_DIR = Join-Path $testRoot 'build'
     [IO.File]::WriteAllText((Join-Path $env:GYMLOG_BUILD_DIR 'outputs/apk/debug/app-debug.apk'), 'fixture APK')
     Copy-DebugApk 6>$null
-    $copy = Join-Path $script:AppRoot 'artifacts/debug/app-debug.apk'
+    $copy = Join-Path $script:RepoRoot 'GymLog-debug.apk'
     $hash = (Get-FileHash -LiteralPath $copy -Algorithm SHA256).Hash.ToLowerInvariant()
-    Assert-Environment ([IO.File]::ReadAllText($copy) -eq 'fixture APK') 'Copy debug artifacts to the existing GymLog output location'
-    Assert-Environment ([IO.File]::ReadAllText((Join-Path $script:AppRoot 'artifacts/debug/SHA256SUMS.txt')) -ceq "$hash  app-debug.apk`n") 'Write the checksum for the exact copied artifact'
+    Assert-Environment ([IO.File]::ReadAllText($copy) -eq 'fixture APK') 'Copy debug APK to the project root'
+    Assert-Environment ([IO.File]::ReadAllText((Join-Path $script:RepoRoot 'artifacts/checksums/GymLog-debug.apk.sha256')) -ceq "$hash  ../../GymLog-debug.apk`n") 'Write the checksum for the exact copied artifact'
 } finally {
     foreach ($name in $variables) { [Environment]::SetEnvironmentVariable($name, $saved[$name]) }
     # Remove individual fixtures only; never recursively delete a computed path.

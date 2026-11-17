@@ -32,7 +32,7 @@ recent load = min(1, sum(exercise intensity * 0.5^recency index))
 overlap % = round(100 * sum(candidate intensity * recent load) / sum(candidate intensity))
 ```
 
-The fixed weights are 100%, 50%, 25%, 12.5%, and so on. They are never normalized by the number of exercises performed, so additional overlapping work can add load. This is a planning estimate. Missing profiles count as zero overlap.
+The fixed weights are 100%, 50%, 25%, 12.5%, then 10% for every earlier exercise. Core/abs percentages in exercise presets are scaled by 1.5 (High = 150%, Medium = 75%, Low = 37.5%). There is no hidden Core multiplier, so existing profiles keep their saved values until edited. Region percentages can be edited directly using compact L/M/H shortcuts (25/50/100%) and a custom percentage field; 0 removes a region. They are never normalized by the number of exercises performed, so additional overlapping work can add load. Exercises from yesterday contribute 10% each and those from two training days ago 5% each, once per exercise per training day and without order weighting. Training days use the 06:00 boundary. This is a planning estimate. Missing profiles count as zero overlap.
 
 Ranking and outlines share seven bins: 0-14% dark green, 15-28% green, 29-42% yellow, 43-57% orange, 58-71% red-orange, 72-85% red, and 86-100% dark red. The current exercise keeps its blue outline; completed exercises have no overlap outline. The overview has no overlap text header.
 
@@ -41,7 +41,7 @@ Ordering follows these rules:
 1. Keep the current exercise first.
 2. Keep unfinished Manual top exercises in their chosen arrow order.
 3. Rank unfinished Auto exercises by overlap bin, from least to most overlap.
-4. Within each bin, prefer fewer distinct training days in the last two calendar months. A training day starts at 06:00 local time; the window includes the entire training day at its start. Multiple sets count once. Tie priority, saved order, and stable name/ID ordering resolve ties. The Auto sorted section in Exercise Order previews this ranking; + raises tie priority and - lowers it.
+4. Within each bin, prefer higher Auto priority: + moves an exercise earlier and - moves it later, before comparing training frequency. With equal priority, prefer fewer distinct training days in the last two calendar months, then saved order and stable name/ID ordering. A training day starts at 06:00 local time; the window includes the entire training day at its start. Multiple sets count once. The Auto sorted section in Exercise Order previews this ranking. Priority applies to unfinished Auto exercises within the same overlap bin; it does not override the current exercise, manual groups, completed ordering or a different overlap bin.
 5. Keep unfinished Manual bottom exercises in their chosen arrow order.
 6. Put all remaining completed exercises last, ordered by their last set from first to last done.
 
@@ -49,7 +49,7 @@ Manual top/bottom override automatic ranking for unfinished exercises.
 
 ## Progress warnings
 
-Weight-tracked exercises show warnings on one line: `4 weeks no kg increase` and/or `1RM trend 2 %`, separated by a middle dot only when both apply. Trend warnings always use formula-based best-set 1RM, regardless of the chart display choice or legacy per-exercise metric overrides.
+Weight-tracked exercises show warnings on one line: `4 weeks no kg increase` and/or `1RM trend 2 %`, separated by a middle dot only when both apply. Trend warnings always use session-adjusted Wathan 1RM, regardless of the chart display choice or legacy per-exercise metric overrides.
 
 **Progress Warnings** settings let you choose weeks without a kg increase, the minimum 1RM increase percentage, and the trend window in trainings (default 5, minimum 2). Blank or zero disables the corresponding warning. Either a blank/zero window or minimum percentage disables trend warnings. Once a full window is available, its first and last training days are compared; training days start at 06:00 local time.
 
@@ -57,9 +57,9 @@ Every exercise has **Progress Warnings** in its details. It follows global thres
 
 ### Chart metric and formula
 
-The **Use 1RM instead of volume** switch in **Menu** controls weight-exercise charts and entry summaries only. Its outlined label and the exercise-chart metric button open an explanation. Volume is total weight times reps. Level/watts workload remains intensity times minutes, with **Load [Lv. min]** and **Work [W min]** labels.
+The **Use 1RM instead of volume** switch in **Menu** controls weight-exercise charts and entry summaries only. Its outlined label and the exercise-chart metric button open an explanation. Volume is total weight times reps. Level/watts use estimated intensity for a 10-minute effort: `intensity * (minutes / 10)^0.06`. This fixed Riegel-style heuristic uses the best individual entry, with **Est. 10-min [Lv.]** and **Est. 10-min [W]** labels. Level comparisons assume a linear scale on the same machine.
 
-1RM estimates the load for one repetition. GymLog uses the Wathan equation, `100 * weight / (48.8 + 53.8 * exp(-0.075 * reps))`, taking the highest estimate among sets in each training day. A recorded single uses its actual load. Additional sets do not add to 1RM. Entry summaries show the best estimate in that entry; charts and warnings use the best set for the whole training day.
+1RM estimates the load for one repetition. GymLog uses the Wathan equation, `100 * weight / (48.8 + 53.8 * exp(-0.075 * reps))`, then starts from the highest set estimate and includes a small contribution from the others: `best * (1 + 0.05 * support / (best + support))`, where support sums the other valid Wathan set estimates. One set is unchanged; two equal sets add 2.5%; the bonus approaches but stays below 5%. This session adjustment is a heuristic. Entry summaries use their own sets; charts, warnings, and the strength explorer use all sets from the training day. A lone recorded single uses its actual load.
 
 ## Catalogue reference notes
 

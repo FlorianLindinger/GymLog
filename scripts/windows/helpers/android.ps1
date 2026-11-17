@@ -3,15 +3,25 @@ param(
     [Parameter(Mandatory)][ValidateSet('build','verify','release','install','build-install','device','logs','screenshot','wifi')][string]$Command,
     [Parameter(Position=0)][string]$Serial,
     [string]$Apk,
-    [ValidateSet('USB','WiFi','Bluetooth')][string]$Transport = 'USB',
+    [ValidateSet('USB','WiFi','Bluetooth','GoogleDrive')][string]$Transport = 'USB',
+    [string]$DriveFolder,
     [string]$PairAddress,
-    [string]$ConnectAddress
+    [string]$ConnectAddress,
+    [switch]$ForceBuild
 )
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'android_env.ps1')
 
 try {
     $isInstall = $Command -in @('install','build-install')
+    if ($DriveFolder -and (-not $isInstall -or $Transport -ne 'GoogleDrive')) {
+        throw '-DriveFolder is only supported by the GoogleDrive installer.'
+    }
+    if ($isInstall -and $Transport -eq 'GoogleDrive') {
+        if ($Serial -or $PairAddress -or $ConnectAddress) { throw 'Google Drive transfer does not use ADB or Wi-Fi addresses.' }
+        . (Join-Path $PSScriptRoot 'google_drive_apk.ps1')
+        $DriveFolder = Select-GoogleDriveFolder $DriveFolder
+    }
     if ($isInstall -and $Transport -eq 'Bluetooth' -and ($Serial -or $PairAddress -or $ConnectAddress)) {
         throw 'Bluetooth transfer does not use an ADB serial or a Wi-Fi address.'
     }
@@ -20,20 +30,37 @@ try {
     }
     $selected = $null
     if ($isInstall) {
-        $action = if ($Command -eq 'build-install') { 'Build and install' } else { 'Install' }
+        $action = if ($Transport -eq 'GoogleDrive') {
+            if ($Command -eq 'build-install') { 'Build and copy APK' } else { 'Copy APK' }
+        } elseif ($Command -eq 'build-install') { 'Build and install' } else { 'Install' }
         Write-Host "GymLog - $action via $Transport" -ForegroundColor Cyan
-        if ($Transport -ne 'Bluetooth') {
+        if ($Transport -notin @('Bluetooth','GoogleDrive')) {
             $adb = Find-Adb
             if ($Transport -eq 'WiFi' -and ($PairAddress -or $ConnectAddress)) {
                 Connect-AndroidWifi $adb $PairAddress $ConnectAddress
             }
-            $connection = Resolve-InstallConnection { Find-Adb } $Serial -Transport $Transport
+            try {
+                $connection = Resolve-InstallConnection { Find-Adb } $Serial -Transport $Transport
+            } catch {
+                # Only the argument-free, interactive Wi-Fi flow offers setup.
+                # Explicit targets, ADB errors and ambiguous lists must still fail.
+                if ($Transport -ne 'WiFi' -or $Serial -or $PairAddress -or $ConnectAddress -or
+                    -not $_.Exception.Data['NoUsableDevice'] -or
+                    $_.Exception.Data['AdbListingFailed'] -or
+                    $env:GYMLOG_NO_PAUSE -eq '1' -or [Console]::IsInputRedirected) { throw }
+                Request-AndroidWifiConnection $adb
+                $connection = Resolve-InstallConnection { Find-Adb } '' -Transport WiFi
+            }
             $adb = $connection.Adb
             $selected = $connection.Serial
             Write-Host "[$Transport] Connected: $selected" -ForegroundColor Green
         }
     }
-    if ($Command -in @('build','verify','release','build-install')) {
+    if ($Command -in @('build','build-install')) {
+        Invoke-DebugBuild -ForceBuild:$ForceBuild
+        if ($Command -eq 'build') { exit 0 }
+    }
+    if ($Command -in @('verify','release')) {
         Write-Host '[BUILD] Preparing the Android build tools...' -ForegroundColor Cyan
         Initialize-Build
         if ($Command -eq 'release') {
@@ -48,12 +75,12 @@ try {
             Push-Location $script:RepoRoot
             try { git diff --check; if ($LASTEXITCODE -ne 0) { throw 'Git whitespace check failed.' } }
             finally { Pop-Location }
-        } else { Invoke-Gradle @(':app:assembleDebug') }
+        }
         Copy-DebugApk
-        if ($Command -ne 'build-install') { exit 0 }
+        exit 0
     }
     if ($isInstall) {
-        if (-not $Apk) { $Apk = Join-Path $script:RepoRoot 'app/artifacts/debug/app-debug.apk' }
+        if (-not $Apk) { $Apk = Join-Path $script:RepoRoot 'GymLog-debug.apk' }
         if (-not (Test-Path -LiteralPath $Apk -PathType Leaf)) { throw 'APK not found. Run advanced/build.bat first or pass -Apk PATH.' }
     }
     if ($isInstall -and $Transport -eq 'Bluetooth') {
@@ -61,13 +88,15 @@ try {
         Send-ApkViaBluetooth $Apk
         exit 0
     }
+    if ($isInstall -and $Transport -eq 'GoogleDrive') {
+        Send-ApkViaGoogleDrive $Apk $DriveFolder
+        exit 0
+    }
     if (-not $isInstall) { $adb = Find-Adb }
     if ($Command -eq 'wifi') {
         if (-not $PairAddress -and -not $ConnectAddress) {
-            $PairAddress = Read-Host 'Pairing IP:port (leave blank if already paired)'
-            $ConnectAddress = Read-Host 'Connection IP:port'
-        }
-        Connect-AndroidWifi $adb $PairAddress $ConnectAddress
+            Request-AndroidWifiConnection $adb
+        } else { Connect-AndroidWifi $adb $PairAddress $ConnectAddress }
         (Invoke-Adb $adb @('devices','-l')).Lines | ForEach-Object { Write-Host $_ }
         exit 0
     }
@@ -83,7 +112,7 @@ try {
         exit 0
     }
     if ($Command -in @('install','build-install')) {
-        if (-not $Apk) { $Apk = Join-Path $script:RepoRoot 'app/artifacts/debug/app-debug.apk' }
+        if (-not $Apk) { $Apk = Join-Path $script:RepoRoot 'GymLog-debug.apk' }
         if (-not (Test-Path -LiteralPath $Apk -PathType Leaf)) { throw 'APK not found. Run advanced/build.bat first or pass -Apk PATH.' }
         Write-Host "[INSTALL] Updating GymLog via $Transport..." -ForegroundColor Cyan
         $install = Invoke-Adb $adb @('-s',$selected,'install','-r',[IO.Path]::GetFullPath($Apk))

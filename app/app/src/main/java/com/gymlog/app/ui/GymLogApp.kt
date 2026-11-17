@@ -65,6 +65,8 @@ import androidx.compose.ui.unit.dp
 import com.gymlog.app.BuildConfig
 import com.gymlog.app.data.TrackingMode
 import com.gymlog.app.data.BodyArea
+import com.gymlog.app.data.FatigueBands
+import com.gymlog.app.data.parseFatigueBands
 import com.gymlog.app.data.BackupSyncStatus
 import com.gymlog.app.data.GymRepository
 import com.gymlog.app.data.HistorySet
@@ -91,6 +93,7 @@ internal data class AppUiState(
     val hiddenMachineIds: Set<Long>,
     val automaticBackupEnabled: Boolean,
     val backupSyncStatus: BackupSyncStatus,
+    val fatigueBands: FatigueBands = FatigueBands(),
 )
 
 internal fun GymRepository.loadUiState(): AppUiState {
@@ -109,6 +112,7 @@ internal fun GymRepository.loadUiState(): AppUiState {
         hiddenMachineIds = machines.mapNotNullTo(mutableSetOf()) { it.machine.id.takeIf(::isMachineHidden) },
         automaticBackupEnabled = automaticBackupEnabled(),
         backupSyncStatus = backupSyncStatus(),
+        fatigueBands = loadFatigueBands(),
     )
 }
 
@@ -125,6 +129,9 @@ fun GymLogApp(
     externalDataVersion: Int,
     onExport: () -> Unit,
     onImport: () -> Unit,
+    onSaveBodyEntry: (ManualBodyEntry, (String?) -> Unit) -> Unit,
+    onExportPlan: () -> Unit,
+    onImportPlan: () -> Unit,
     onAccentColorChanged: (Long) -> Unit,
     bodyData: BodyDataSnapshot,
     healthSyncStatus: String,
@@ -135,7 +142,7 @@ fun GymLogApp(
     val viewModel: GymLogViewModel = androidx.lifecycle.viewmodel.compose.viewModel(factory = GymLogViewModel.factory(repository))
     val loadState by viewModel.uiState.collectAsState()
     val uiStateResult = loadState.result ?: run {
-        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text("Loading GymLog…") }
+        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text("Loading GymLog\u2026") }
         return
     }
     var screen by remember { mutableStateOf(Screen.OVERVIEW) }
@@ -144,6 +151,7 @@ fun GymLogApp(
     var historyOrigin by remember { mutableStateOf(Screen.STATS) }
     var showAdd by remember { mutableStateOf(false) }
     var showMenu by remember { mutableStateOf(false) }
+    var showAddBody by remember { mutableStateOf(false) }
     var confirmImport by remember { mutableStateOf(false) }
     var showProgressionSettings by remember { mutableStateOf(false) }
     var showAccentColor by remember { mutableStateOf(false) }
@@ -151,7 +159,7 @@ fun GymLogApp(
     var showTrainingHeader by remember { mutableStateOf(false) }
     var showHelp by remember { mutableStateOf(false) }
     var showTrainingMetricHelp by remember { mutableStateOf(false) }
-    var confirmDeleteCurrentTraining by remember { mutableStateOf(false) }
+    var confirmDeleteLastTraining by remember { mutableStateOf(false) }
     var editingExerciseField by remember { mutableStateOf<ExerciseEditField?>(null) }
     var importUndoSnapshot by remember { mutableStateOf<String?>(null) }
     var initialExternalVersionHandled by remember { mutableStateOf(false) }
@@ -200,16 +208,18 @@ fun GymLogApp(
         return
     }
     val uiState = uiStateResult.getOrThrow()
+    var scrollToExerciseId by remember(uiState.activeTrainingPlanId) { mutableStateOf<Long?>(null) }
+    val lastTraining = remember(uiState.history, uiState.activeTrainingPlanId) { repository.lastTrainingWindow() }
     val activePlan = uiState.trainingPlans.firstOrNull { it.id == uiState.activeTrainingPlanId }
 
     val selected = uiState.machines.firstOrNull { it.machine.id == selectedId }
     val areaFrequency = remember(uiState.machines) {
         uiState.machines.flatMap { it.areas }.groupBy { it.area }
-            .mapValues { (_, values) -> values.sumOf { it.strength.value } }
+            .mapValues { (_, values) -> values.sumOf { it.intensity } }
     }
     val areaUsage = remember(uiState.machines) {
         uiState.machines.flatMap { it.areas }.groupBy { it.area }
-            .mapValues { (_, assignments) -> assignments.sumOf { it.strength.value } }
+            .mapValues { (_, assignments) -> assignments.sumOf { it.intensity } }
     }
     LaunchedEffect(screen, selected) {
         if (screen == Screen.DETAIL && selected == null) screen = Screen.OVERVIEW
@@ -269,7 +279,7 @@ fun GymLogApp(
                     if (screen != Screen.OVERVIEW) TextButton(
                         colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.onPrimary),
                         onClick = ::navigateBack,
-                    ) { Text("‹ Back") }
+                    ) { Text("\u2039 Back") }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = MaterialTheme.colorScheme.primary,
@@ -299,6 +309,8 @@ fun GymLogApp(
                 onWipStats = { screen = Screen.WIP_STATS },
                 onBody = { screen = Screen.BODY },
                 listState = overviewListState,
+                scrollToExerciseId = scrollToExerciseId,
+                onExerciseScrollHandled = { scrollToExerciseId = null },
                 showHidden = showHiddenExercises,
                 onShowHiddenChanged = {
                     showHiddenExercises = it
@@ -313,6 +325,7 @@ fun GymLogApp(
                     } else {
                         repository.addSets(machine.machine.id, reps, machine.machine.currentWeight)
                     }
+                    scrollToExerciseId = machine.machine.id.takeIf { reps.any { it > 0 } }
                     refresh()
                 },
                 onDeleteCurrentExerciseSets = { machine -> deleteWithUndo("Current ${machine.machine.name} entries deleted") { repository.deleteCurrentExerciseSetsWithJournal(machine.machine.id) } },
@@ -325,9 +338,11 @@ fun GymLogApp(
                     refresh()
                 },
                 progressionSettings = uiState.progressionSettings,
+                fatigueBands = uiState.fatigueBands,
             )
             Screen.BODY -> BodyOverviewScreen(
                 snapshot = bodyData,
+                onAddWeight = { showAddBody = true },
                 syncStatus = healthSyncStatus,
                 isSyncing = healthSyncing,
                 modifier = Modifier.padding(padding),
@@ -368,6 +383,12 @@ fun GymLogApp(
             )
             Screen.ORDER -> OrderScreen(
                 machines = uiState.machines,
+                fatigueBands = uiState.fatigueBands,
+                progressionSettings = uiState.progressionSettings,
+                onFatigueBands = { bands ->
+                    repository.saveFatigueBands(bands)
+                    viewModel.replace(Result.success(uiState.copy(fatigueBands = bands)))
+                },
                 modifier = Modifier.padding(padding),
                 onMove = { id, direction -> mutate { repository.moveMachineWithinOrderGroup(id, direction) } },
                 onGroup = { id, group -> mutate { repository.setExerciseOrderGroup(id, group) } },
@@ -416,6 +437,7 @@ fun GymLogApp(
                     repository = repository,
                     onAreaColor = { area, color -> mutate { repository.setAreaColor(area, color) } },
                     onChanged = ::refresh,
+                    onTrainingLogged = { scrollToExerciseId = summary.machine.id; refresh() },
                     onEditDetails = { editingExerciseField = it },
                     isHidden = summary.machine.id in uiState.hiddenMachineIds,
                     onDeleteSets = { sets -> deleteWithUndo("${sets.size} set${if (sets.size == 1) "" else "s"} deleted") { repository.deleteSetsWithJournal(sets.map { it.id }) } },
@@ -468,9 +490,9 @@ fun GymLogApp(
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                     OutlinedButton(
                         onClick = { showMenu = false; showTrainingMetricHelp = true },
-                        modifier = Modifier.weight(1f).semantics { contentDescription = "Explain volume and 1RM" },
+                        modifier = Modifier.weight(1f).semantics { contentDescription = "Explain volume and strength score" },
                         contentPadding = PaddingValues(horizontal = 8.dp),
-                    ) { Text("Use 1RM instead of volume", style = MaterialTheme.typography.bodyMedium) }
+                    ) { Text("Use strength score instead of volume", style = MaterialTheme.typography.bodyMedium) }
                     Switch(checked = uiState.progressionSettings.useOneRepMax, onCheckedChange = { enabled ->
                         val updated = uiState.progressionSettings.copy(useOneRepMax = enabled)
                         repository.saveProgressionSettings(updated)
@@ -481,12 +503,12 @@ fun GymLogApp(
                 TextButton(onClick = { showMenu = false; screen = Screen.BACKUP }) { Text("Data, Backup & Sync") }
                 TextButton(onClick = { showMenu = false; showAccentColor = true }) { Text("UI Color") }
                 TextButton(onClick = { showMenu = false; showHelp = true }) { Text("Help & Explanations") }
-                TextButton(onClick = { showMenu = false; confirmDeleteCurrentTraining = true }) {
-                    Text("Delete Current Training", color = MaterialTheme.colorScheme.error)
+                TextButton(onClick = { showMenu = false; confirmDeleteLastTraining = true }, enabled = lastTraining != null) {
+                    Text("Delete Last Training", color = MaterialTheme.colorScheme.error)
                 }
                 androidx.compose.material3.HorizontalDivider()
                 Text(
-                    "Version ${BuildConfig.VERSION_NAME} · Built ${BuildConfig.BUILD_TIME}",
+                    "Version ${BuildConfig.VERSION_NAME} \u00B7 Built ${BuildConfig.BUILD_TIME}",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -505,50 +527,52 @@ fun GymLogApp(
         title = { Text("Help & Explanations") },
         text = {
             Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text("Volume or 1RM", style = MaterialTheme.typography.titleSmall)
-                Text("Choose Use 1RM instead of volume with the switch in Menu. Tap its outlined label for details. " + TRAINING_METRIC_EXPLANATION)
+                Text("Volume or strength score", style = MaterialTheme.typography.titleSmall)
+                Text("Choose Use strength score instead of volume with the switch in Menu. Tap its outlined label for details. " + TRAINING_METRIC_EXPLANATION)
                 Text("Progress Warnings & Overrides", style = MaterialTheme.typography.titleSmall)
-                Text("Warnings show weeks without a kg increase and growth in formula-based best-set 1RM. The trend window compares the first and last training once the window is full. The Menu metric switch only changes charts and entry summaries. Blank or 0 disables the corresponding warning; either a blank/0 window or minimum percentage disables the trend warning. Active windows need at least 2 trainings.")
-                Text("Every exercise has Progress Warnings in its details. Follow global warning settings uses future global changes. Turn it off for custom thresholds. Trend warnings always use the Wathan 1RM formula; there is no per-exercise metric setting. Blank custom fields disable warnings rather than inheriting global values. Warnings apply to weight exercises.")
+                Text("Warnings show weeks without a kg increase and growth in all-set strength score. The trend window compares the first and latest training days within the last X days, including today (default 60 days). The Menu metric switch only changes charts and entry summaries. Blank or 0 disables the corresponding warning; either a blank/0 window or minimum percentage disables the trend warning. At least 2 training days in that period are needed.")
+                Text("Every exercise has Progress Warnings in its details. Follow global warning settings uses future global changes. Turn it off for custom thresholds. Trend warnings always use the all-set strength score formula; there is no per-exercise metric setting. Blank custom fields disable warnings rather than inheriting global values. Warnings apply to weight exercises.")
                 Text("Exercise Ordering & Outlines", style = MaterialTheme.typography.titleSmall)
-                Text("Open Exercise Order from Menu. The current exercise stays first with a blue outline. Auto groups unfinished exercises into seven overlap bins. All distinct exercises in this training contribute with fixed weights of 100%, 50%, 25%, 12.5% and so on, without dividing by exercise count. The colors run from dark green through green, yellow, orange, red-orange and red to dark red. Completed exercises have no overlap outline. Missing profiles count as zero overlap, so dark green can also mean an unconfigured profile.")
-                Text("Within each overlap bin, fewer training days in the last two calendar months comes first, then tie priority (+ raises it). Unfinished manual top and bottom use your arrow order; completed exercises follow from first to last done. Hidden exercises still contribute recent training context.")
+                Text("Open Exercise Order from Menu. The current exercise stays first with a blue outline. Auto groups unfinished exercises into four configurable color bins. All distinct exercises in this training contribute with decreasing influence (neutral regions: 100%, 50%, 25%, 12.5%, then a 10% floor). Planning factors keep biceps/triceps overlap slightly longer (1.1), quads/hamstrings slightly shorter (0.9), core/abs 20% slower to recover (factor 1.25), and other regions neutral (1.0). These are heuristics, not measured recovery times. Preset Core/abs percentages are 50% higher; saved profiles keep their editable percentages, without dividing by exercise count. Yesterday adds 30% per exercise, two days ago 15%, and three days ago 7.5%. Contributions from all those exercises accumulate once per training day without order weighting. The score uses the strongest intensity-weighted region, so adding regions cannot dilute an existing clash. Choose the green/yellow/orange/red boundaries in Exercise Order. Defaults switch at 25%, 50% and 75%; Auto priority and warning/frequency bias stay within those color groups. Completed exercises have no overlap outline. Missing profiles count as zero overlap, so green can also mean an unconfigured profile.")
+                Text("Within each overlap bin, higher Auto priority comes first (+ moves earlier, - moves later), then a small combined boost for one or two active warnings and fewer recent training days. The frequency boost is capped and disappears after three training days in the last two calendar months. Unfinished manual top and bottom use your arrow order; completed exercises follow from first to last done. Hidden exercises still contribute recent training context.")
                 Text("Body Regions & Colors", style = MaterialTheme.typography.titleSmall)
-                Text("Choose Off, Low, Medium or High involvement in exercise details. Marker widths follow intensity. English/German exercise suggestions provide editable starting profiles. These are planning estimates, not recovery measurements. The body-region guide's Show/Hide choice is remembered for every exercise, even when profile edits are cancelled.")
+                Text("Choose L (25%), M (50%), H (100%), or type a custom region percentage in exercise details. Zero removes the region. Marker widths follow the percentage. Preset Core/abs values are 50% higher; existing saved profiles are unchanged. English/German exercise suggestions provide editable starting profiles. These are planning estimates, not recovery measurements. The body-region guide's Show/Hide choice is remembered for every exercise, even when profile edits are cancelled.")
                 Text("Training Days & Time", style = MaterialTheme.typography.titleSmall)
-                Text("A training day runs from 06:00 to 05:59 the next day. The overview timer estimates your training duration and becomes completed after 10 minutes without an entry. Stats duration uses the first and last recorded entry; a single entry has 0 minutes between them. Overview history abbreviates minutes as m; Lv. means level, and W means watts.")
+                Text("A training day runs from 06:00 to 05:59 the next day. The overview timer estimates your training duration and becomes completed after 30 minutes without an entry when the estimated duration at the last entry is under one hour; otherwise after 10 minutes. Stats duration uses the first and last recorded entry; a single entry has 0 minutes between them. Overview history shows minutes without a suffix; Lv. means level, and W means watts.")
                 Text("Stats", style = MaterialTheme.typography.titleSmall)
-                Text("Weight-increase counters compare recorded training loads; editing the next weight alone does not count. Body Area Training counts each exercise once per training day, weighted High = 1, Medium = 0.5 and Low = 0.25. Cards marked last 30 days keep that fixed window.")
+                Text("Weight-increase counters compare recorded training loads; editing the next weight alone does not count. A higher next-session weight hides the weeks-without-increase warning until you log it or revert it; the recorded-history counter and Strength score trend stay unchanged. Body Area Training counts each exercise once per training day, weighted High = 1, Medium = 0.5 and Low = 0.25. Cards marked last 30 days keep that fixed window.")
                 Text("WIP stats", style = MaterialTheme.typography.titleSmall)
                 Text("WIP stats is a separate dashboard beside Stats. It compares equal calendar periods, tracks weekly goals, and offers a tappable training calendar, exercise charts and records. Its totals follow the selected interval and hidden-exercise switch. Tap How measured for the calculation rules.")
-                Text("The strength explorer uses best-set 1RM, while level and watts use peak intensity. Level changes are level steps, not percentages. Work/load for those entries is intensity x recorded minutes; the 1RM formula does not apply because they do not record repetitions. Tap the exercise chart's 1RM legend for details. New settings default to 1RM; saved choices are preserved.")
+                Text("The strength explorer uses all-set strength score, while level and watts use estimated intensity for a 10-minute effort. The Riegel-style estimate is intensity x (minutes / 10)^0.06, taking the best entry. This is a fixed heuristic, not a fitted model; level comparisons assume a linear scale on the same machine. Level changes are estimated level steps, not percentages. Tap the exercise chart's metric legend for its mode-specific calculation and limitations. Level and watt charts show minutes on the left and intensity on the right. New settings default to Strength score; saved choices are preserved.")
                 Text("Body Plot Settings", style = MaterialTheme.typography.titleSmall)
-                Text("Body Settings controls global plot defaults. Order and hide plots saves your plot order and visibility; reset restores Weight, Muscle Mass, Fat Mass, Fat %, then Muscle Mass %. Tap an individual plot for overrides; Follow global switches choose which settings inherit future global changes. Raw data and two trailing moving averages can be toggled independently: one uses a period in days, the other a percentage of the displayed interval. Both averages can be overlaid. Fits use original measurements. Blank Y-axis limits use automatic scaling. Targets and acceptance ranges belong to each plot; the global target switch controls visibility.")
+                Text("Body Settings controls global plot defaults. Order and hide plots saves your plot order and visibility; reset restores Weight, Muscle Mass, Fat Mass, Fat %, then Muscle Mass %. Tap an individual plot for overrides; Follow global switches choose which settings inherit future global changes. Raw data and two trailing moving averages can be toggled independently: one uses a period in days, the other a percentage of the displayed interval. Both averages can be overlaid. Fits use original measurements. Blank Y-axis limits use automatic scaling. Targets and acceptance ranges belong to each plot; the global target switches control visibility. Show goal - acceptance and Show goal + acceptance independently control the lower and upper dashed boundary lines and their shaded halves of the acceptance band.")
                 Text("Body Reference Lines", style = MaterialTheme.typography.titleSmall)
-                Text("Blue marks raw data, cyan the fixed-period moving average, pink the interval-fraction moving average, yellow the fit, green the target, purple all-time low/mean/high and orange history references. Reference text names All-time or the history interval, such as 2mon history. Each reference has its own visibility switch; means are dashed. History low/high default to the 5th/95th percentiles; choose a cutoff from 0 to 50%. A nonzero cutoff appears in the labels; 0 uses exact low/high. All-time records remain exact. History can follow the plot interval or use a separate window. Means and fits always use raw measurements.")
+                Text("Blue marks raw data, white the fixed-period moving average, pink the interval-fraction moving average, yellow the fit, green the target, purple all-time low/mean/high and orange history references. Reference text names All-time or the history interval, such as 8wk history. Each reference has its own visibility switch; means are dashed. History low/high default to the 5th/95th percentiles; choose a cutoff from 0 to 50%. A nonzero cutoff appears in the labels; 0 uses exact low/high. All-time records remain exact. History can follow the plot interval or use a separate window. Means and fits always use raw measurements.")
                 Text("Health Connect", style = MaterialTheme.typography.titleSmall)
                 Text("Sync Health Connect is at the top of Body Settings, with status and last sync time. Body syncs on entry, on returning to the foreground, and every minute while visible, using existing permissions. Its refresh timer stops when you leave Body or background the app. Outside Body, automatic refresh on resume reuses a successful sync for 15 minutes. The Settings button requests a fresh sync and can request permissions. Body data and plot settings are independent of training plans.")
                 Text("History, Hidden Exercises & Undo", style = MaterialTheme.typography.titleSmall)
                 Text("Calendar & History lets you edit or delete individual entries, an exercise's day or a whole training day. Hiding an exercise retains its records; use Show hidden exercises to find it again. When an Undo message appears after a deletion, tap Undo while it is visible to restore the data.")
                 Text("Backups", style = MaterialTheme.typography.titleSmall)
-                Text("Data, Backup & Sync provides JSON export and restore. Restoring replaces the current workout data. Backups preserve exercise warning overrides and the Volume/1RM choice. Export a backup before moving devices or replacing data.")
+                Text("Data, Backup & Sync provides JSON export and restore. Restoring replaces the current workout data. Backups preserve exercise warning overrides and the Volume/Strength score choice. Export a backup before moving devices or replacing data.")
             }
         },
         confirmButton = { TextButton(onClick = { showHelp = false; showMenu = true }) { Text("Close") } },
     )
 
-    if (confirmDeleteCurrentTraining) AlertDialog(
-        onDismissRequest = { confirmDeleteCurrentTraining = false; showMenu = true },
-        title = { Text("Delete Current Training?") },
-        text = { Text("This removes all entries in the current six-hour training unit from the active plan.") },
+    if (confirmDeleteLastTraining) AlertDialog(
+        onDismissRequest = { confirmDeleteLastTraining = false; showMenu = true },
+        title = { Text("Delete Last Training?") },
+        text = { Text("Delete all entries from the latest recorded training day in this plan (${lastTraining?.let { formatTimestamp(it.startInclusive) } ?: "none"})? You can undo this afterwards.") },
         confirmButton = {
             Button(onClick = {
-                deleteWithUndo("Current training deleted") { repository.deleteCurrentTrainingWithJournal() }
-                confirmDeleteCurrentTraining = false
+                deleteWithUndo("Last training deleted") { repository.deleteLastTrainingWithJournal(lastTraining) }
+                confirmDeleteLastTraining = false
             }) { Text("Delete Training") }
         },
-        dismissButton = { TextButton(onClick = { confirmDeleteCurrentTraining = false; showMenu = true }) { Text("Cancel") } },
+        dismissButton = { TextButton(onClick = { confirmDeleteLastTraining = false; showMenu = true }) { Text("Cancel") } },
     )
+
+    if (showAddBody) AddBodyMeasurementDialog(onDismiss = { showAddBody = false }, onSave = onSaveBodyEntry)
 
     if (showPlanNotes && activePlan != null) TrainingPlanNotesDialog(
         notes = activePlan.notes,
@@ -565,6 +589,12 @@ fun GymLogApp(
     if (showTrainingHeader && activePlan != null) TrainingHeaderDialog(
         activePlan = activePlan,
         plans = uiState.trainingPlans,
+        onCreate = { name ->
+            repository.createTrainingPlan(name)
+            refresh()
+            showTrainingHeader = false
+        },
+        onExport = onExportPlan, onImport = onImportPlan,
         onDismiss = { showTrainingHeader = false },
         onSave = { name, notes, pinned ->
             repository.renameTrainingPlan(activePlan.id, name)
@@ -722,15 +752,61 @@ private fun DataRecoveryDialog(
 }
 
 @Composable
+internal fun FatigueBandSettings(current: FatigueBands, onSave: (FatigueBands) -> Unit) {
+    var yellow by remember(current) { mutableStateOf(current.yellowFrom.toString()) }
+    var orange by remember(current) { mutableStateOf(current.orangeFrom.toString()) }
+    var red by remember(current) { mutableStateOf(current.redFrom.toString()) }
+    val draft = parseFatigueBands(yellow, orange, red)
+    val preview = draft ?: current
+    Card(Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text("Fatigue color boundaries", style = MaterialTheme.typography.titleSmall)
+            Text("Each color starts at its percentage. Auto bias stays within a color group.", style = MaterialTheme.typography.bodySmall)
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                listOf(Triple("Yellow (%)", yellow, { value: String -> yellow = value }),
+                    Triple("Orange (%)", orange, { value: String -> orange = value }),
+                    Triple("Red (%)", red, { value: String -> red = value })).forEach { (label, value, update) ->
+                    OutlinedTextField(value, { update(it.filter(Char::isDigit)) }, Modifier.weight(1f),
+                        label = { Text(label) }, singleLine = true, isError = draft == null,
+                        keyboardOptions = KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Number))
+                }
+            }
+            if (draft == null) Text("Use increasing values from 1 to 100.", color = MaterialTheme.colorScheme.error,
+                style = MaterialTheme.typography.bodySmall)
+            Row(Modifier.fillMaxWidth()) {
+                listOf("Green\n0-${preview.yellowFrom - 1}%" to 0,
+                    "Yellow\n${preview.yellowFrom}-${preview.orangeFrom - 1}%" to preview.yellowFrom,
+                    "Orange\n${preview.orangeFrom}-${preview.redFrom - 1}%" to preview.orangeFrom,
+                    "Red\n${preview.redFrom}-100%" to preview.redFrom).forEach { (label, score) ->
+                    Text(label, Modifier.weight(1f), color = overlapOutlineColor(score, preview),
+                        style = MaterialTheme.typography.labelSmall)
+                }
+            }
+            Row {
+                TextButton(onClick = {
+                    val defaults = FatigueBands()
+                    yellow = defaults.yellowFrom.toString(); orange = defaults.orangeFrom.toString(); red = defaults.redFrom.toString()
+                }) { Text("Default colors") }
+                Button(onClick = { draft?.let(onSave) }, enabled = draft != null && draft != current) { Text("Save colors") }
+            }
+        }
+    }
+}
+
+@Composable
 private fun OrderScreen(
     machines: List<MachineSummary>,
+    fatigueBands: FatigueBands,
+    progressionSettings: ProgressionSettings,
+    onFatigueBands: (FatigueBands) -> Unit,
     modifier: Modifier = Modifier,
     onMove: (Long, Int) -> Unit,
     onGroup: (Long, ExerciseOrderGroup) -> Unit,
     onPriority: (Long, Int) -> Unit,
 ) {
     val cutoff = com.gymlog.app.data.GymClock().trainingDayStart(System.currentTimeMillis())
-    val ranked = rankOverviewMachines(machines, cutoff, recentTrainingExercises(machines, cutoff))
+    val ranked = rankOverviewMachines(machines, cutoff, recentTrainingExercises(machines, cutoff),
+        progressionSettings = progressionSettings, fatigueBands = fatigueBands)
     val groups = listOf(
         ExerciseOrderGroup.MANUAL_TOP to "Manual top",
         ExerciseOrderGroup.AUTOMATIC to "Auto sorted",
@@ -741,9 +817,10 @@ private fun OrderScreen(
         contentPadding = PaddingValues(horizontal = 8.dp, vertical = 6.dp),
         verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
+        item { FatigueBandSettings(fatigueBands, onFatigueBands) }
         item {
             Text(
-                "The current exercise stays first, then unfinished Manual top in your arrow order. Auto uses seven overlap bins, from dark green (least) to dark red (most). All distinct exercises in this training contribute with fixed weights of 100%, 50%, 25%, 12.5% and so on, without dividing by exercise count. Within each bin, fewer training days in the last two calendar months comes first, then tie priority. Unknown overlap counts as zero. Unfinished Manual bottom keeps your arrow order, followed by completed exercises from first to last done.",
+                "The current exercise stays first, then unfinished Manual top in your arrow order. Auto uses four configurable color bins, green, yellow, orange and red. All distinct exercises in this training contribute with decreasing influence (neutral regions: 100%, 50%, 25%, 12.5%, then a 10% floor). Planning factors keep biceps/triceps overlap slightly longer (1.1), quads/hamstrings slightly shorter (0.9), core/abs 20% slower to recover (factor 1.25), and other regions neutral (1.0). These are heuristics, not measured recovery times. Preset Core/abs percentages are 50% higher; saved profiles keep their editable percentages, without dividing by exercise count. Yesterday adds 30% per exercise, two days ago 15%, and three days ago 7.5%. Contributions from all those exercises accumulate once per training day without order weighting. The score uses the strongest intensity-weighted region, so adding regions cannot dilute an existing clash. Within each bin, higher Auto priority comes first (+ moves earlier, - moves later), then a small combined boost for one or two active warnings and fewer recent training days. The frequency boost is capped and disappears after three training days in the last two calendar months. Unknown overlap counts as zero. Unfinished Manual bottom keeps your arrow order, followed by completed exercises from first to last done.",
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -765,11 +842,11 @@ private fun OrderScreen(
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Text(machine.name, Modifier.weight(1f), style = MaterialTheme.typography.labelLarge, maxLines = 1)
                             if (group != ExerciseOrderGroup.AUTOMATIC) {
-                                TextButton(onClick = { onMove(machine.id, -1) }, enabled = index > 0, contentPadding = PaddingValues(horizontal = 7.dp, vertical = 0.dp)) { Text("▲") }
-                                TextButton(onClick = { onMove(machine.id, 1) }, enabled = index < entries.lastIndex, contentPadding = PaddingValues(horizontal = 7.dp, vertical = 0.dp)) { Text("▼") }
+                                TextButton(onClick = { onMove(machine.id, -1) }, enabled = index > 0, contentPadding = PaddingValues(horizontal = 7.dp, vertical = 0.dp)) { Text("\u25B2") }
+                                TextButton(onClick = { onMove(machine.id, 1) }, enabled = index < entries.lastIndex, contentPadding = PaddingValues(horizontal = 7.dp, vertical = 0.dp)) { Text("\u25BC") }
                             } else {
-                                Text("Tie priority ${-machine.rankingPriority}", style = MaterialTheme.typography.labelSmall)
-                                TextButton(onClick = { onPriority(machine.id, 1) }, contentPadding = PaddingValues(horizontal = 7.dp, vertical = 0.dp)) { Text("−") }
+                                Text("Auto priority ${if (machine.rankingPriority < 0) "+" else ""}${-machine.rankingPriority}", style = MaterialTheme.typography.labelSmall)
+                                TextButton(onClick = { onPriority(machine.id, 1) }, contentPadding = PaddingValues(horizontal = 7.dp, vertical = 0.dp)) { Text("\u2212") }
                                 TextButton(onClick = { onPriority(machine.id, -1) }, contentPadding = PaddingValues(horizontal = 7.dp, vertical = 0.dp)) { Text("+") }
                             }
                         }
@@ -831,7 +908,7 @@ private fun BackupScreen(
             Column(Modifier.weight(1f)) {
                 Text("Android Automatic Backup", style = MaterialTheme.typography.titleMedium)
                 Text(
-                    if (automaticBackupEnabled) "On · included in future Android backups" else "Off · future Android backups skip GymLog data",
+                    if (automaticBackupEnabled) "On \u00B7 included in future Android backups" else "Off \u00B7 future Android backups skip GymLog data",
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     style = MaterialTheme.typography.bodySmall,
                 )
@@ -844,8 +921,15 @@ private fun BackupScreen(
         )
         androidx.compose.material3.OutlinedButton(
             onClick = {
-                runCatching { context.startActivity(Intent("android.settings.BACKUP_SETTINGS")) }
-                    .getOrElse { context.startActivity(Intent(Settings.ACTION_SETTINGS)) }
+                // Android Settings registers this action with the com.android.settings prefix.
+                runCatching { context.startActivity(Intent("com.android.settings.BACKUP_SETTINGS")) }
+                    .recoverCatching {
+                        context.startActivity(Intent(Settings.ACTION_SETTINGS))
+                        android.widget.Toast.makeText(context, "Search for Backup in Android Settings.", android.widget.Toast.LENGTH_LONG).show()
+                    }
+                    .onFailure {
+                        android.widget.Toast.makeText(context, "Could not open Android Settings. Open Settings and search for Backup.", android.widget.Toast.LENGTH_LONG).show()
+                    }
             },
             modifier = Modifier.fillMaxWidth(),
         ) { Text("Open Android Backup Settings") }
@@ -903,39 +987,51 @@ private fun AccentColorDialog(
 }
 
 @Composable
-private fun TrainingHeaderDialog(
+internal fun TrainingHeaderDialog(
     activePlan: TrainingPlan,
     plans: List<TrainingPlan>,
+    onExport: () -> Unit, onImport: () -> Unit,
     onDismiss: () -> Unit,
     onSave: (String, String, Boolean) -> Unit,
     onSwitch: (Long) -> Unit,
+    onCreate: (String) -> Unit = {},
 ) {
     var name by remember(activePlan.id) { mutableStateOf(activePlan.name) }
     var notes by remember(activePlan.id) { mutableStateOf(activePlan.notes) }
     var pinned by remember(activePlan.id) { mutableStateOf(activePlan.notesPinned) }
-    var choosingPlan by remember { mutableStateOf(false) }
-    AlertDialog(
+    var creating by remember { mutableStateOf(false) }
+    if (!creating) AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Training plan") },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 OutlinedTextField(name, { name = it }, Modifier.fillMaxWidth(), label = { Text("Name") }, singleLine = true)
                 OutlinedTextField(notes, { notes = it }, Modifier.fillMaxWidth(), label = { Text("Training Plan Notes") }, minLines = 2, maxLines = 4)
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                     Text("Pin note on overview", Modifier.weight(1f), style = MaterialTheme.typography.bodySmall)
                     Switch(checked = pinned, onCheckedChange = { pinned = it })
                 }
-                OutlinedButton(onClick = { choosingPlan = !choosingPlan }, modifier = Modifier.fillMaxWidth()) {
-                    Text(if (choosingPlan) "Hide plans" else "Switch training plan")
+                val otherPlans = plans.filter { it.id != activePlan.id }
+                if (otherPlans.isNotEmpty()) Text("Switch training plan", style = MaterialTheme.typography.titleSmall)
+                otherPlans.forEach { plan ->
+                    OutlinedButton(onClick = { onSwitch(plan.id) }, modifier = Modifier.fillMaxWidth()) { Text(plan.name) }
                 }
-                if (choosingPlan) plans.filter { it.id != activePlan.id }.forEach { plan ->
-                    TextButton(onClick = { onSwitch(plan.id) }, modifier = Modifier.fillMaxWidth()) { Text(plan.name) }
+                OutlinedButton(onClick = { creating = true }, modifier = Modifier.fillMaxWidth()) {
+                    Text("Add another training plan")
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedButton(onClick = onExport, modifier = Modifier.weight(1f)) { Text("Download plan") }
+                    OutlinedButton(onClick = { onDismiss(); onImport() }, modifier = Modifier.weight(1f)) { Text("Load file") }
                 }
             }
         },
         confirmButton = { Button(onClick = { onSave(name.trim(), notes.trim(), pinned) }, enabled = name.isNotBlank()) { Text("Save") } },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
     )
+    if (creating) PlanNameDialog("Add another training plan", "", { creating = false }) { value ->
+        onCreate(value)
+        creating = false
+    }
 }
 
 @Composable

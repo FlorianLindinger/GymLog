@@ -1,10 +1,50 @@
 # Changelog
 
-Notable changes to GymLog are recorded here. Planned work belongs in `TODO.md`.
+Notable changes to GymLog are recorded here. Planned work belongs in `docs/TODO.md`.
 
 ## Unreleased
 
 ### Changed
+
+- Always offer ranked starting profiles for weak exercise-name matches, labeled as potentially weak suggestions.
+- Add compact L/M/H and editable percentage controls for body regions. Scale preset Core/abs values by 50% and draw proportionally wider markers; preserve existing profiles without a hidden Core multiplier. Keep custom percentages in storage, plan files, duplication, and backups.
+- Add 10% fatigue per exercise from yesterday and 5% from two days ago, independent of order and counted once per exercise per training day.
+- Highlight exercise notes through color and weight without changing padding or typography size. Show only the latest entry above the chart and full recent history below it.
+- Restore green/red overview history separators; use neutral colors within exercise history. Initialize new-session wheels from the latest recorded batch instead of stale saved wheel values.
+- Put plus adjustment rows above minus rows for time and weight. Allow a local date when adding body weight, preserving that date in local data and Health Connect records.
+
+- Apply 20% extra Core/abs fatigue and recency weights of 100%, 50%, 25%, 12.5%, then 10% for all earlier exercises.
+- Give supporting weight sets a small, diminishing contribution to Wathan 1RM (two equal sets add 2.5%, capped below 5%) across charts, summaries, warnings, and the stats explorer.
+- Show warnings at the top of exercise details and compact recent sets/minutes above the chart, with expandable history.
+- Open plan choices directly from the training banner and offer a working Add another training plan action.
+- Open larger Body and exercise charts with settings below in a scrolling view. Body settings preview edits before saving.
+- Add independent Follow global / Force show / Force hide choices for goals, acceptance bounds, reference lines, fits, averages, raw data, and plot summaries; preserve existing saved visibility choices.
+
+- Keep Add weight only in Body, with a wider single-line middle button and equal outer buttons. Remove colored overview history separators and minute suffixes.
+- Replace watt work and level load comparisons with a best-entry Riegel-style intensity estimate at 10 minutes: intensity x (minutes / 10)^0.06. Use it in exercise charts, entry summaries and the stats explorer; document the fixed heuristic and same-machine level limitation.
+
+- Hide the weeks-without-weight-increase warning while a higher next-session weight is configured. Keep actual recorded increase counters and 1RM trend warnings based on performed entries; restore the stale warning if the planned increase is reverted.
+
+- Replace Delete Current Training with Delete Last Training, targeting the latest recorded training day in the active plan (06:00 boundary), with confirmation, stale-selection protection and undo.
+- Include manual Body entries in full JSON backups and restore them locally without automatically exporting them to Health Connect.
+- Add manual weight, optional body-fat percentage and optional muscle percentage from Add weight in Body. Weight and fat can be written to Health Connect for compatible readers such as Google Fit; muscle stays local. Support permission denial, local-only saving and duplicate-safe retries.
+- Add Download plan and Load file below the training-plan selector. Plan files contain exercise configuration without history; loading adds and selects a new plan without replacing existing data.
+
+- Format Body targets and acceptance together before their unit, such as 70±2 kg. Fix the Android backup-settings shortcut action and explain how to find Backup if only general Settings is available; show a message if Settings cannot be opened.
+
+- Follow every newly logged or changed current-training exercise in the overview, instead of scrolling to the top only for the first entry of the day. Wait for refreshed ranking before scrolling; logging from exercise details also positions the overview on that exercise when returning. Historical entry edits and deletions do not request this scroll.
+
+- Show Change and Delete directly on each Recent Entries row. Change opens the set wheels or minutes controls for that recorded entry, preserving its date and weight/level/watts. Confirm deletion and retain undo; clearing every set also asks for deletion confirmation. Keep larger imported set counts and rep values when opening the wheels.
+
+- Apply Auto priority before training frequency within each overlap bin, so +1 moves an unfinished Auto exercise earlier and -1 moves it later even when training counts differ. Label the signed value Auto priority and explain its scope. Preserve current/manual/completed group ordering and the minutes-left, levels/watts-right chart layout.
+
+- Put recorded minutes on the left axis and levels/watts on the right in exercise charts, including legends, axis colors and trend lines. Open mode-specific metric help instead of the weight-training reps/sets explanation. Explain the 10-minute intensity estimate and its same-machine level limitation.
+
+- Add independent Body target visibility switches for goal minus acceptance and goal plus acceptance, globally and per plot. Show each enabled limit as a dashed green boundary with its side of the acceptance shading; hidden limits no longer expand the automatic Y-axis. Existing target bands retain both sides by default.
+
+- Use bright white for the Body fixed-day moving average line and its Avg days label, separating it from blue raw data and the other colored plot overlays. Update the chart color guide to match.
+
+- Keep exported APK checksums under `artifacts/checksums/` instead of the project root, including reused debug builds. Remove obsolete root checksum sidecars when exporting or reusing an APK.
 
 - Windows launchers are organized around three everyday commands: USB.bat, WiFi.bat, and Bluetooth.bat. Each uses only its named transport, with no fallback. Build-only, install-only, diagnostics and release commands moved under advanced/; old combined launchers are inactive archived sources. All launchers keep result windows open and color-code progress, success, errors and pending Bluetooth actions.
 - Exercise overview scrolling avoids rebuilding card history and warnings when rows re-enter the list. Single-line text sizing now estimates from measured width instead of doing twelve binary-search layouts. Current-training filtering uses numeric day boundaries instead of converting every historical timestamp to a date.

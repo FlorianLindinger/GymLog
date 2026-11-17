@@ -1,6 +1,10 @@
 package com.gymlog.app.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.width
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -45,7 +49,7 @@ import com.gymlog.app.data.Strength
 internal fun ExerciseCatalogDialog(initialQuery: String, onDismiss: () -> Unit, onPick: (ExerciseTemplate) -> Unit) {
     var query by remember { mutableStateOf(initialQuery) }
     var equipment by remember { mutableStateOf<ExerciseEquipment?>(null) }
-    val results = remember(query, equipment) { ExerciseCatalog.search(query, equipment, ExerciseCatalog.entries.size) }
+    val results = remember(query, equipment) { ExerciseCatalog.search(query, equipment, ExerciseCatalog.entries.size, allowWeakMatches = true) }
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         Surface(Modifier.fillMaxSize().padding(12.dp), shape = MaterialTheme.shapes.large) {
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -88,41 +92,62 @@ internal fun ExerciseCatalogDialog(initialQuery: String, onDismiss: () -> Unit, 
 }
 
 internal fun muscleProfileSummary(areas: List<AreaAssignment>): String =
-    if (areas.isEmpty()) "No regions selected" else Strength.entries.asReversed().mapNotNull { intensity ->
-        val names = areas.filter { it.strength == intensity }.map { it.area.label.substringBefore(" /") }
-        if (names.isEmpty()) null else "${intensity.label}: ${names.joinToString(", ")}"
-    }.joinToString(" · ")
+    if (areas.isEmpty()) "No regions selected" else areas.joinToString(" ? ") {
+        "${it.area.label.substringBefore(" /")} ${formatRegionPercent(it.intensity * 100)}%"
+    }
+
+internal fun parseRegionPercent(text: String): Double? =
+    if (text.isBlank()) 0.0 else text.replace(',', '.').toDoubleOrNull()?.takeIf { it.isFinite() && it in 0.0..1000.0 }
+
+internal fun formatRegionPercent(value: Double): String = java.math.BigDecimal.valueOf(value).stripTrailingZeros().toPlainString()
 
 @Composable
 internal fun MuscleProfileFields(
     areas: List<AreaAssignment>,
     colors: Map<BodyArea, Long>,
     onColor: ((BodyArea) -> Unit)?,
+    onValidityChange: (Boolean) -> Unit = {},
     onChange: (List<AreaAssignment>) -> Unit,
 ) {
+    var invalid by remember { mutableStateOf(emptySet<BodyArea>()) }
     BodyArea.entries.forEach { area ->
-        val selected = areas.firstOrNull { it.area == area }?.strength
-        Column(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(Modifier.size(14.dp).background(Color(colors[area] ?: area.color), CircleShape)
-                    .then(if (onColor != null) Modifier.clickable { onColor(area) } else Modifier))
-                Text(area.label, Modifier.weight(1f).padding(start = 6.dp), style = MaterialTheme.typography.bodySmall,
-                    maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+        val assignment = areas.firstOrNull { it.area == area }
+        var percent by remember(area, assignment?.intensity) { mutableStateOf(assignment?.let { formatRegionPercent(it.intensity * 100) } ?: "") }
+        androidx.compose.runtime.LaunchedEffect(area, assignment?.intensity) {
+            invalid = invalid - area
+            onValidityChange(invalid.isEmpty())
+        }
+        fun update(value: Double) {
+            onChange(areas.filterNot { it.area == area } + if (value <= 0.0) emptyList() else listOf(
+                AreaAssignment(area, Strength.fromStorage(value / 100), colors[area] ?: area.color, value / 100)))
+        }
+        Row(Modifier.fillMaxWidth().padding(vertical = 3.dp), verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+            Box(Modifier.size(10.dp).background(Color(colors[area] ?: area.color), CircleShape)
+                .then(if (onColor != null) Modifier.clickable { onColor(area) } else Modifier))
+            Text(area.label.substringBefore(" /"), Modifier.weight(1f), style = MaterialTheme.typography.bodySmall,
+                maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+            listOf("L" to 25.0, "M" to 50.0, "H" to 100.0).forEach { (label, value) ->
+                Text(label, Modifier.width(24.dp).background(
+                    if (assignment?.intensity == value / 100) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant,
+                    MaterialTheme.shapes.small).clickable {
+                        invalid = invalid - area; onValidityChange(invalid.isEmpty()); update(value)
+                    }.padding(vertical = 8.dp), textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                    style = MaterialTheme.typography.labelMedium)
             }
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                (listOf<Strength?>(null) + Strength.entries).forEach { intensity ->
-                    FilterChip(
-                        selected = selected == intensity,
-                        onClick = {
-                            onChange(areas.filterNot { it.area == area } + listOfNotNull(intensity?.let {
-                                AreaAssignment(area, it, colors[area] ?: area.color)
-                            }))
-                        },
-                        label = { Text(intensity?.label ?: "Off", style = MaterialTheme.typography.labelSmall) },
-                        modifier = Modifier.weight(1f),
-                    )
-                }
-            }
+            androidx.compose.foundation.text.BasicTextField(percent, { next ->
+                percent = next
+                val value = parseRegionPercent(next)
+                invalid = if (value == null) invalid + area else invalid - area
+                onValidityChange(invalid.isEmpty())
+                if (value != null) update(value)
+            }, Modifier.width(52.dp).border(1.dp, if (area in invalid) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.outline,
+                MaterialTheme.shapes.small).padding(horizontal = 4.dp, vertical = 8.dp)
+                .semantics { contentDescription = "${area.label.substringBefore(" /")} percentage" },
+                textStyle = MaterialTheme.typography.bodySmall.copy(color = MaterialTheme.colorScheme.onSurface),
+                singleLine = true, keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Decimal))
+            Text("%", style = MaterialTheme.typography.bodySmall)
         }
     }
+    if (invalid.isNotEmpty()) Text("Use a percentage from 0 to 1000.", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
 }

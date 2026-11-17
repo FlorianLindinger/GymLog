@@ -1,5 +1,6 @@
 param([string]$WindowsPath = (Join-Path $PSScriptRoot '..'))
 $ErrorActionPreference = 'Stop'
+$RepoPath = [IO.Path]::GetFullPath((Join-Path $WindowsPath '../..'))
 if ($env:OS -ne 'Windows_NT') { Write-Output 'SKIP: console integration checks require Windows cmd.exe.'; return }
 $script:InstallerAssertions = 0
 function Assert-Installer($value, [string]$message) {
@@ -10,14 +11,15 @@ $testRoot = Join-Path ([IO.Path]::GetTempPath()) ('gymlog-console-tests-' + [Gui
 $savedPause = $env:GYMLOG_NO_PAUSE
 $savedExit = $env:GYMLOG_TEST_INSTALL_EXIT
 $launchers = @(
-    @('USB.bat','build-install','USB'), @('WiFi.bat','build-install','WiFi'), @('Bluetooth.bat','build-install','Bluetooth'),
-    @('advanced/build.bat','build','USB'), @('advanced/verify.bat','verify','USB'), @('advanced/device_check.bat','device','USB'),
-    @('advanced/connect_wifi.bat','wifi','WiFi'), @('advanced/launch_and_stream_gym_log_logs.bat','logs','USB'),
-    @('advanced/screenshot.bat','screenshot','USB'), @('advanced/install_usb.bat','install','USB'),
-    @('advanced/install_wifi.bat','install','WiFi'), @('advanced/send_bluetooth.bat','install','Bluetooth'),
-    @('advanced/release/build_release.bat','release','USB'), @('advanced/release/release_patch.bat','patch','USB'),
-    @('advanced/release/release_minor.bat','minor','USB'), @('advanced/release/release_major.bat','major','USB'),
-    @('advanced/release/release_no_bump.bat','none','USB')
+    @('build & install via USB.bat','build-install','USB'), @('build & install via WiFi.bat','build-install','WiFi'), @('build & install via Bluetooth.bat','build-install','Bluetooth'),
+    @('build & install via Google Drive.bat','build-install','GoogleDrive'),
+    @('scripts/windows/advanced/build.bat','build','USB'), @('scripts/windows/advanced/verify.bat','verify','USB'), @('scripts/windows/advanced/device_check.bat','device','USB'),
+    @('scripts/windows/advanced/connect_wifi.bat','wifi','WiFi'), @('scripts/windows/advanced/launch_and_stream_gym_log_logs.bat','logs','USB'),
+    @('scripts/windows/advanced/screenshot.bat','screenshot','USB'), @('scripts/windows/advanced/install_usb.bat','install','USB'),
+    @('scripts/windows/advanced/install_wifi.bat','install','WiFi'), @('scripts/windows/advanced/send_bluetooth.bat','install','Bluetooth'),
+    @('scripts/windows/advanced/release/build_release.bat','release','USB'), @('scripts/windows/advanced/release/release_patch.bat','patch','USB'),
+    @('scripts/windows/advanced/release/release_minor.bat','minor','USB'), @('scripts/windows/advanced/release/release_major.bat','major','USB'),
+    @('scripts/windows/advanced/release/release_no_bump.bat','none','USB')
 )
 function Invoke-LauncherFixture($entry, [int]$Code, [bool]$NoPause) {
     $env:GYMLOG_TEST_INSTALL_EXIT = [string]$Code
@@ -55,30 +57,31 @@ function Invoke-LauncherFixture($entry, [int]$Code, [bool]$NoPause) {
         if ($entry[1] -notin @('patch','minor','major','none')) {
             Assert-Installer ($output.Contains("MOCK_TRANSPORT=$($entry[2])")) "$($entry[0]) must select its explicit transport"
         }
-        $status = if ($Code -ne 0) { '[ERROR]' } elseif ($entry[2] -eq 'Bluetooth') { '[ACTION REQUIRED]' } else { '[SUCCESS]' }
+        $status = if ($Code -ne 0) { '[ERROR]' } elseif ($entry[2] -in @('Bluetooth','GoogleDrive')) { '[ACTION REQUIRED]' } else { '[SUCCESS]' }
         Assert-Installer ($output.Contains($status)) "$($entry[0]) must show an accurate final status"
         Assert-Installer (($output -match 'This window stays open\.') -eq (-not $NoPause)) 'Only automation opt-out may close the console immediately'
     } finally { $process.Dispose() }
 }
 try {
-    foreach ($folder in @('helpers','advanced','advanced/release')) { New-Item -ItemType Directory -Path (Join-Path $testRoot $folder) -Force | Out-Null }
-    Copy-Item -LiteralPath (Join-Path $WindowsPath 'helpers/launch.bat') -Destination (Join-Path $testRoot 'helpers/launch.bat')
-    foreach ($entry in $launchers) { Copy-Item -LiteralPath (Join-Path $WindowsPath $entry[0]) -Destination (Join-Path $testRoot $entry[0]) }
+    foreach ($folder in @('scripts/windows/helpers','scripts/windows/advanced','scripts/windows/advanced/release')) { New-Item -ItemType Directory -Path (Join-Path $testRoot $folder) -Force | Out-Null }
+    Copy-Item -LiteralPath (Join-Path $WindowsPath 'helpers/launch.bat') -Destination (Join-Path $testRoot 'scripts/windows/helpers/launch.bat')
+    foreach ($entry in $launchers) { Copy-Item -LiteralPath (Join-Path $RepoPath $entry[0]) -Destination (Join-Path $testRoot $entry[0]) }
     @'
 param([string]$Command,[string]$Transport,[string]$Apk)
 Write-Output "MOCK_COMMAND=$Command"
 Write-Output "MOCK_TRANSPORT=$Transport"
 Write-Output "MOCK_APK=$Apk"
 exit ([int]$env:GYMLOG_TEST_INSTALL_EXIT)
-'@ | Set-Content -LiteralPath (Join-Path $testRoot 'helpers/android.ps1') -Encoding ASCII
+'@ | Set-Content -LiteralPath (Join-Path $testRoot 'scripts/windows/helpers/android.ps1') -Encoding ASCII
     @'
 param([string]$Bump,[string]$Apk)
 Write-Output "MOCK_COMMAND=$Bump"
 Write-Output "MOCK_APK=$Apk"
 exit ([int]$env:GYMLOG_TEST_INSTALL_EXIT)
-'@ | Set-Content -LiteralPath (Join-Path $testRoot 'helpers/release_version.ps1') -Encoding ASCII
-    $top = @(Get-ChildItem -LiteralPath $WindowsPath -Filter '*.bat' | Sort-Object Name | Select-Object -ExpandProperty Name)
-    Assert-Installer (($top -join ',') -eq 'Bluetooth.bat,USB.bat,WiFi.bat') 'Only the three everyday transport launchers should be visible at the top level'
+'@ | Set-Content -LiteralPath (Join-Path $testRoot 'scripts/windows/helpers/release_version.ps1') -Encoding ASCII
+    $top = @(Get-ChildItem -LiteralPath $RepoPath -Filter '*.bat' | Sort-Object Name | Select-Object -ExpandProperty Name)
+    Assert-Installer (($top -join ',') -eq 'build & install via Bluetooth.bat,build & install via Google Drive.bat,build & install via USB.bat,build & install via WiFi.bat') 'The four everyday transport launchers should be visible in the project root'
+    Assert-Installer (@(Get-ChildItem -LiteralPath $WindowsPath -Filter '*.bat').Count -eq 0) 'Everyday launchers must be moved out of scripts/windows'
     $shared = Get-Content -LiteralPath (Join-Path $WindowsPath 'helpers/launch.bat') -Raw
     foreach ($color in @('0B','0A','0C','0E')) { Assert-Installer ($shared.Contains("color $color")) 'Progress, success, errors and pending actions need distinct colors' }
     foreach ($entry in $launchers) {

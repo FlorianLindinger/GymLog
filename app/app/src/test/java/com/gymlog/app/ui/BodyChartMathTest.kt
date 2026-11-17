@@ -9,6 +9,47 @@ import org.junit.Test
 
 class BodyChartMathTest {
     @Test
+    fun individualVisibilityOverridesCanFollowForceShowOrForceHide() {
+        val local = BodyChartSettings(target = 80.0, acceptance = 2.0, visibility = mapOf(
+            "showGoal" to BodyVisibility.HIDE, "showTargetLower" to BodyVisibility.SHOW,
+            "showTargetUpper" to BodyVisibility.FOLLOW_GLOBAL,
+            "showFit" to BodyVisibility.HIDE, "showAllTimeHigh" to BodyVisibility.SHOW,
+            "showHistoryLow" to BodyVisibility.FOLLOW_GLOBAL, "showRawData" to BodyVisibility.HIDE))
+        val global = BodyChartSettings(targetEnabled = false, showTargetUpper = true, showHistoryLow = true)
+        val resolved = resolveBodySettings(local, global)
+        assertTrue(resolved.targetEnabled && resolved.showTargetLower && !resolved.showGoal && !resolved.showTargetUpper)
+        assertTrue(!resolved.showFit && !resolved.showRawData && resolved.showAllTimeHigh && resolved.showHistoryLow)
+        assertEquals(listOf(78.0), bodyTargetBand(resolved, androidx.compose.ui.graphics.Color.Green)!!.visibleValues())
+        assertTrue(!resolveBodySettings(local, global.copy(showHistoryLow = false)).showHistoryLow)
+        assertTrue(local.visibility["showHistoryLow"] == BodyVisibility.FOLLOW_GLOBAL)
+    }
+    @Test
+    fun targetLimitsCanEachBeHiddenWithoutAffectingTheGoal() {
+        val settings = BodyChartSettings(target = 80.0, acceptance = 2.0, targetEnabled = true)
+        fun band(value: BodyChartSettings) = bodyTargetBand(value, androidx.compose.ui.graphics.Color.Green)!!
+        assertEquals(listOf(78.0, 80.0, 82.0), band(settings).visibleValues())
+        assertEquals(listOf(78.0, 80.0), band(settings.copy(showTargetUpper = false)).visibleValues())
+        assertEquals(listOf(80.0, 82.0), band(settings.copy(showTargetLower = false)).visibleValues())
+        assertEquals(listOf(80.0), band(settings.copy(showTargetLower = false, showTargetUpper = false)).visibleValues())
+        assertTrue(band(settings).showBoundaries)
+        assertEquals(null, bodyTargetBand(settings.copy(targetEnabled = false), androidx.compose.ui.graphics.Color.Green))
+        assertEquals(null, bodyTargetBand(settings.copy(target = null), androidx.compose.ui.graphics.Color.Green))
+        assertEquals(listOf(80.0, 80.0, 80.0), band(settings.copy(acceptance = null)).visibleValues())
+    }
+
+    @Test
+    fun targetLimitVisibilityFollowsGlobalSettingsWithoutReplacingLocalChoices() {
+        val local = BodyChartSettings(target = 80.0, acceptance = 2.0, showTargetLower = false, showTargetUpper = true)
+        val global = BodyChartSettings(targetEnabled = true, showTargetLower = true, showTargetUpper = false)
+        val inherited = resolveBodySettings(local, global)
+        assertTrue(inherited.showTargetLower && !inherited.showTargetUpper)
+        assertEquals(80.0, inherited.target!!, 0.0)
+        assertEquals(2.0, inherited.acceptance!!, 0.0)
+        val custom = resolveBodySettings(local.copy(globalTarget = false), global)
+        assertTrue(!custom.showTargetLower && custom.showTargetUpper)
+    }
+
+    @Test
     fun historyAndAllTimeMeansUseOriginalMeasurementsAndHaveIndependentDashedLines() {
         val day = 86_400_000L
         val points = listOf(TimeValue(0, 100.0), TimeValue(50 * day, 10.0), TimeValue(60 * day, 20.0), TimeValue(100 * day, 60.0),
@@ -64,7 +105,7 @@ class BodyChartMathTest {
         assertEquals(2, references.size)
         assertEquals(100.0, references[0].high.value, 0.0)
         assertEquals(50.0, references[0].low.value, 0.0)
-        assertEquals("2mon history", references[1].label)
+        assertEquals("8wk history", references[1].label)
         assertEquals(70.0, references[1].high.value, 0.0)
         assertEquals(50.0, references[1].low.value, 0.0)
         assertEquals(emptyList<BodyHighLowReference>(), bodyHighLowReferences(points, BodyChartSettings(historyPercentile = 0.0, ), 100 * day))
@@ -163,8 +204,13 @@ class BodyChartMathTest {
 
     @Test
     fun estimatesIncludeRemainingWeeksUntilOverOneYear() {
-        assertEquals("1 mon. 2 weeks", formatBodyEta(45.0))
-        assertEquals("2 mon. 1 week", formatBodyEta(68.0))
+        assertEquals("6 weeks", formatBodyEta(45.0))
+        assertEquals("9 weeks", formatBodyEta(68.0))
+        assertEquals("8 weeks", formatBodyEta(56.0))
+        assertEquals("10 weeks", formatBodyEta(70.0))
+        assertEquals("2 mon. 1 week", formatBodyEta(71.0))
+        assertEquals("2 mon. 2 weeks", formatBodyEta(75.0))
+        assertEquals("8wk history", bodyHistoryLabel(com.gymlog.app.data.ChartRange.TWO_MONTHS))
         assertEquals("2 weeks", formatBodyEta(16.0))
         assertEquals("12 mon.", formatBodyEta(365.0))
         assertEquals("1 year", formatBodyEta(366.0))

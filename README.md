@@ -26,6 +26,9 @@
 - Per-plot body targets and independent Y-axis limits, with compact automatic scaling
 - Optional, permission-controlled Health Connect synchronization
 - Portable JSON backup and restore
+- Download and load individual training-plan files without replacing existing plans
+- Add weight with optional body-fat and muscle percentages; optionally share weight and fat through Health Connect
+- Delete the latest recorded training day in the active plan, with confirmation and undo
 - No account, analytics, or internet permission
 
 ## Screenshots
@@ -49,7 +52,7 @@ Release downloads include `SHA256SUMS.txt` so you can verify the APK before
 installing it. The `.aab` file is intended for app-store distribution and
 cannot be installed directly.
 
-For local builds and phone updates, choose `scripts\windows\USB.bat`, `scripts\windows\WiFi.bat`, or `scripts\windows\Bluetooth.bat`. Each uses only its named connection type; there is no automatic fallback. Bluetooth transfer and installation finish on the phone. Less frequently needed build, verification, diagnostic and release commands are under `scripts/windows/advanced/`. See the [Windows launcher guide](scripts/windows/README.md).
+For local builds and phone updates, choose `build & install via USB.bat`, `build & install via WiFi.bat`, `build & install via Bluetooth.bat`, or `build & install via Google Drive.bat`. Each uses only its named connection type; there is no automatic fallback. Bluetooth transfer and installation finish on the phone. Google Drive copies to a chosen local sync folder; wait for upload, then download/install on the phone. Less frequently needed build, verification, diagnostic and release commands are under `scripts/windows/advanced/`. See the [Windows launcher guide](scripts/windows/README.md).
 
 > [!NOTE]
 > GymLog is currently distributed outside Google Play. Android may show a
@@ -87,7 +90,7 @@ scripts\windows\advanced\build.bat
 scripts\windows\advanced\verify.bat
 ```
 
-The debug APK is copied to `app\artifacts\debug\app-debug.apk`. You can also use
+The debug APK is copied to the project root as `GymLog-debug.apk`. You can also use
 the Gradle wrapper directly:
 
 ```powershell
@@ -96,6 +99,15 @@ cd app
 ```
 
 On macOS or Linux, run `./gradlew :app:assembleDebug` from the `app` directory.
+
+## Project layout
+
+The three `build & install via ...` launchers and generated APKs are in the
+project root. Open `app/` in Android Studio; build helpers and their tests are
+under `scripts/windows/`.
+
+Supporting documentation, planned work, third-party notices, screenshots and
+source artwork are grouped in [docs/](docs/README.md).
 
 ## Development
 
@@ -113,4 +125,4 @@ See [CHANGELOG.md](CHANGELOG.md) for notable changes and the current feature bas
 
 ## License
 
-GymLog is available under the [MIT License](LICENSE).
+GymLog is available under the [MIT License](LICENSE). See the [third-party notices](docs/THIRD_PARTY_NOTICES.md) for included assets.

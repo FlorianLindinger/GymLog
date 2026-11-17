@@ -6,6 +6,16 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class ExerciseCatalogTest {
+    @Test fun weakQueriesStillOfferRankedStartingProfilesAndCoreDefaultsAreScaled() {
+        val weak = ExerciseCatalog.search("bizeps zzzzz unknown machine", limit = 3, allowWeakMatches = true)
+        assertEquals(3, weak.size)
+        assertTrue(weak.first().areas.any { it.area == BodyArea.BICEPS })
+        assertTrue(ExerciseCatalog.search("completely unrelated words", allowWeakMatches = true).isNotEmpty())
+        assertTrue(ExerciseCatalog.search("Hammer Strength Selection 900 unknown", allowWeakMatches = true).isNotEmpty())
+        ExerciseCatalog.entries.flatMap { it.areas }.forEach { area ->
+            assertEquals(area.strength.value * if (area.area == BodyArea.CORE) 1.5 else 1.0, area.intensity, 0.0)
+        }
+    }
     @Test
     fun catalogueHasLargeBilingualCoverageAndValidProfiles() {
         val entries = ExerciseCatalog.entries

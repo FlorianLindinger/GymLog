@@ -1,6 +1,7 @@
 import java.time.ZoneId
 import java.time.ZonedDateTime
 import java.time.format.DateTimeFormatter
+import java.util.Properties
 
 plugins {
     id("com.android.application")
@@ -8,11 +9,11 @@ plugins {
     id("org.jetbrains.kotlin.plugin.compose")
 }
 
-// Google Drive and similar sync clients can lock app/build while AGP replaces APK
-// output directories on Windows. Keep generated files outside synced repositories.
+// Keep generated output ignored and on the project drive: Android resource-backed
+// unit tests need relative paths between this module and the build directory.
 if (System.getProperty("os.name").startsWith("Windows", ignoreCase = true)) {
     val windowsBuildDir = providers.environmentVariable("GYMLOG_BUILD_DIR").orNull
-        ?: System.getenv("LOCALAPPDATA")?.let { "$it/GymLog/build/app" }
+        ?: rootProject.file("../.tools/b").absolutePath
     if (!windowsBuildDir.isNullOrBlank()) {
         layout.buildDirectory.set(file(windowsBuildDir))
     }
@@ -24,6 +25,10 @@ val releaseSigningConfigured = listOf(
     "GYMLOG_KEY_ALIAS",
     "GYMLOG_KEY_PASSWORD",
 ).all { !System.getenv(it).isNullOrBlank() }
+// Keep debug updates compatible across Windows accounts without sharing a private key in Git.
+val localBuildProperties = Properties().apply {
+    rootProject.file("local.properties").takeIf { it.isFile }?.inputStream()?.use { load(it) }
+}
 val buildTimestamp = ZonedDateTime.now(ZoneId.of("Europe/Berlin"))
     .format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm z"))
 
@@ -40,6 +45,8 @@ android {
         buildConfigField("String", "BUILD_TIME", 34.toChar() + buildTimestamp + 34.toChar())
     }
 
+    testOptions { unitTests.isIncludeAndroidResources = true }
+
     buildFeatures {
         compose = true
         buildConfig = true
@@ -52,6 +59,11 @@ android {
     kotlinOptions { jvmTarget = "17" }
 
     signingConfigs {
+        getByName("debug") {
+            localBuildProperties.getProperty("gymlog.debug.keystore")?.takeIf { it.isNotBlank() }?.let {
+                storeFile = rootProject.file(it)
+            }
+        }
         if (releaseSigningConfigured) {
             create("release") {
                 storeFile = file(System.getenv("GYMLOG_KEYSTORE_FILE"))
@@ -98,6 +110,9 @@ dependencies {
     debugImplementation("androidx.compose.ui:ui-tooling")
 
     testImplementation("junit:junit:4.13.2")
+    testImplementation("org.robolectric:robolectric:4.14.1")
+    testImplementation("androidx.compose.ui:ui-test-junit4")
+    testImplementation("androidx.health.connect:connect-testing:1.0.0-alpha03")
     androidTestImplementation("androidx.test.ext:junit:1.2.1")
     androidTestImplementation("androidx.test.espresso:espresso-core:3.6.1")
     androidTestImplementation("androidx.compose.ui:ui-test-junit4")

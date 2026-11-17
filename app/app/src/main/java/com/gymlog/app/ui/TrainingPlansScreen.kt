@@ -94,7 +94,7 @@ fun TrainingPlansScreen(
 }
 
 @Composable
-private fun PlanNameDialog(title: String, initial: String, onDismiss: () -> Unit, onSave: (String) -> Unit) {
+internal fun PlanNameDialog(title: String, initial: String, onDismiss: () -> Unit, onSave: (String) -> Unit) {
     var name by remember(initial) { mutableStateOf(initial) }
     AlertDialog(
         onDismissRequest = onDismiss,

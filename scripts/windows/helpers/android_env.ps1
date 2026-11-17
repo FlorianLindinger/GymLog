@@ -60,8 +60,7 @@ function Initialize-Build {
     $env:ANDROID_HOME = Find-AndroidSdk
     $env:DEBUG = '' # Gradle's .bat launcher otherwise echoes every command when DEBUG is inherited.
     if (-not $env:GYMLOG_BUILD_DIR) {
-        if ($env:LOCALAPPDATA) { $env:GYMLOG_BUILD_DIR = Join-Path $env:LOCALAPPDATA 'GymLog/build/app' }
-        else { $env:GYMLOG_BUILD_DIR = Join-Path $script:RepoRoot '.tools/b' }
+        $env:GYMLOG_BUILD_DIR = Join-Path $script:RepoRoot '.tools/b'
     }
 }
 
@@ -89,6 +88,7 @@ function Find-Adb {
 }
 
 . (Join-Path $PSScriptRoot 'adb_devices.ps1')
+. (Join-Path $PSScriptRoot 'debug_build.ps1')
 
 function Assert-WifiAddress([string]$Address) {
     if ($Address -notmatch '^(?:[A-Za-z0-9][A-Za-z0-9.-]*|\[[0-9A-Fa-f:]+\]):([0-9]{1,5})$') { throw 'Use the IP:port shown in Android Wireless debugging.' }
@@ -112,17 +112,38 @@ function Connect-AndroidWifi([string]$Adb, [string]$PairAddress, [string]$Connec
     }
 }
 
-function Copy-DebugApk {
-    $source = Join-Path $env:GYMLOG_BUILD_DIR 'outputs/apk/debug/app-debug.apk'
+function Request-AndroidWifiConnection([string]$Adb) {
+    Write-Host '[WIFI] Connect the PC and phone to the same Wi-Fi network, then enable Developer options > Wireless debugging on the phone.' -ForegroundColor Yellow
+    Write-Host '[WIFI] For a new pairing, open Pair device with pairing code and keep that screen open. Already paired? Leave the first address blank.' -ForegroundColor Yellow
+    $pair = (Read-Host 'Pairing IP:port (blank if already paired)').Trim()
+    if ($pair) { Connect-AndroidWifi $Adb $pair '' }
+    Write-Host '[WIFI] Return to the main Wireless debugging screen. Its IP address & port is the connection address; the pairing port is different.' -ForegroundColor Yellow
+    $connect = (Read-Host 'Connection IP:port (blank to cancel)').Trim()
+    if (-not $connect) { throw 'Wi-Fi connection cancelled. No build or installation was started.' }
+    Connect-AndroidWifi $Adb '' $connect
+}
+
+function Write-ApkChecksum([string]$Apk) {
+    $directory = Join-Path $script:RepoRoot 'artifacts/checksums'
+    New-Item -ItemType Directory -Path $directory -Force | Out-Null
+    $name = [IO.Path]::GetFileName($Apk)
+    $hash = (Get-FileHash -LiteralPath $Apk -Algorithm SHA256).Hash.ToLowerInvariant()
+    [IO.File]::WriteAllText((Join-Path $directory "$name.sha256"), "$hash  ../../$name`n")
+    if (Test-Path -LiteralPath "$Apk.sha256" -PathType Leaf) { Remove-Item -LiteralPath "$Apk.sha256" -Force }
+}
+
+function Copy-AndroidApk([ValidateSet('debug','release')][string]$Variant) {
+    $source = Join-Path $env:GYMLOG_BUILD_DIR "outputs/apk/$Variant/app-$Variant.apk"
     if (-not (Test-Path -LiteralPath $source)) { throw "APK missing: $source" }
-    $directory = Join-Path $script:AppRoot 'artifacts/debug'
-    New-Item -ItemType Directory -Force -Path $directory | Out-Null
-    $destination = Join-Path $directory 'app-debug.apk'
+    $name = "GymLog-$Variant.apk"
+    $destination = Join-Path $script:RepoRoot $name
     Copy-Item -LiteralPath $source -Destination $destination -Force
-    $hash = (Get-FileHash -LiteralPath $destination -Algorithm SHA256).Hash.ToLowerInvariant()
-    [IO.File]::WriteAllText((Join-Path $directory 'SHA256SUMS.txt'), "$hash  app-debug.apk`n")
+    Write-ApkChecksum $destination
     Write-Host "APK: $destination"
 }
+
+function Copy-DebugApk { Copy-AndroidApk 'debug' }
+function Copy-ReleaseApk { Copy-AndroidApk 'release' }
 
 function Build-SignedRelease {
     foreach ($name in @('GYMLOG_KEYSTORE_FILE','GYMLOG_KEYSTORE_PASSWORD','GYMLOG_KEY_ALIAS','GYMLOG_KEY_PASSWORD')) {
@@ -154,5 +175,6 @@ function Build-SignedRelease {
         "$((Get-FileHash -LiteralPath (Join-Path $directory $name) -Algorithm SHA256).Hash.ToLowerInvariant())  $name"
     }
     [IO.File]::WriteAllText((Join-Path $directory 'SHA256SUMS.txt'), ($checksums -join "`n") + "`n")
+    Copy-ReleaseApk
     Write-Host "Verified release assets and checksums: $directory"
 }

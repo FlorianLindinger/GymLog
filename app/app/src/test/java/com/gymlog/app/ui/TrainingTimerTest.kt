@@ -21,10 +21,30 @@ class TrainingTimerTest {
 
     @Test
     fun stopsExactlyAtIdleEvenBetweenMinuteBoundaries() {
-        assertEquals(15_000L, nextTrainingTimerDelay(600_000, 15_000, 0))
-        assertNull(nextTrainingTimerDelay(615_000, 15_000, 0))
-        assertNull(nextTrainingTimerDelay(700_000, 15_000, 0))
+        assertEquals(15_000L, nextTrainingTimerDelay(1_800_000, 15_000, 0))
+        assertNull(nextTrainingTimerDelay(1_815_000, 15_000, 0))
+        assertNull(nextTrainingTimerDelay(1_900_000, 15_000, 0))
         assertNull(nextTrainingTimerDelay(0, null, null))
+    }
+
+    @Test
+    fun shortSessionsStayLiveUntilThirtyMinuteBreakEvenIfLiveClockPassesOneHour() {
+        val last = 50L * 60_000L
+        assertEquals(true, trainingTimerActive(last + 29L * 60_000L, last, 0))
+        assertEquals(false, trainingTimerActive(last + 30L * 60_000L, last, 0))
+        assertEquals(1L, nextTrainingTimerDelay(last + 30L * 60_000L - 1, last, 0))
+        assertNull(nextTrainingTimerDelay(last + 30L * 60_000L, last, 0))
+    }
+
+    @Test
+    fun oneHourBoundaryKeepsTenMinuteTimeoutAndNewEntryResumesClock() {
+        val hour = 60L * 60_000L
+        assertEquals(hour - 1 + 30L * 60_000L, trainingIdleDeadline(hour - 1, 0))
+        assertEquals(hour + 10L * 60_000L, trainingIdleDeadline(hour, 0))
+        assertEquals(true, trainingTimerActive(hour + 10L * 60_000L - 1, hour, 0))
+        assertEquals(false, trainingTimerActive(hour + 10L * 60_000L, hour, 0))
+        assertEquals(true, trainingTimerActive(hour + 11L * 60_000L, hour + 11L * 60_000L, 0))
+        assertEquals(false, trainingTimerActive(hour, null, null))
     }
 
     @Test

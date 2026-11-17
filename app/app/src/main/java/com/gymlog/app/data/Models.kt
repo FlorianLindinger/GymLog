@@ -62,6 +62,7 @@ data class AreaAssignment(
     val area: BodyArea,
     val strength: Strength,
     val displayColor: Long = area.color,
+    val intensity: Double = strength.value,
 )
 
 data class SetRecord(
@@ -76,9 +77,9 @@ data class WeightChange(val weight: Double, val changedAt: Long)
 
 data class ProgressionSettings(
     val staleWeeks: Int = 4,
-    val volumeWindowTrainings: Int = 5,
+    val volumeWindowDays: Int = 60,
     val volumeMinimumIncreasePercent: Int = 5,
-    val useOneRepMax: Boolean = true,
+    val useOneRepMax: Boolean = true, // Legacy preference name; selects the all-set strength score.
 )
 
 data class BackupSyncStatus(

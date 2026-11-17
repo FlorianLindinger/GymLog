@@ -33,6 +33,7 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import kotlin.math.roundToInt
@@ -51,7 +52,17 @@ internal data class TimeSeries(
     val showPoints: Boolean = true,
 )
 
-internal data class TimeBand(val center: Double, val tolerance: Double, val color: Color, val dashed: Boolean = false)
+internal data class TimeBand(
+    val center: Double, val tolerance: Double, val color: Color, val dashed: Boolean = false,
+    val showLower: Boolean = true, val showUpper: Boolean = true, val showBoundaries: Boolean = false,
+    val showCenter: Boolean = true,
+) {
+    fun visibleValues(): List<Double> = buildList {
+        if (showLower) add(center - tolerance)
+        if (showCenter) add(center)
+        if (showUpper) add(center + tolerance)
+    }
+}
 
 internal data class ChartWindow(
     val durationMillis: Long?,
@@ -76,15 +87,24 @@ internal fun calculateVisibleTimeRange(dataStart: Long, dataEnd: Long, window: C
     return VisibleTimeRange(end - window.durationMillis.coerceAtLeast(1L), end)
 }
 
-private fun pointsInWindow(points: List<TimeValue>, range: VisibleTimeRange): List<TimeValue> {
+/** Clip line segments at both edges, including a segment whose two recorded points are outside. */
+internal fun pointsInWindow(points: List<TimeValue>, range: VisibleTimeRange): List<TimeValue> {
     val visible = points.filter { it.timestamp in range.start..range.end }
-    val firstVisible = visible.firstOrNull() ?: return visible
-    if (firstVisible.timestamp == range.start) return visible
-    val previous = points.lastOrNull { it.timestamp < range.start } ?: return visible
-    val elapsed = (firstVisible.timestamp - previous.timestamp).coerceAtLeast(1L)
-    val fraction = (range.start - previous.timestamp).toDouble() / elapsed
-    val boundaryValue = previous.value + (firstVisible.value - previous.value) * fraction
-    return listOf(TimeValue(range.start, boundaryValue)) + visible
+    val previous = points.lastOrNull { it.timestamp < range.start }
+    val next = points.firstOrNull { it.timestamp > range.end }
+    fun boundary(time: Long, before: TimeValue, after: TimeValue): TimeValue {
+        val fraction = (time - before.timestamp).toDouble() / (after.timestamp - before.timestamp)
+        return TimeValue(time, before.value + (after.value - before.value) * fraction)
+    }
+    return buildList {
+        val first = visible.firstOrNull() ?: next
+        if (previous != null && first != null && first.timestamp > range.start)
+            add(boundary(range.start, previous, first))
+        addAll(visible)
+        val last = visible.lastOrNull() ?: previous
+        if (next != null && last != null && last.timestamp < range.end)
+            add(boundary(range.end, last, next))
+    }
 }
 
 internal fun trendTimeSeries(
@@ -152,6 +172,7 @@ internal fun ChartRangeControls(
     modifier: Modifier = Modifier,
     trendLabel: String = "Trend",
     showTrendControl: Boolean = true,
+    rangeLabel: (ChartRange) -> String = { it.storageValue },
 ) {
     val rows = listOf(
         listOf(ChartRange.ONE_WEEK, ChartRange.TWO_WEEKS, ChartRange.THREE_WEEKS, ChartRange.ONE_MONTH, ChartRange.TWO_MONTHS, ChartRange.THREE_MONTHS, ChartRange.FOUR_MONTHS),
@@ -171,7 +192,7 @@ internal fun ChartRangeControls(
                         ChartRange.ALL -> "All"
                         ChartRange.CUSTOM -> "Custom"
                         null -> trendLabel
-                        else -> range.storageValue
+                        else -> rangeLabel(range)
                     }
                     if (range == null && !showTrendControl) Spacer(Modifier.weight(1f)) else Text(
                         text = label,
@@ -286,7 +307,7 @@ internal fun TimeWindowChart(
     fun visibleValues(axis: PlotAxis) = visibleSeries.filter { it.axis == axis }
         .flatMap { it.points }
         .map(TimeValue::value)
-    val bandValues = remember(bands) { bands.flatMap { listOf(it.center - it.tolerance, it.center, it.center + it.tolerance) } }
+    val bandValues = remember(bands) { bands.flatMap { it.visibleValues() } }
     val leftRange = remember(visibleSeries, bandValues, compactYAxis, yMin, yMax) { chartAxisRange(visibleValues(PlotAxis.LEFT) + bandValues, compactYAxis, yMin, yMax) }
     val rightRange = remember(visibleSeries, sortedSeries, matchWeightSteps) {
         val values = visibleValues(PlotAxis.RIGHT)
@@ -303,13 +324,22 @@ internal fun TimeWindowChart(
     val xAxisColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.95f)
     val leftAxisColor = leftColor.copy(alpha = 0.95f)
     val rightAxisColor = (rightColor ?: xAxisColor).copy(alpha = 0.95f)
+    val textMeasurer = rememberTextMeasurer()
+    val density = LocalDensity.current
+    val axisLabelStyle = MaterialTheme.typography.labelSmall
+    val compactLabelWidth = remember(leftRange, textMeasurer, density, axisLabelStyle) {
+        with(density) {
+            leftRange.ticks.maxOf { textMeasurer.measure(formatChartAxisValue(it), axisLabelStyle,
+                softWrap = false, maxLines = 1).size.width }.toDp() + 2.dp
+        }
+    }
 
     BoxWithConstraints(modifier.fillMaxWidth()) {
-        val labelWidth = 34.dp
-        val labelGap = 3.dp
-        val tickWidth = 6.dp
-        val rightLabelWidth = if (hasRightAxis) 34.dp else 0.dp
-        val rightLabelGap = if (hasRightAxis) labelGap else 0.dp
+        val labelWidth = if (compactYAxis) compactLabelWidth else 34.dp
+        val labelGap = if (compactYAxis) 1.dp else 3.dp
+        val tickWidth = if (compactYAxis) 4.dp else 6.dp
+        val rightLabelWidth = if (hasRightAxis) 34.dp else if (mirrorLeftTicksOnRight) labelWidth else 0.dp
+        val rightLabelGap = if (hasRightAxis || mirrorLeftTicksOnRight) labelGap else 0.dp
         val rightTickWidth = if (hasRightAxis || mirrorLeftTicksOnRight) tickWidth else 0.dp
         val plotWidth = (
             maxWidth - labelWidth - labelGap - tickWidth - rightTickWidth - rightLabelGap - rightLabelWidth
@@ -352,20 +382,30 @@ internal fun TimeWindowChart(
                             ((value - range.min) / range.span).toFloat() * (size.height - CHART_INSET * 2f)
                         clipRect(top = CHART_INSET, bottom = size.height - CHART_INSET) {
                             bands.forEach { band ->
-                                val top = y(band.center + band.tolerance, leftRange)
-                                val bottom = y(band.center - band.tolerance, leftRange)
-                                if (band.tolerance > 0.0) drawRect(
+                                val top = y(band.center + if (band.showUpper) band.tolerance else 0.0, leftRange)
+                                val bottom = y(band.center - if (band.showLower) band.tolerance else 0.0, leftRange)
+                                if (band.tolerance > 0.0 && (band.showLower || band.showUpper)) drawRect(
                                     band.color.copy(alpha = 0.16f),
                                     Offset(0f, top),
                                     Size(size.width, (bottom - top).coerceAtLeast(1f)),
                                 )
-                                drawLine(
+                                if (band.showCenter) drawLine(
                                     band.color,
                                     Offset(0f, y(band.center, leftRange)),
                                     Offset(size.width, y(band.center, leftRange)),
                                     strokeWidth = 3.2f,
                                     pathEffect = if (band.dashed) dashEffect else null,
                                 )
+                                if (band.showBoundaries && (band.tolerance > 0.0 || !band.showCenter)) {
+                                    val limits = buildList {
+                                        if (band.showLower) add(band.center - band.tolerance)
+                                        if (band.showUpper) add(band.center + band.tolerance)
+                                    }
+                                    limits.forEach { limit ->
+                                        drawLine(band.color, Offset(0f, y(limit, leftRange)), Offset(size.width, y(limit, leftRange)),
+                                            strokeWidth = 2f, pathEffect = dashEffect)
+                                    }
+                                }
                             }
                             visibleSeries.forEachIndexed { index, item ->
                                 val axisRange = when (item.axis) {
@@ -411,9 +451,10 @@ internal fun TimeWindowChart(
                         }
                     }
                 }
-                if (hasRightAxis) {
+                if (hasRightAxis || mirrorLeftTicksOnRight) {
                     Box(Modifier.width(rightLabelGap))
-                    ChartAxisLabels(rightRange, rightColor!!, rightLabelWidth, height, false)
+                    ChartAxisLabels(if (hasRightAxis) rightRange else leftRange,
+                        if (hasRightAxis) rightColor!! else leftColor, rightLabelWidth, height, false)
                 }
             }
             Row {

@@ -9,6 +9,8 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.selection.toggleable
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.window.DialogProperties
 import androidx.compose.material3.CircularProgressIndicator
@@ -55,16 +57,23 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.Dp
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 
+internal enum class BodyVisibility { FOLLOW_GLOBAL, SHOW, HIDE }
+
 internal data class BodyChartSettings(
+    val visibility: Map<String, BodyVisibility> = emptyMap(),
+    val showGoal: Boolean = true,
     val target: Double? = null,
     val acceptance: Double? = null,
     val targetEnabled: Boolean = false,
+    val showTargetLower: Boolean = true,
+    val showTargetUpper: Boolean = true,
     val showFit: Boolean = true,
     val averaging: Boolean = false,
     val bins: Int = 20,
@@ -100,10 +109,38 @@ internal data class BodyChartSettings(
     val globalHighLow: Boolean = true,
 )
 
+internal val bodyVisibilityKeys = listOf("showFit", "showRawData", "periodAveraging", "averaging", "showIntervalCount", "showTotalCount", "showMean", "showRange", "showAllTimeHigh", "showAllTimeLow", "showAllTimeMean", "showHistoryHigh", "showHistoryLow", "showHistoryMean", "showGoal", "showTargetLower", "showTargetUpper")
+
+internal fun bodyVisibilityChoice(settings: BodyChartSettings, key: String, follows: Boolean, localValue: Boolean): BodyVisibility =
+    settings.visibility[key] ?: if (follows) BodyVisibility.FOLLOW_GLOBAL else if (localValue) BodyVisibility.SHOW else BodyVisibility.HIDE
+
+private fun bodyVisible(local: BodyChartSettings, key: String, follows: Boolean, localValue: Boolean, globalValue: Boolean): Boolean =
+    when (bodyVisibilityChoice(local, key, follows, localValue)) {
+        BodyVisibility.FOLLOW_GLOBAL -> globalValue
+        BodyVisibility.SHOW -> true
+        BodyVisibility.HIDE -> false
+    }
+
+private fun bodyTargetVisible(local: BodyChartSettings, global: BodyChartSettings, key: String, localValue: Boolean, globalValue: Boolean): Boolean {
+    // Retain legacy flags when there are no individual overrides. Once a target option
+    // is overridden, Follow global also respects the global target enable switch.
+    val individual = listOf("showGoal", "showTargetLower", "showTargetUpper").any { it in local.visibility }
+    return bodyVisible(local, key, local.globalTarget,
+        localValue && (!individual || local.targetEnabled), globalValue && (!individual || global.targetEnabled))
+}
+
 private fun readBodySettings(prefs: android.content.SharedPreferences, prefix: String): BodyChartSettings = BodyChartSettings(
+    visibility = bodyVisibilityKeys.mapNotNull { key ->
+        prefs.getString("${prefix}visibility_$key", null)?.let { saved ->
+            runCatching { BodyVisibility.valueOf(saved) }.getOrNull()?.let { key to it }
+        }
+    }.toMap(),
+    showGoal = prefs.getBoolean("${prefix}show_goal", true),
     target = prefs.getString("${prefix}target", null)?.toDoubleOrNull(),
     acceptance = prefs.getString("${prefix}acceptance", null)?.toDoubleOrNull(),
     targetEnabled = prefs.getBoolean("${prefix}target_enabled", prefs.contains("${prefix}target")),
+    showTargetLower = prefs.getBoolean("${prefix}target_lower", true),
+    showTargetUpper = prefs.getBoolean("${prefix}target_upper", true),
     showFit = prefs.getBoolean("${prefix}fit", true),
     averaging = prefs.getBoolean("${prefix}averaging", false),
     bins = prefs.getInt("${prefix}bins", 20).coerceIn(1, 1000),
@@ -144,9 +181,14 @@ private fun readBodySettings(prefs: android.content.SharedPreferences, prefix: S
 )
 
 private fun saveBodySettings(prefs: android.content.SharedPreferences, prefix: String, value: BodyChartSettings) {
+    val visibilityEditor = prefs.edit()
+    bodyVisibilityKeys.forEach { key -> visibilityEditor.putString("${prefix}visibility_$key", value.visibility[key]?.name) }
+    visibilityEditor.putBoolean("${prefix}show_goal", value.showGoal).apply()
     prefs.edit().putString("${prefix}target", value.target?.toString())
         .putString("${prefix}acceptance", value.acceptance?.toString())
         .putBoolean("${prefix}target_enabled", value.targetEnabled)
+        .putBoolean("${prefix}target_lower", value.showTargetLower)
+        .putBoolean("${prefix}target_upper", value.showTargetUpper)
         .putString("${prefix}y_min", value.yMin?.toString()).putString("${prefix}y_max", value.yMax?.toString())
         .putBoolean("${prefix}fit", value.showFit).putBoolean("${prefix}averaging", value.averaging)
         .putInt("${prefix}bins", value.bins).putString("${prefix}interval", value.interval.storageValue)
@@ -170,25 +212,29 @@ private fun saveBodySettings(prefs: android.content.SharedPreferences, prefix: S
 }
 
 internal fun resolveBodySettings(local: BodyChartSettings, global: BodyChartSettings): BodyChartSettings = local.copy(
-    showFit = if (local.globalFit) global.showFit else local.showFit,
-    averaging = if (local.globalAveraging) global.averaging else local.averaging,
+    showFit = bodyVisible(local, "showFit", local.globalFit, local.showFit, global.showFit),
+    averaging = bodyVisible(local, "averaging", local.globalAveraging, local.averaging, global.averaging),
     bins = if (local.globalAveraging) global.bins else local.bins,
-    showRawData = if (local.globalAveraging) global.showRawData else local.showRawData,
-    periodAveraging = if (local.globalAveraging) global.periodAveraging else local.periodAveraging,
+    showRawData = bodyVisible(local, "showRawData", local.globalAveraging, local.showRawData, global.showRawData),
+    periodAveraging = bodyVisible(local, "periodAveraging", local.globalAveraging, local.periodAveraging, global.periodAveraging),
     averagePeriodDays = if (local.globalAveraging) global.averagePeriodDays else local.averagePeriodDays,
     averageFractionPercent = if (local.globalAveraging) global.averageFractionPercent else local.averageFractionPercent,
     historyPercentile = if (local.globalHighLow) global.historyPercentile else local.historyPercentile,
-    targetEnabled = if (local.globalTarget) global.targetEnabled else local.targetEnabled,
-    showIntervalCount = if (local.globalSummary) global.showIntervalCount else local.showIntervalCount,
-    showTotalCount = if (local.globalSummary) global.showTotalCount else local.showTotalCount,
-    showMean = if (local.globalSummary) global.showMean else local.showMean,
-    showRange = if (local.globalSummary) global.showRange else local.showRange,
-    showAllTimeHigh = if (local.globalHighLow) global.showAllTimeHigh else local.showAllTimeHigh,
-    showAllTimeLow = if (local.globalHighLow) global.showAllTimeLow else local.showAllTimeLow,
-    showAllTimeMean = if (local.globalHighLow) global.showAllTimeMean else local.showAllTimeMean,
-    showHistoryHigh = if (local.globalHighLow) global.showHistoryHigh else local.showHistoryHigh,
-    showHistoryLow = if (local.globalHighLow) global.showHistoryLow else local.showHistoryLow,
-    showHistoryMean = if (local.globalHighLow) global.showHistoryMean else local.showHistoryMean,
+    showGoal = bodyTargetVisible(local, global, "showGoal", local.showGoal, global.showGoal),
+    targetEnabled = (if (local.globalTarget) global.targetEnabled else local.targetEnabled) ||
+        listOf("showGoal", "showTargetLower", "showTargetUpper").any { local.visibility[it] == BodyVisibility.SHOW },
+    showTargetLower = bodyTargetVisible(local, global, "showTargetLower", local.showTargetLower, global.showTargetLower),
+    showTargetUpper = bodyTargetVisible(local, global, "showTargetUpper", local.showTargetUpper, global.showTargetUpper),
+    showIntervalCount = bodyVisible(local, "showIntervalCount", local.globalSummary, local.showIntervalCount, global.showIntervalCount),
+    showTotalCount = bodyVisible(local, "showTotalCount", local.globalSummary, local.showTotalCount, global.showTotalCount),
+    showMean = bodyVisible(local, "showMean", local.globalSummary, local.showMean, global.showMean),
+    showRange = bodyVisible(local, "showRange", local.globalSummary, local.showRange, global.showRange),
+    showAllTimeHigh = bodyVisible(local, "showAllTimeHigh", local.globalHighLow, local.showAllTimeHigh, global.showAllTimeHigh),
+    showAllTimeLow = bodyVisible(local, "showAllTimeLow", local.globalHighLow, local.showAllTimeLow, global.showAllTimeLow),
+    showAllTimeMean = bodyVisible(local, "showAllTimeMean", local.globalHighLow, local.showAllTimeMean, global.showAllTimeMean),
+    showHistoryHigh = bodyVisible(local, "showHistoryHigh", local.globalHighLow, local.showHistoryHigh, global.showHistoryHigh),
+    showHistoryLow = bodyVisible(local, "showHistoryLow", local.globalHighLow, local.showHistoryLow, global.showHistoryLow),
+    showHistoryMean = bodyVisible(local, "showHistoryMean", local.globalHighLow, local.showHistoryMean, global.showHistoryMean),
     highLowFollowPlot = if (local.globalHighLow) global.highLowFollowPlot else local.highLowFollowPlot,
     highLowRange = if (local.globalHighLow) global.highLowRange else local.highLowRange,
     highLowStart = if (local.globalHighLow) global.highLowStart else local.highLowStart,
@@ -205,6 +251,7 @@ private data class BodyFit(
 @Composable
 fun BodyOverviewScreen(
     snapshot: BodyDataSnapshot,
+    onAddWeight: () -> Unit,
     syncStatus: String,
     isSyncing: Boolean,
     modifier: Modifier = Modifier,
@@ -286,7 +333,7 @@ fun BodyOverviewScreen(
                 ChartRangeControls(
                     selectedWindow = window,
                     showTrend = showTrend,
-                    showTrendControl = false,
+                    showTrendControl = false, rangeLabel = ::bodyRangeLabel,
                     onWindowSelected = { preset ->
                         window = preset
                         preferences.edit().putString("window", preset.storageValue).apply()
@@ -320,8 +367,9 @@ fun BodyOverviewScreen(
             Modifier.align(Alignment.BottomCenter).fillMaxWidth().background(MaterialTheme.colorScheme.surface).padding(8.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            FilledTonalButton(onClick = onGym, modifier = Modifier.weight(1f)) { Text("Gym") }
-            FilledTonalButton(onClick = { showGlobalSettings = true }, modifier = Modifier.weight(1f)) { Text("Settings") }
+            FilledTonalButton(onClick = onGym, modifier = Modifier.weight(1f), contentPadding = PaddingValues(horizontal = 8.dp)) { Text("Gym", maxLines = 1, softWrap = false) }
+            FilledTonalButton(onClick = onAddWeight, modifier = Modifier.weight(1.4f), contentPadding = PaddingValues(horizontal = 8.dp)) { Text("Add weight", maxLines = 1, softWrap = false) }
+            FilledTonalButton(onClick = { showGlobalSettings = true }, modifier = Modifier.weight(1f), contentPadding = PaddingValues(horizontal = 8.dp)) { Text("Settings", maxLines = 1, softWrap = false) }
         }
     }
     if (showGlobalSettings) BodyChartSettingsDialog(
@@ -461,10 +509,10 @@ private fun BodyMetricCard(
             }
             if (summary.isNotEmpty()) Text(summary,
                 style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            if (effective.targetEnabled && effective.target != null) {
+            if (effective.targetEnabled && effective.showGoal && effective.target != null) {
                 Text(
-                    "Target: ${formatBodyValue(effective.target)} ${metric.unit}" +
-                        (effective.acceptance?.let { " ± ${formatBodyValue(it)}" } ?: "") +
+                    "Target: ${formatBodyValue(effective.target)}" +
+                        (effective.acceptance?.let { "±${formatBodyValue(it)}" } ?: "") + " ${metric.unit}" +
                         (targetEta?.let { " · Est. ${formatBodyEta(it)}" } ?: ""),
                     color = targetColor,
                     style = MaterialTheme.typography.bodySmall,
@@ -490,7 +538,27 @@ private fun BodyMetricCard(
             )
         }
     }
-    if (editing) BodyChartSettingsDialog(metric, settings, { editing = false }) {
+    if (editing) BodyChartSettingsDialog(metric, settings, { editing = false }, inherited = globalSettings,
+        preview = { draft ->
+            val resolved = resolveBodySettings(draft, globalSettings)
+            val previewWindow = if (draft.globalInterval) window else ChartWindow(
+                chartWindowDuration(draft.interval),
+                if (draft.interval == ChartRange.CUSTOM) draft.customEnd else System.currentTimeMillis(),
+                if (draft.interval == ChartRange.CUSTOM) draft.customStart else null,
+                "preview:${draft.interval}:${draft.customStart}:${draft.customEnd}")
+            val previewRange = if (raw.isEmpty()) null else calculateVisibleTimeRange(raw.first().timestamp, raw.last().timestamp, previewWindow)
+            val previewValues = sorted.filter { previewRange != null && it.measuredAt in previewRange.start..previewRange.end }
+            val previewFit = bodyLinearFit(previewValues)
+            val previewFitPoints = if (resolved.showFit && previewValues.size >= 2 && previewRange != null)
+                listOf(previewRange.start, previewRange.end).map { time -> TimeValue(time,
+                    previewFit.fittedLast + previewFit.slopePerDay * (time - previewValues.last().measuredAt) / DAY_MILLIS.toDouble()) }
+                else emptyList()
+            val references = bodyHighLowReferences(raw, resolved, previewWindow.endMillis ?: System.currentTimeMillis(), previewRange,
+                bodyHistoryLabel(if (draft.globalInterval) globalRange else draft.interval))
+            BodyGraph(sorted, previewFitPoints, resolved, primary, fitColor, targetColor, previewWindow,
+                references.flatMap { reference -> reference.visibleLines.map { line -> TimeBand(line.value, 0.0,
+                    if (reference.allTime) allTimeColor else historyColor, dashed = line.dashed) } }, height = 320.dp)
+        }) {
         onSettings(it)
         editing = false
     }
@@ -506,28 +574,29 @@ private fun BodyGraph(
     targetColor: Color,
     window: ChartWindow,
     highLowBands: List<TimeBand>,
+    height: Dp = 132.dp,
 ) {
     if (values.isEmpty()) {
-        Box(Modifier.fillMaxWidth().height(110.dp), contentAlignment = Alignment.Center) {
+        Box(Modifier.fillMaxWidth().height(height), contentAlignment = Alignment.Center) {
             Text("No measurements yet.", color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         return
     }
     val raw = remember(values) { values.map { TimeValue(it.measuredAt, it.value) } }
     val range = calculateVisibleTimeRange(raw.first().timestamp, raw.last().timestamp, window)
-    if (raw.none { it.timestamp in range.start..range.end }) {
-        Box(Modifier.fillMaxWidth().height(132.dp), contentAlignment = Alignment.Center) {
+    if (pointsInWindow(raw, range).isEmpty()) {
+        Box(Modifier.fillMaxWidth().height(height), contentAlignment = Alignment.Center) {
             Text("No measurements in this interval.", color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         return
     }
     val periodAverage = remember(raw, range, settings.periodAveraging, settings.averagePeriodDays) {
-        if (settings.periodAveraging) bodyMovingAverage(raw, range, (settings.averagePeriodDays * DAY_MILLIS).toLong()) else emptyList()
+        if (settings.periodAveraging) bodyMovingAverage(raw, range, (settings.averagePeriodDays * DAY_MILLIS).toLong(), includeBoundaryNeighbors = true) else emptyList()
     }
     val fractionAverage = remember(raw, range, settings.averaging, settings.averageFractionPercent) {
-        if (settings.averaging) bodyMovingAverage(raw, range, (range.duration * settings.averageFractionPercent / 100).toLong()) else emptyList()
+        if (settings.averaging) bodyMovingAverage(raw, range, (range.duration * settings.averageFractionPercent / 100).toLong(), includeBoundaryNeighbors = true) else emptyList()
     }
-    val periodColor = Color(0xFF26C6DA)
+    val periodColor = Color(0xFFF5F5F5)
     val fractionColor = Color(0xFFF48FB1)
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         if (settings.showRawData) Text("Raw data", Modifier.weight(1f), color = dataColor, style = MaterialTheme.typography.labelSmall)
@@ -546,18 +615,17 @@ private fun BodyGraph(
             }
         }
     }
-    if (series.isEmpty() && highLowBands.isEmpty() && !(settings.targetEnabled && settings.target != null)) {
-        Box(Modifier.fillMaxWidth().height(110.dp), contentAlignment = Alignment.Center) {
+    if (series.isEmpty() && highLowBands.isEmpty() && bodyTargetBand(settings, targetColor) == null) {
+        Box(Modifier.fillMaxWidth().height(height), contentAlignment = Alignment.Center) {
             Text("Data series are hidden. Tap the plot to show raw data or a moving average.", style = MaterialTheme.typography.bodySmall)
         }
         return
     }
     TimeWindowChart(
         series = series,
+        height = height,
         window = window.copy(startMillis = range.start, endMillis = range.end),
-        bands = settings.target?.takeIf { settings.targetEnabled }?.let { target ->
-            listOf(TimeBand(target, settings.acceptance ?: 0.0, targetColor))
-        }.orEmpty() + highLowBands,
+        bands = listOfNotNull(bodyTargetBand(settings, targetColor)) + highLowBands,
         compactYAxis = true,
         yMin = settings.yMin,
         yMax = settings.yMax,
@@ -565,6 +633,12 @@ private fun BodyGraph(
         mirrorLeftTicksOnRight = true,
     )
 }
+
+internal fun bodyTargetBand(settings: BodyChartSettings, color: Color): TimeBand? =
+    settings.target?.takeIf { settings.targetEnabled && (settings.showGoal || settings.showTargetLower || settings.showTargetUpper) }?.let { target ->
+        TimeBand(target, settings.acceptance ?: 0.0, color,
+            showLower = settings.showTargetLower, showUpper = settings.showTargetUpper, showBoundaries = true, showCenter = settings.showGoal)
+    }
 
 @Composable
 internal fun CustomBodyRangeDialog(
@@ -672,6 +746,26 @@ private fun BodySettingsSection(
 }
 
 @Composable
+private fun BodyVisibilityControl(label: String, key: String, value: Boolean, follows: Boolean,
+    global: Boolean, settings: BodyChartSettings, onChange: (BodyChartSettings) -> Unit, onBoolean: (Boolean) -> Unit) {
+    if (global) SettingCheck(label, value, onBoolean) else {
+        Column(Modifier.testTag("visibility_$key"), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text(label, style = MaterialTheme.typography.bodySmall)
+            val selected = bodyVisibilityChoice(settings, key, follows, value)
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                BodyVisibility.entries.forEach { choice ->
+                    val title = when (choice) { BodyVisibility.FOLLOW_GLOBAL -> "Follow global"; BodyVisibility.SHOW -> "Force show"; BodyVisibility.HIDE -> "Force hide" }
+                    Text(title, Modifier.weight(1f).background(if (selected == choice) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(7.dp))
+                        .selectable(selected = selected == choice, role = Role.RadioButton, onClick = { onChange(settings.copy(visibility = settings.visibility + (key to choice))) }).padding(vertical = 8.dp),
+                        textAlign = TextAlign.Center, style = MaterialTheme.typography.labelSmall,
+                        color = if (selected == choice) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+        }
+    }
+}
+
+@Composable
 private fun BodySettingsHint(text: String) {
     Text(text, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
 }
@@ -716,6 +810,8 @@ private fun BodyChartSettingsDialog(
     onDismiss: () -> Unit,
     header: (@Composable () -> Unit)? = null,
     plotControls: (@Composable () -> Unit)? = null,
+    inherited: BodyChartSettings = BodyChartSettings(),
+    preview: (@Composable (BodyChartSettings) -> Unit)? = null,
     onSave: (BodyChartSettings) -> Unit,
 ) {
     var draft by remember { mutableStateOf(current) }
@@ -727,20 +823,22 @@ private fun BodyChartSettingsDialog(
     var yMin by remember { mutableStateOf(current.yMin?.let(::formatChartAxisValue).orEmpty()) }
     var yMax by remember { mutableStateOf(current.yMax?.let(::formatChartAxisValue).orEmpty()) }
     val global = metric == null
+    val effectiveDraft = if (global) draft else resolveBodySettings(draft, inherited)
     fun number(text: String) = text.replace(',', '.').toDoubleOrNull()?.takeIf { it.isFinite() }
     val validPeriod = number(periodDays)?.takeIf { it > 0 && it <= 36500 }
     val validFraction = number(fractionPercent)?.takeIf { it > 0 && it <= 100 }
     val validHistoryPercent = number(historyPercent)?.takeIf { it in 0.0..50.0 }
-    val averagesValid = !(global || !draft.globalAveraging) ||
-        ((!draft.periodAveraging || validPeriod != null) && (!draft.averaging || validFraction != null))
-    val historyPercentValid = !(global || !draft.globalHighLow) ||
-        !(draft.showHistoryHigh || draft.showHistoryLow) || validHistoryPercent != null
+    val averagesValid = (!effectiveDraft.periodAveraging || validPeriod != null) && (!effectiveDraft.averaging || validFraction != null)
+    val historyPercentValid = !(effectiveDraft.showHistoryHigh || effectiveDraft.showHistoryLow) || validHistoryPercent != null
     val targetsValid = global || draft.globalTarget || !draft.targetEnabled || draft.target != null
     fun axisValue(text: String) = text.replace(',', '.').toDoubleOrNull()?.takeIf { it.isFinite() && it >= 0 }
     val minimum = axisValue(yMin)
     val maximum = axisValue(yMax)
     val boundsValid = (yMin.isBlank() || minimum != null) && (yMax.isBlank() || maximum != null && maximum > 0) &&
         (minimum == null || maximum == null || minimum < maximum)
+    @Composable fun visibility(label: String, key: String, value: Boolean, follows: Boolean, change: (Boolean) -> Unit) {
+        BodyVisibilityControl(label, key, value, follows, global, draft, { draft = it }, change)
+    }
     fun source(followsGlobal: Boolean) = if (global) "Default" else if (followsGlobal) "Global" else "Custom"
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -749,18 +847,20 @@ private fun BodyChartSettingsDialog(
         title = {
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Text(metric?.let { "${it.label} settings" } ?: "Global plot settings")
-                BodySettingsHint(if (global) "Defaults for plots that follow global settings" else "Choose global defaults or customize each section")
+                BodySettingsHint(if (global) "Defaults for plots that follow global settings" else "Follow global defaults or force individual items shown or hidden")
             }
         },
         text = {
             Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                preview?.invoke(draft.copy(averagePeriodDays = validPeriod ?: current.averagePeriodDays, averageFractionPercent = validFraction ?: current.averageFractionPercent, yMin = minimum, yMax = maximum))
+                if (preview != null) BodySettingsHint("Scroll for plot settings. Changes preview above; Save applies them.")
                 if (header != null) BodySettingsSection("Health Connect") { header() }
                 if (plotControls != null) BodySettingsSection("Plots") { plotControls() }
                 BodySettingsSection("Time range", "Which measurements appear in the plot", source(draft.globalInterval)) {
                     if (!global) BodySettingsInheritance(draft.globalInterval, { draft = draft.copy(globalInterval = it) })
                     if (global || !draft.globalInterval) {
                         ChartRangeControls(draft.interval, draft.showFit,
-                            { draft = draft.copy(interval = it) }, { custom = true }, {}, showTrendControl = false)
+                            { draft = draft.copy(interval = it) }, { custom = true }, {}, showTrendControl = false, rangeLabel = ::bodyRangeLabel)
                         if (draft.interval == ChartRange.CUSTOM && draft.customStart != null && draft.customEnd != null) {
                             BodySettingsHint("${formatChartDate(draft.customStart!!)} - ${formatChartDate(draft.customEnd!!)}")
                         }
@@ -768,14 +868,14 @@ private fun BodyChartSettingsDialog(
                 }
                 BodySettingsSection("Data and moving averages", "Show raw data, either average, or overlay all three", source(draft.globalAveraging)) {
                     if (!global) BodySettingsInheritance(draft.globalAveraging, { draft = draft.copy(globalAveraging = it) })
-                    if (global || !draft.globalAveraging) {
-                        SettingCheck("Show full raw data", draft.showRawData) { draft = draft.copy(showRawData = it) }
-                        SettingCheck("Moving average: fixed period", draft.periodAveraging) { draft = draft.copy(periodAveraging = it) }
-                        if (draft.periodAveraging) OutlinedTextField(periodDays, { periodDays = it }, modifier = Modifier.fillMaxWidth(),
+                    run {
+                        visibility("Show full raw data", "showRawData", draft.showRawData, draft.globalAveraging) { draft = draft.copy(showRawData = it) }
+                        visibility("Moving average: fixed period", "periodAveraging", draft.periodAveraging, draft.globalAveraging) { draft = draft.copy(periodAveraging = it) }
+                        if ((global || !draft.globalAveraging) && effectiveDraft.periodAveraging) OutlinedTextField(periodDays, { periodDays = it }, modifier = Modifier.fillMaxWidth(),
                             label = { Text("Period in days (e.g. 7)") }, isError = validPeriod == null,
                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal), singleLine = true)
-                        SettingCheck("Moving average: fraction of interval", draft.averaging) { draft = draft.copy(averaging = it) }
-                        if (draft.averaging) OutlinedTextField(fractionPercent, { fractionPercent = it }, modifier = Modifier.fillMaxWidth(),
+                        visibility("Moving average: fraction of interval", "averaging", draft.averaging, draft.globalAveraging) { draft = draft.copy(averaging = it) }
+                        if ((global || !draft.globalAveraging) && effectiveDraft.averaging) OutlinedTextField(fractionPercent, { fractionPercent = it }, modifier = Modifier.fillMaxWidth(),
                             label = { Text("Window as % of displayed interval (0-100)") }, isError = validFraction == null,
                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal), singleLine = true)
                         BodySettingsHint("Each point averages measurements from the preceding window, including earlier data just outside the plot. Fits and reference lines always use raw measurements.")
@@ -783,15 +883,15 @@ private fun BodyChartSettingsDialog(
                 }
                 BodySettingsSection("Trend fit", "Show the direction of change", source(draft.globalFit)) {
                     if (!global) BodySettingsInheritance(draft.globalFit, { draft = draft.copy(globalFit = it) })
-                    if (global || !draft.globalFit) SettingCheck("Show fit", draft.showFit) { draft = draft.copy(showFit = it) }
+                    visibility("Show fit", "showFit", draft.showFit, draft.globalFit) { draft = draft.copy(showFit = it) }
                 }
                 BodySettingsSection("Plot summary", "Values shown above the chart", source(draft.globalSummary)) {
                     if (!global) BodySettingsInheritance(draft.globalSummary, { draft = draft.copy(globalSummary = it) })
-                    if (global || !draft.globalSummary) {
-                        SettingCheck("Count in interval", draft.showIntervalCount) { draft = draft.copy(showIntervalCount = it) }
-                        SettingCheck("Total count", draft.showTotalCount) { draft = draft.copy(showTotalCount = it) }
-                        SettingCheck("Interval mean", draft.showMean) { draft = draft.copy(showMean = it) }
-                        SettingCheck("Interval range", draft.showRange) { draft = draft.copy(showRange = it) }
+                    run {
+                        visibility("Count in interval", "showIntervalCount", draft.showIntervalCount, draft.globalSummary) { draft = draft.copy(showIntervalCount = it) }
+                        visibility("Total count", "showTotalCount", draft.showTotalCount, draft.globalSummary) { draft = draft.copy(showTotalCount = it) }
+                        visibility("Interval mean", "showMean", draft.showMean, draft.globalSummary) { draft = draft.copy(showMean = it) }
+                        visibility("Interval range", "showRange", draft.showRange, draft.globalSummary) { draft = draft.copy(showRange = it) }
                     }
                 }
                 if (!global) BodySettingsSection("Y axis (${metric!!.unit})", "Leave either limit blank for automatic scaling", "Custom") {
@@ -805,27 +905,29 @@ private fun BodyChartSettingsDialog(
                 }
                 BodySettingsSection("Reference lines", "Solid low/high lines and dashed means", source(draft.globalHighLow)) {
                     if (!global) BodySettingsInheritance(draft.globalHighLow, { draft = draft.copy(globalHighLow = it) })
-                    if (global || !draft.globalHighLow) {
+                    run {
                         BodyReferenceGroup("All-time", Color(0xFFCE93D8)) {
                             BodySettingsHint("Every recorded measurement")
-                            BodyReferenceToggles(draft.showAllTimeLow, draft.showAllTimeMean, draft.showAllTimeHigh,
-                                { draft = draft.copy(showAllTimeLow = it) }, { draft = draft.copy(showAllTimeMean = it) }, { draft = draft.copy(showAllTimeHigh = it) })
+                            visibility("Low", "showAllTimeLow", draft.showAllTimeLow, draft.globalHighLow) { draft = draft.copy(showAllTimeLow = it) }
+                            visibility("Mean", "showAllTimeMean", draft.showAllTimeMean, draft.globalHighLow) { draft = draft.copy(showAllTimeMean = it) }
+                            visibility("High", "showAllTimeHigh", draft.showAllTimeHigh, draft.globalHighLow) { draft = draft.copy(showAllTimeHigh = it) }
                         }
                         BodyReferenceGroup("History window", Color(0xFFFF8A65)) {
-                            BodyReferenceToggles(draft.showHistoryLow, draft.showHistoryMean, draft.showHistoryHigh,
-                                { draft = draft.copy(showHistoryLow = it) }, { draft = draft.copy(showHistoryMean = it) }, { draft = draft.copy(showHistoryHigh = it) })
-                            if (draft.showHistoryHigh || draft.showHistoryLow) {
+                            visibility("Low", "showHistoryLow", draft.showHistoryLow, draft.globalHighLow) { draft = draft.copy(showHistoryLow = it) }
+                            visibility("Mean", "showHistoryMean", draft.showHistoryMean, draft.globalHighLow) { draft = draft.copy(showHistoryMean = it) }
+                            visibility("High", "showHistoryHigh", draft.showHistoryHigh, draft.globalHighLow) { draft = draft.copy(showHistoryHigh = it) }
+                            if ((global || !draft.globalHighLow) && (effectiveDraft.showHistoryHigh || effectiveDraft.showHistoryLow)) {
                                 OutlinedTextField(historyPercent, { historyPercent = it }, modifier = Modifier.fillMaxWidth(),
                                     label = { Text("Low/high percentile cutoff % (0-50)") }, isError = validHistoryPercent == null,
                                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal), singleLine = true)
                                 BodySettingsHint("5 uses the 5th and 95th percentiles. 0 uses exact low/high values. All-time references always use exact records.")
                             }
-                            if (draft.showHistoryHigh || draft.showHistoryLow || draft.showHistoryMean) {
+                            if ((global || !draft.globalHighLow) && (effectiveDraft.showHistoryHigh || effectiveDraft.showHistoryLow || effectiveDraft.showHistoryMean)) {
                                 HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = .2f))
                                 SettingCheck("Follow plot interval", draft.highLowFollowPlot) { draft = draft.copy(highLowFollowPlot = it) }
                                 if (!draft.highLowFollowPlot) {
                                     ChartRangeControls(draft.highLowRange, false,
-                                        { draft = draft.copy(highLowRange = it) }, { customHighLow = true }, {}, showTrendControl = false)
+                                        { draft = draft.copy(highLowRange = it) }, { customHighLow = true }, {}, showTrendControl = false, rangeLabel = ::bodyRangeLabel)
                                     if (draft.highLowRange == ChartRange.CUSTOM && draft.highLowStart != null && draft.highLowEnd != null) {
                                         BodySettingsHint("${formatChartDate(draft.highLowStart!!)} - ${formatChartDate(draft.highLowEnd!!)}")
                                     }
@@ -841,6 +943,11 @@ private fun BodyChartSettingsDialog(
                         SettingCheck("Show targets", draft.targetEnabled) { draft = draft.copy(targetEnabled = it) }
                         BodySettingsHint("Controls visibility for plots that follow this setting. Target values remain specific to each plot.")
                     } else BodyTargetFields(metric!!, draft) { draft = it }
+                    visibility("Show goal", "showGoal", draft.showGoal, draft.globalTarget) { draft = draft.copy(showGoal = it) }
+                    run {
+                        visibility("Show goal - acceptance", "showTargetLower", draft.showTargetLower, draft.globalTarget) { draft = draft.copy(showTargetLower = it) }
+                        visibility("Show goal + acceptance", "showTargetUpper", draft.showTargetUpper, draft.globalTarget) { draft = draft.copy(showTargetUpper = it) }
+                    }
                 }
             }
         },
@@ -874,10 +981,10 @@ private fun BodyChartSettingsDialog(
 private fun BodyTargetFields(metric: BodyMetric, current: BodyChartSettings, onChange: (BodyChartSettings) -> Unit) {
     var target by remember { mutableStateOf(current.target?.toString().orEmpty()) }
     var acceptance by remember { mutableStateOf(current.acceptance?.toString().orEmpty()) }
-    if (!current.globalTarget) SettingCheck("Show target", current.targetEnabled) { onChange(current.copy(targetEnabled = it)) }
+
     OutlinedTextField(target, {
         target = it
-        onChange(current.copy(target = it.replace(',', '.').toDoubleOrNull()?.takeIf { value -> value.isFinite() && value >= 0 }))
+        onChange(current.copy(targetEnabled = true, target = it.replace(',', '.').toDoubleOrNull()?.takeIf { value -> value.isFinite() && value >= 0 }))
     }, label = { Text("Target (${metric.unit})") },
         isError = !current.globalTarget && current.targetEnabled && current.target == null,
         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal), singleLine = true)
@@ -917,6 +1024,7 @@ internal fun formatBodyEta(days: Double): String {
     val totalDays = kotlin.math.ceil(days).toLong().coerceAtLeast(1)
     val months = ((totalDays + 0.5) / (365.25 / 12)).toLong()
     fun quantity(value: Long, unit: String) = "$value $unit${if (value == 1L) "" else "s"}"
+    if (totalDays in 7L..70L) return quantity(totalDays / 7, "week")
     if (months >= 120) return quantity(months / 12, "year")
     if (totalDays > 365 && months >= 12) return listOf(quantity(months / 12, "year"),
         (months % 12).takeIf { it > 0 }?.let { quantity(it, "month") }).filterNotNull().joinToString(" ")

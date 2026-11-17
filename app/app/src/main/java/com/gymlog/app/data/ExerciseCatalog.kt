@@ -28,7 +28,7 @@ internal object ExerciseCatalog {
     val entries: List<ExerciseTemplate> = buildList {
         fun profile(high: String, medium: String = "", low: String = ""): List<AreaAssignment> =
             listOf(high to Strength.FULL, medium to Strength.HALF, low to Strength.LIGHT).flatMap { (names, intensity) ->
-                names.split(' ').filter(String::isNotBlank).map { AreaAssignment(BodyArea.valueOf(it), intensity) }
+                names.split(' ').filter(String::isNotBlank).map { AreaAssignment(BodyArea.valueOf(it), intensity, intensity = intensity.value * if (it == "CORE") 1.5 else 1.0) }
             }
         fun entry(en: String, de: String, equipment: ExerciseEquipment, areas: List<AreaAssignment>, aliases: String = "") {
             add(ExerciseTemplate(en, de, equipment, areas, aliases))
@@ -257,7 +257,7 @@ internal object ExerciseCatalog {
             alternatives.map { it.replace(" ", "") }, normalizeExerciseSearch(entry.englishName.substringBefore(" · ")))
     }
 
-    fun search(query: String, equipment: ExerciseEquipment? = null, limit: Int = 20): List<ExerciseTemplate> {
+    fun search(query: String, equipment: ExerciseEquipment? = null, limit: Int = 20, allowWeakMatches: Boolean = false): List<ExerciseTemplate> {
         val normalized = exerciseSearchTerms(query)
         val raw = normalizeExerciseSearch(query).replace(Regex("(?<=[a-z])(?=[0-9])|(?<=[0-9])(?=[a-z])"), " ")
         val modelQuery = raw.replace(Regex("\\s+[0-9]+$"), "")
@@ -268,13 +268,14 @@ internal object ExerciseCatalog {
         }
         val line = listOf("selection 700", "selection 900", "pure strength", "biostrength", "artis", "mts", "hd elite")
             .firstOrNull { it in raw }
-        if (query.isNotBlank() && normalized.isBlank() && manufacturer == null) return emptyList()
+        if (!allowWeakMatches && query.isNotBlank() && normalized.isBlank() && manufacturer == null) return emptyList()
         val tokens = normalized.split(' ').filter(String::isNotBlank)
         val compact = normalized.replace(" ", "")
-        return entries.asSequence().filter { equipment == null || it.equipment == equipment }
-            .filter { manufacturer == null || it.manufacturer == manufacturer }
+        val available = entries.filter { equipment == null || it.equipment == equipment }
+        val narrowed = available.filter { manufacturer == null || it.manufacturer == manufacturer }
             .filter { line == null || line in names.getValue(it).raw }
-            .mapNotNull { entry ->
+        val candidates = narrowed.ifEmpty { if (allowWeakMatches) available else emptyList() }
+        return candidates.asSequence().mapNotNull { entry ->
                 val indexed = names.getValue(entry)
                 val alternatives = indexed.alternatives
                 val words = indexed.words
@@ -288,7 +289,11 @@ internal object ExerciseCatalog {
                     tokens.all { token -> words.any { it.startsWith(token) } } -> 400
                     indexed.compact.any { closeExerciseWord(compact, it) } -> 300
                     tokens.all { token -> words.any { word -> word.startsWith(token) || closeExerciseWord(token, word) } } -> 200
-                    else -> return@mapNotNull null
+                    else -> if (!allowWeakMatches) return@mapNotNull null else {
+                        // Weak matches stay below all confident matches, but still provide a starting profile.
+                        (tokens.map { token -> words.maxOfOrNull { word -> exerciseWordSimilarity(token, word) } ?: 0.0 }
+                            .average().takeIf { it.isFinite() }?.times(100)?.toInt() ?: 0).coerceIn(0, 100)
+                    }
                 }
                 entry to score
             }.sortedWith(compareByDescending<Pair<ExerciseTemplate, Int>> { it.second }
@@ -334,4 +339,15 @@ private fun closeExerciseWord(a: String, b: String): Boolean {
         previous = current
     }
     return previous[b.length] <= budget
+}
+
+private fun exerciseWordSimilarity(a: String, b: String): Double {
+    if (a.isEmpty() || b.isEmpty()) return 0.0
+    var previous = IntArray(b.length + 1) { it }
+    for (i in a.indices) {
+        val current = IntArray(b.length + 1); current[0] = i + 1
+        for (j in b.indices) current[j + 1] = minOf(current[j] + 1, previous[j + 1] + 1, previous[j] + if (a[i] == b[j]) 0 else 1)
+        previous = current
+    }
+    return 1.0 - previous.last().toDouble() / maxOf(a.length, b.length)
 }

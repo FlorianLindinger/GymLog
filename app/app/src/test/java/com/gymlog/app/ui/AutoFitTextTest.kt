@@ -14,6 +14,28 @@ import kotlin.math.ceil
 
 class AutoFitTextTest {
     @Test
+    fun timedHistoryCanUseMoreThanEightEntriesAndFitsWholeEntries() {
+        val summary = MachineSummary(
+            Machine(1, "Time", "", "", "", ChartRange.ALL, 0, TrackingMode.DURATION, 10.0, 0), emptyList(),
+            (1..20).map { SetRecord(it.toLong(), 1, 0, 5.0, it * 60_000L) }, emptyList(), 0,
+        )
+        val text = sessionPatternText(summary).text
+        assertEquals(20, Regex("5").findAll(text).count())
+        val end = overviewHistoryPrefixLength(text) { it.length <= 90 }
+        val shown = text.substring(0, end)
+        assertTrue(Regex("5").findAll(shown).count() > 8)
+        assertTrue(shown.endsWith("5"))
+        assertEquals(text.length, overviewHistoryPrefixLength(text) { true })
+        assertEquals("Last: 5".length, overviewHistoryPrefixLength(text) { false })
+    }
+
+    @Test
+    fun readableMinimumStopsHistoryShrinkingOnNarrowCards() {
+        assertEquals(12f, fittedSingleLineFontSize(14f, 100, minimumSize = 12f) { ceil(it * 20).toInt() }, 0f)
+        assertEquals(14f, fittedSingleLineFontSize(14f, 500, minimumSize = 12f) { ceil(it * 20).toInt() }, 0f)
+    }
+
+    @Test
     fun fittingTextKeepsPreferredSizeWithOneMeasurement() {
         var calls = 0
         assertEquals(16f, fittedSingleLineFontSize(16f, 200) { calls++; 100 }, 0f)

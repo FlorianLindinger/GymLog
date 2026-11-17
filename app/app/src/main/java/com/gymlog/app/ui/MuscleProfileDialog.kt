@@ -37,9 +37,10 @@ internal fun MuscleProfileDialog(
     onDismiss: () -> Unit,
     onSave: (List<AreaAssignment>) -> Unit,
 ) {
+    var validPercentages by remember { mutableStateOf(true) }
     var draft by remember(exerciseName) { mutableStateOf(current) }
     val suggestions = remember(exerciseName) {
-        if (exerciseName.isBlank()) emptyList() else ExerciseCatalog.search(exerciseName, limit = 3)
+        if (exerciseName.isBlank()) emptyList() else ExerciseCatalog.search(exerciseName, limit = 3, allowWeakMatches = true)
     }
     var showSuggestions by remember { mutableStateOf(false) }
     var chosenProfile by remember { mutableStateOf<String?>(null) }
@@ -62,7 +63,7 @@ internal fun MuscleProfileDialog(
                 }
                 if (showRegionGuide) BodyRegionGuide(colors)
                 if (suggestions.isNotEmpty()) {
-                    Text("Suggested profiles for this exercise", style = MaterialTheme.typography.labelMedium)
+                    Text("Best matching profiles (may be a weak match)", style = MaterialTheme.typography.labelMedium)
                     suggestions.forEach { template ->
                         TextButton(onClick = { draft = template.areas; chosenProfile = template.title }) {
                             Column(Modifier.fillMaxWidth()) {
@@ -74,13 +75,13 @@ internal fun MuscleProfileDialog(
                 }
                 OutlinedButton(onClick = { showSuggestions = true }, modifier = Modifier.fillMaxWidth()) { Text("Browse exercise list") }
                 chosenProfile?.let { Text("Starting profile: " + it, color = MaterialTheme.colorScheme.primary) }
-                Text("High: primary · Medium: supporting · Low: light involvement. Off removes the region.", style = MaterialTheme.typography.bodySmall)
+                Text("L = 25%, M = 50%, H = 100%. Type a custom percentage; 0 removes the region. Preset abs/Core values are 50% higher.", style = MaterialTheme.typography.bodySmall)
                 Text("Suggestions are editable estimates. Adjust them for your machine and technique.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 TextButton(onClick = { draft = emptyList(); chosenProfile = null }, enabled = draft.isNotEmpty()) { Text("Clear all regions") }
-                MuscleProfileFields(draft, colors, if (onColorChange == null) null else { area -> colorArea = area }) { draft = it }
+                MuscleProfileFields(draft, colors, if (onColorChange == null) null else { area -> colorArea = area }, onValidityChange = { validPercentages = it }) { draft = it }
             }
         },
-        confirmButton = { Button(onClick = { onSave(draft) }) { Text("Save") } },
+        confirmButton = { Button(enabled = validPercentages, onClick = { onSave(draft) }) { Text("Save") } },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
     )
     if (showSuggestions) ExerciseCatalogDialog(exerciseName, onDismiss = { showSuggestions = false }) { template ->

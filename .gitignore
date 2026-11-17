@@ -25,3 +25,8 @@ google_drive_synced/*.apk
 *.jks
 *.keystore
 *.driveupload
+
+# Root APK exports and legacy checksums
+/GymLog-*.apk
+/GymLog-*.apk.sha256
+/artifacts/

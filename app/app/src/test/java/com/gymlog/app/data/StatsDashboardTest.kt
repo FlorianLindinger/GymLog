@@ -42,7 +42,7 @@ class StatsDashboardTest {
     }
 
     @Test
-    fun cardioDoesNotBecomeOneRepMaxOrWeightVolumeAndExtraSetsDoNotInflateStrength() {
+    fun cardioUsesItsOwnMetricAndStrengthIncludesEverySet() {
         val weight = exercise(1, TrackingMode.WEIGHT, set(1, "2026-10-20T12:00:00Z", 100.0), set(2, "2026-10-20T12:01:00Z", 100.0))
         val level = exercise(2, TrackingMode.STRENGTH, set(3, "2026-10-20T13:00:00Z", 20.0, 7))
         val watts = exercise(3, TrackingMode.WATTS, set(4, "2026-10-20T13:30:00Z", 25.0, 120))
@@ -50,10 +50,12 @@ class StatsDashboardTest {
         assertEquals(2, result.current.weightSets)
         assertEquals(2000.0, result.current.volume, 0.0)
         assertEquals(45.0, result.current.cardioMinutes, 0.0)
-        assertEquals(estimatedOneRepMax(100.0, 10), result.exercises[0].latest!!, 0.0)
-        assertEquals(7.0, result.exercises[1].latest!!, 0.0)
-        assertEquals(120.0, result.exercises[2].latest!!, 0.0)
-        assertEquals("Peak power", result.exercises[2].label)
+        assertEquals(setStrengthScore(100.0, 10) * 2, result.exercises[0].latest!!, 0.000001)
+        assertEquals("Strength score", result.exercises[0].label)
+        assertEquals("pts", result.exercises[0].unit)
+        assertEquals(estimatedTenMinuteIntensity(7.0, 20.0), result.exercises[1].latest!!, 0.0)
+        assertEquals(estimatedTenMinuteIntensity(120.0, 25.0), result.exercises[2].latest!!, 0.0)
+        assertEquals("Est. 10-min power", result.exercises[2].label)
         assertNull(result.exercises[1].changePercent)
     }
 
@@ -109,7 +111,7 @@ class StatsDashboardTest {
     }
 
     @Test
-    fun unconfiguredSettingsEnableOneRepMaxByDefault() {
+    fun unconfiguredSettingsEnableStrengthScoreByDefault() {
         assertTrue(ProgressionSettings().useOneRepMax)
     }
 }

@@ -18,6 +18,9 @@ if not "%GYMLOG_RESULT%"=="0" (
 ) else if /i "%GYMLOG_TRANSPORT%"=="Bluetooth" (
     color 0E
     echo [ACTION REQUIRED] APK ready. Complete Bluetooth transfer and installation on the phone.
+) else if /i "%GYMLOG_TRANSPORT%"=="GoogleDrive" (
+    color 0E
+    echo [ACTION REQUIRED] APK copied. Wait for Google Drive sync, then open and install it on the phone.
 ) else (
     color 0A
     echo [SUCCESS] Command completed successfully.

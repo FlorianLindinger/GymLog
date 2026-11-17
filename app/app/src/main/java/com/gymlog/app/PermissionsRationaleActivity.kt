@@ -27,8 +27,8 @@ class PermissionsRationaleActivity : ComponentActivity() {
                 ) {
                     Text("Health Connect Privacy", style = MaterialTheme.typography.headlineSmall)
                     Text(
-                        "GymLog reads weight, body-fat percentage, and lean body mass only when you request a sync. " +
-                            "The data is used on-device for Body graphs and is not sent to GymLog servers.",
+                        "GymLog reads permitted body measurements for Body graphs. If you choose to sync a manual entry, it writes weight and body-fat percentage to Health Connect so other apps you authorize can read them. " +
+                            "Manual muscle percentage stays in GymLog. Manual entries are kept on-device, and GymLog sends no data to its own servers.",
                         modifier = Modifier.padding(vertical = 16.dp),
                     )
                     Button(onClick = { finish() }) { Text("Close") }

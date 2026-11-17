@@ -28,10 +28,17 @@ internal fun trainingTimerSnapshot(machines: List<MachineSummary>, zone: ZoneId)
         sessionSets.map { it.machineId }.distinct().size)
 }
 
+/** Short sessions allow a longer break; use the stopped duration so the deadline cannot move mid-break. */
+internal fun trainingIdleDeadline(last: Long, estimatedStart: Long): Long =
+    last + (if (last - estimatedStart < 60L * 60_000L) 30L else 10L) * 60_000L
+
+internal fun trainingTimerActive(now: Long, last: Long?, estimatedStart: Long?): Boolean =
+    last != null && estimatedStart != null && now < trainingIdleDeadline(last, estimatedStart)
+
 /** Wake only for a visible minute change or the exact transition to idle. */
 internal fun nextTrainingTimerDelay(now: Long, last: Long?, estimatedStart: Long?): Long? {
     if (last == null || estimatedStart == null) return null
-    val untilIdle = last + 10L * 60_000L - now
+    val untilIdle = trainingIdleDeadline(last, estimatedStart) - now
     if (untilIdle <= 0L) return null
     val untilMinute = 60_000L - (now - estimatedStart).coerceAtLeast(0L) % 60_000L
     return minOf(untilMinute, untilIdle)

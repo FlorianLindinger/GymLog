@@ -1,32 +1,66 @@
 # Windows launchers
 
-Choose one of the three everyday launchers in this folder. Each builds the latest
-APK and uses exactly the connection type in its name. There is no automatic
+Choose one of the four everyday launchers in the project root. Each builds the latest
+APK (reusing it when build inputs are unchanged) and uses exactly the connection type in its name. There is no automatic
 USB/Wi-Fi/Bluetooth fallback.
 
 | Launcher | Action |
 | --- | --- |
-| `USB.bat` | Check the USB connection, build, install the update, and launch GymLog |
-| `WiFi.bat` | Check the Wi-Fi connection, build, install the update, and launch GymLog |
-| `Bluetooth.bat` | Build and open Bluetooth File Transfer; finish installation on the phone |
+| `build & install via USB.bat` | Check the USB connection, build, install the update, and launch GymLog |
+| `build & install via WiFi.bat` | Check the Wi-Fi connection, build, install the update, and launch GymLog |
+| `build & install via Bluetooth.bat` | Build and open Bluetooth File Transfer; finish installation on the phone |
+| `build & install via Google Drive.bat` | Build and copy the APK to a chosen Drive sync folder; download/install on the phone |
 
-Double-click a launcher, or run it from any directory. Every launcher keeps its
+Double-click a root launcher, or run its quoted path from any directory. In PowerShell, use `& "PATH.bat"` for names containing spaces and `&`. Every launcher keeps its
 window open after success or failure. Review the messages, then close the window
 or type `exit`. For automation, set `GYMLOG_NO_PAUSE=1`; exit codes are preserved.
 
 Colors: **cyan** = progress, **green** = success, **red** = error, **yellow** =
-action required. Bluetooth remains yellow because opening the wizard does not
-confirm that the APK was delivered or installed.
+action required. Bluetooth and Google Drive remain yellow because local dispatch
+does not confirm that the APK was delivered or installed.
+
+## Google Drive
+
+Run `build & install via Google Drive.bat` and select a folder synchronized by Google Drive for desktop.
+The folder picker preselects your last folder and lets you keep or change it.
+The choice is remembered locally in the Git-ignored `.tools/google-drive-folder.txt`.
+The destination is checked before building. Exports are numbered `GymLog-1.apk`,
+`GymLog-2.apk`, and so on, continuing after the highest existing number without
+overwriting previous versions. Older timestamp-named exports are also preserved.
+To skip the folder picker, pass a folder or set `GYMLOG_DRIVE_FOLDER`:
+
+```powershell
+& '.\build & install via Google Drive.bat' -DriveFolder 'G:\My Drive\GymLog'
+```
+
+Wait for the Drive client to finish uploading. On the phone, open Google Drive,
+download the APK and confirm installation. The helper copies locally; it does not
+verify cloud upload, create public links, or remotely install the app. Choose a
+folder already synchronized by your Drive client. No ADB connection is needed.
 
 ## USB
 
+If Android reports a conflict with an existing GymLog package, check that the new
+APK uses the same signing key as the installed app. Debug keys normally differ
+between Windows accounts. To reuse the original debug key, add its path to the
+Git-ignored `app/local.properties` (relative paths start at `app`):
+
+```properties
+gymlog.debug.keystore=C\:/Users/USERNAME/.android/debug.keystore
+```
+
+Use the existing key; a newly generated one cannot update the old installation.
+Keep the key outside Git. Uninstalling the app deletes local training data, so
+prefer rebuilding with the matching key. This setting applies to debug APKs;
+release signing uses the separate release configuration.
+
 Enable Developer options and USB debugging, connect a USB data cable, unlock the
-phone, and accept its debugging authorization prompt. Then run `USB.bat`.
+phone, and accept its debugging authorization prompt. Then run `build & install via USB.bat`.
 USB ignores wireless connections and emulators. If several USB phones are
 connected, select one explicitly:
 
 ```powershell
-.\USB.bat -Serial PHONE_SERIAL
+& ".\build & install via USB.bat" -Serial PHONE_SERIAL
 ```
 
 An unavailable or unauthorized USB phone produces an error, even if Wi-Fi is
@@ -35,24 +69,33 @@ connected. Existing app data is preserved; the helper never uninstalls GymLog.
 ## Wi-Fi
 
 Enable Android Wireless debugging on the phone. Pairing and connection ports are
-different; use the addresses shown on the phone:
+different. Connect the PC and phone to the same Wi-Fi network, then double-click
+`build & install via WiFi.bat`. If no authorized wireless device is connected,
+the launcher guides you through pairing and connecting before building. Keep
+the pairing screen open while entering its address and code, then use the
+connection address from the main Wireless debugging screen. For an already-paired
+phone, leave the pairing address blank. Leave the connection address blank to cancel.
+
+You can also supply the addresses shown on the phone:
 
 ```powershell
-.\WiFi.bat -PairAddress 192.168.1.7:PAIRING_PORT -ConnectAddress 192.168.1.7:CONNECTION_PORT
+& ".\build & install via WiFi.bat" -PairAddress 192.168.1.7:PAIRING_PORT -ConnectAddress 192.168.1.7:CONNECTION_PORT
 ```
 
 Replace both port placeholders with the displayed numbers. Enter the pairing
 code at ADB's prompt; the helpers do not save it. For an already-paired phone,
-use only `-ConnectAddress`. Once connected, `WiFi.bat` needs no arguments.
+use only `-ConnectAddress`. Once connected, `build & install via WiFi.bat` needs no arguments.
 If multiple wireless connections are listed, use `-Serial IP:PORT` or the exact
 mDNS serial. Wi-Fi never selects a USB phone.
+Explicit addresses/serials, redirected input, and `GYMLOG_NO_PAUSE=1` do not trigger
+the automatic setup prompt; automation must supply a connection or use an existing one.
 
 For pairing/connecting without a build, double-click `advanced/connect_wifi.bat`
 and follow its prompts, or supply the same address arguments.
 
 ## Bluetooth
 
-Pair the phone with Windows, then run `Bluetooth.bat`. The helper copies the APK
+Pair the phone with Windows, then run `build & install via Bluetooth.bat`. The helper copies the APK
 path to the clipboard and opens Windows Bluetooth File Transfer. Choose **Send
 files**, select the phone, click **Browse**, and paste the path with **Ctrl+V**.
 If clipboard copying fails, copy the printed path manually.
@@ -70,7 +113,7 @@ Less frequently needed launchers are in `advanced/`, and release tools are in
 
 | Command | Action |
 | --- | --- |
-| `advanced/build.bat` | Build only; copy APK and SHA-256 checksum to `app/artifacts/debug/` |
+| `advanced/build.bat` | Build only; export APK to the root and checksum to artifacts/checksums |
 | `advanced/install_usb.bat [-Serial SERIAL] [-Apk "PATH.apk"]` | Install an existing APK over USB |
 | `advanced/install_wifi.bat [-Serial SERIAL] [-Apk "PATH.apk"]` | Install an existing APK over Wi-Fi; also accepts pairing/connection addresses |
 | `advanced/send_bluetooth.bat [-Apk "PATH.apk"]` | Send an existing APK over Bluetooth |
@@ -98,8 +141,22 @@ standard locations. SDK discovery supports `ANDROID_HOME`, `ANDROID_SDK_ROOT`,
 `app/local.properties` and standard SDK locations. ADB-only commands require only
 Platform-Tools, also discoverable via `GYMLOG_ADB` or PATH.
 
-Temporary build output defaults to `%LOCALAPPDATA%/GymLog/build/app`, overridden
-by `GYMLOG_BUILD_DIR`. The APK remains `app/artifacts/debug/app-debug.apk`.
+Temporary build output defaults to the ignored `.tools/b/` folder on the project drive (required by Android resource-backed unit tests), overridden
+by `GYMLOG_BUILD_DIR`. All Windows build modes export their APK to the project
+root: `GymLog-debug.apk` for debug/verification/version preparation and
+`GymLog-release.apk` for signed release builds, with `.apk.sha256` checksums under
+`artifacts/checksums/`. USB, Wi-Fi, Bluetooth and install-only commands use the root debug APK by
+default; `-Apk` still selects a different file. Versioned signed APK/AAB packages
+remain under `app/artifacts/release/`.
+
+Debug builds compare source/configuration contents and toolchain settings with the
+last successful build and validate the copied APK's SHA-256 before reusing it.
+Added, removed, renamed or edited inputs trigger Gradle; documentation and generated
+artifacts do not. Missing/modified APKs or unreadable cache state also rebuild.
+Use `-ForceBuild` with `build & install via USB.bat`, `build & install via WiFi.bat`, `build & install via Bluetooth.bat` or
+`advanced/build.bat` to invoke Gradle even when unchanged. Installation/transfer
+still runs when a build is skipped. A reused APK retains its original build time.
+Verification and release commands always run their full workflow.
 Execution policy changes apply only to the child PowerShell process.
 
 Release preparation requires clean `main` and verifies locally without publishing.

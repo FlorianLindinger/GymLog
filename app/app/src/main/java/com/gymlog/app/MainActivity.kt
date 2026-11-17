@@ -23,6 +23,8 @@ import com.gymlog.app.data.GymRepository
 import com.gymlog.app.ui.GymLogApp
 import com.gymlog.app.ui.BodyDataSnapshot
 import com.gymlog.app.ui.BodyMeasurement
+import com.gymlog.app.ui.ManualBodyEntry
+import com.gymlog.app.ui.ManualBodyStore
 import com.gymlog.app.ui.BodyMetric
 import com.gymlog.app.ui.HealthConnectGateway
 import com.gymlog.app.ui.shouldAutoSyncBody
@@ -57,7 +59,8 @@ class MainActivity : ComponentActivity() {
         setContent {
             var dataVersion by remember { mutableIntStateOf(0) }
             var accentColor by remember { mutableStateOf(repository.accentColor()) }
-            var bodyData by remember { mutableStateOf(if (BuildConfig.DEBUG && intent.getBooleanExtra("demo_body_data", false)) demoBodyData() else BodyDataSnapshot()) }
+            val manualBodyStore = remember { ManualBodyStore(this) }
+            var bodyData by remember { mutableStateOf(if (BuildConfig.DEBUG && intent.getBooleanExtra("demo_body_data", false)) demoBodyData() else manualBodyStore.merge(BodyDataSnapshot())) }
             var healthSyncStatus by remember { mutableStateOf("Not synced yet.") }
             var healthSyncing by remember { mutableStateOf(false) }
             var checkingHealthPermissions by remember { mutableStateOf(false) }
@@ -72,7 +75,7 @@ class MainActivity : ComponentActivity() {
                     try {
                         runCatching { withContext(Dispatchers.IO) { healthGateway.readBodyData() } }
                             .onSuccess {
-                                bodyData = it
+                                bodyData = manualBodyStore.merge(it)
                                 lastHealthSyncElapsed = SystemClock.elapsedRealtime()
                                 healthSyncStatus = "Synced ${it.measurements.size} measurements."
                             }
@@ -133,18 +136,68 @@ class MainActivity : ComponentActivity() {
                     repository.importJson(json)
                 }.onSuccess {
                     dataVersion++
+                    bodyData = manualBodyStore.merge(bodyData.copy(measurements = bodyData.measurements.filter { it.source != packageName }))
                     Toast.makeText(this, "Backup restored", Toast.LENGTH_SHORT).show()
                 }.onFailure {
                     Toast.makeText(this, "Import failed: ${it.message}", Toast.LENGTH_LONG).show()
                 }
             }
 
+            var pendingBodyWrite by remember { mutableStateOf<Pair<ManualBodyEntry, (String?) -> Unit>?>(null) }
+            suspend fun saveBodyEntry(entry: ManualBodyEntry, complete: (String?) -> Unit) {
+                runCatching {
+                    withContext(Dispatchers.IO) {
+                        if (entry.syncHealthConnect) healthGateway.writeBodyData(entry)
+                        manualBodyStore.save(entry)
+                    }
+                    bodyData = manualBodyStore.merge(bodyData)
+                    if (entry.syncHealthConnect) autoSyncHealthData(force = true)
+                }.onSuccess { complete(null) }.onFailure { complete("Could not save: ${it.message}") }
+            }
+            val bodyWritePermissionLauncher = rememberLauncherForActivityResult(PermissionController.createRequestPermissionResultContract()) { granted ->
+                pendingBodyWrite?.let { (entry, complete) ->
+                    pendingBodyWrite = null
+                    if (granted.containsAll(healthGateway.writePermissions(entry))) scope.launch { saveBodyEntry(entry, complete) }
+                    else complete("Health Connect write permission was not granted. You can turn off sync to save in GymLog only.")
+                }
+            }
+            var pendingPlanExport by remember { mutableStateOf<String?>(null) }
+            val exportPlanLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
+                if (uri != null) runCatching {
+                    val text = requireNotNull(pendingPlanExport) { "Select the plan and download it again" }
+                    contentResolver.openOutputStream(uri)?.bufferedWriter().use { writer -> requireNotNull(writer).write(text) }
+                }.onSuccess { Toast.makeText(this, "Training plan saved", Toast.LENGTH_SHORT).show() }
+                    .onFailure { Toast.makeText(this, "Plan export failed: ${it.message}", Toast.LENGTH_LONG).show() }
+                pendingPlanExport = null
+            }
+            val importPlanLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+                if (uri != null) runCatching {
+                    val text = contentResolver.openInputStream(uri)?.bufferedReader().use { requireNotNull(it).readText() }
+                    repository.importTrainingPlan(text)
+                }.onSuccess { dataVersion++; Toast.makeText(this, "Training plan added", Toast.LENGTH_SHORT).show() }
+                    .onFailure { Toast.makeText(this, "Plan import failed: ${it.message}", Toast.LENGTH_LONG).show() }
+            }
             GymLogTheme(accentColor) {
                 GymLogApp(
                     repository = repository,
                     externalDataVersion = dataVersion,
                     onExport = { exportLauncher.launch("GymLog-${LocalDate.now()}.json") },
                     onImport = { importLauncher.launch(arrayOf("application/json", "text/plain")) },
+                    onSaveBodyEntry = { entry, complete ->
+                        scope.launch {
+                            if (!entry.syncHealthConnect) saveBodyEntry(entry, complete)
+                            else if (healthGateway.sdkStatus() != HealthConnectClient.SDK_AVAILABLE) complete("Health Connect is unavailable. Turn off sync to save in GymLog only.")
+                            else runCatching {
+                                if (healthGateway.grantedPermissions().containsAll(healthGateway.writePermissions(entry))) saveBodyEntry(entry, complete)
+                                else { pendingBodyWrite = entry to complete; bodyWritePermissionLauncher.launch(healthGateway.writePermissions(entry)) }
+                            }.onFailure { complete("Could not request Health Connect access: ${it.message}") }
+                        }
+                    },
+                    onExportPlan = {
+                        pendingPlanExport = repository.exportTrainingPlan()
+                        exportPlanLauncher.launch("GymLog-plan-${LocalDate.now()}.json")
+                    },
+                    onImportPlan = { importPlanLauncher.launch(arrayOf("application/json", "text/plain")) },
                     onAccentColorChanged = {
                         repository.setAccentColor(it)
                         accentColor = it

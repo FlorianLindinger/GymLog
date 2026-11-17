@@ -7,6 +7,25 @@ import org.junit.Test
 
 class TimeWindowChartTest {
     @Test
+    fun lineSegmentsReachBothLimitsWithoutExtrapolation() {
+        val points = listOf(TimeValue(0, 0.0), TimeValue(5, 10.0), TimeValue(10, 0.0))
+        assertEquals(listOf(TimeValue(2, 4.0), TimeValue(5, 10.0), TimeValue(8, 4.0)),
+            pointsInWindow(points, VisibleTimeRange(2, 8)))
+        assertEquals(listOf(TimeValue(2, 4.0), TimeValue(3, 6.0)),
+            pointsInWindow(points, VisibleTimeRange(2, 3)))
+        assertEquals(listOf(TimeValue(0, 0.0), TimeValue(2, 4.0)),
+            pointsInWindow(points, VisibleTimeRange(-2, 2)))
+        assertTrue(pointsInWindow(points, VisibleTimeRange(11, 12)).isEmpty())
+        assertTrue(pointsInWindow(emptyList(), VisibleTimeRange(2, 8)).isEmpty())
+    }
+
+    @Test
+    fun exactEdgePointsAndDuplicatesAreNotReplacedWithSyntheticMarkers() {
+        val points = listOf(TimeValue(0, 4.0), TimeValue(0, 5.0), TimeValue(10, 7.0))
+        assertEquals(points, pointsInWindow(points, VisibleTimeRange(0, 10)))
+    }
+
+    @Test
     fun negativeTrendIsPreservedForClippingButCannotLowerAxisBelowZero() {
         val day = 86_400_000L
         val values = listOf(TimeValue(0L, 2.0), TimeValue(day, 1.0))

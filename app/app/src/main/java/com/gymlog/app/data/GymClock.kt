@@ -11,6 +11,12 @@ data class GymClock(
 ) {
     fun now(): Long = clock.millis()
 
+    fun trainingWindow(timestamp: Long): TrainingWindow {
+        val start = trainingDayStart(timestamp)
+        val end = Instant.ofEpochMilli(start).atZone(zoneId).plusDays(1).toInstant().toEpochMilli()
+        return TrainingWindow(start, end)
+    }
+
     /** A training day starts at 06:00 local time. */
     fun trainingDayStart(timestamp: Long = now()): Long {
         val local = Instant.ofEpochMilli(timestamp).atZone(zoneId)

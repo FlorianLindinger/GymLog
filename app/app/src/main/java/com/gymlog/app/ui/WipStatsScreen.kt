@@ -56,7 +56,7 @@ import com.gymlog.app.data.StatsDashboardSnapshot
 import com.gymlog.app.data.TrackingMode
 import com.gymlog.app.data.buildStatsDashboard
 import com.gymlog.app.data.dashboardPercentChange
-import com.gymlog.app.data.estimatedOneRepMax
+import com.gymlog.app.data.sessionStrengthScore
 import java.time.DayOfWeek
 import java.time.Instant
 import java.time.LocalDate
@@ -195,7 +195,7 @@ internal fun WipStatsScreen(
                     else -> snapshot.weeks.map { TimeValue(dashboardTimestamp(it.date.coerceIn(period.first, period.last), zone), it.sessions.toDouble()) }
                 }
                 Text(when (chart) {
-                    "Volume" -> "Total kg x reps per training day; a workload measure, separate from 1RM strength."
+                    "Volume" -> "Total kg x reps per training day; a workload measure, separate from strength score."
                     "Time" -> "Minutes between first and last recorded entry. Unknown durations are omitted."
                     "Cardio" -> "Recorded minutes in level, watts and duration exercises."
                     else -> "Training days per Monday-Sunday week. Boundary weeks may be partial."
@@ -220,7 +220,7 @@ internal fun WipStatsScreen(
         }
         item {
             DashboardCard("Exercise explorer") {
-                Text("Strength uses best-set 1RM, watts use peak power, levels use peak level, and duration uses total recorded minutes per day.", style = MaterialTheme.typography.bodySmall)
+                Text("Strength uses all-set strength score, watts and levels use estimated intensity for a 10-minute effort, and duration uses total recorded minutes per day.", style = MaterialTheme.typography.bodySmall)
                 Text("Change compares the latest training with the previous period's latest, or the first training in this period if no earlier baseline exists. Tap an exercise to expand its chart.", style = MaterialTheme.typography.labelSmall)
                 OutlinedTextField(query, { query = it }, label = { Text("Find an exercise") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
                 Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -258,7 +258,7 @@ internal fun WipStatsScreen(
         item {
             DashboardCard("Data context") {
                 Text("${snapshot.missingProfiles} trained exercises have no body-region profile.")
-                Text("${snapshot.higherRepSets} weight sets have more than 10 reps; 1RM estimates are less informative for higher-rep sets.")
+                Text("${snapshot.higherRepSets} weight sets have more than 10 reps; the strength score is a comparison heuristic, not measured maximum strength.")
                 val unknown = snapshot.current.sessions - snapshot.current.knownDurationCount
                 Text("$unknown trainings have no measurable span between entries. They count as trainings; duration averages exclude them.")
                 Text("Level numbers depend on the machine. Their changes are shown as level steps rather than percentages.", style = MaterialTheme.typography.bodySmall)
@@ -283,10 +283,10 @@ internal fun WipStatsScreen(
         text = { Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Text("Training days run from 06:00 to 05:59. The comparison period contains the same number of calendar days and ends just before the selected range. Future entries are excluded. All data belongs to the active plan; hidden exercises follow the switch above.")
             Text("Sessions count distinct training days. Sets and volume include weight exercises only; cardio minutes are recorded duration in other modes. Recorded span is first-to-last-entry time, so it omits time before the first entry and is unknown when timestamps do not differ.")
-            Text("Strength change uses best-set Wathan 1RM for each exercise. The plan summary is the median percentage change of comparable weight exercises, rather than adding kilograms across unrelated lifts. No percentage is invented for zero or missing baselines. Level progress uses absolute level steps.")
+            Text("Strength change uses all-set strength score for each exercise. The plan summary is the median percentage change of comparable weight exercises, rather than adding scores across unrelated exercises. No percentage is invented for zero or missing baselines. Level progress uses estimated level steps for a 10-minute effort on the same machine.")
             Text("Exercise baselines use the previous period's last training when available; otherwise the first of at least two trainings in this range. Personal records compare the period's best with all earlier history. New exercises establish a baseline rather than claiming a record.")
             Text("Weekly targets count complete Monday-Sunday weeks only. The calendar shows the last 12 weeks of the selected range; shading represents number of logged entries. Body-region totals weight recorded sets by current profiles and do not measure fatigue or recovery.")
-            Text("Warning badges use each exercise's global/custom thresholds and always calculate trends from best-set Wathan 1RM. The 1RM strength explorer and workload-volume chart let you inspect both dimensions separately.")
+            Text("Warning badges use each exercise's global/custom thresholds and always calculate trends from all-set strength score. The strength score explorer and workload-volume chart let you inspect both dimensions separately.")
         } }, confirmButton = { TextButton(onClick = { showMethods = false }) { Text("Close") } })
 }
 
@@ -300,7 +300,7 @@ private fun DashboardOverview(snapshot: StatsDashboardSnapshot) {
             DashboardTile(current.weightSets.toString(), "Weight sets", dashboardComparison(current.weightSets.toDouble(), previous.weightSets.toDouble()), Modifier.weight(1f))
         }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            DashboardTile(snapshot.medianStrengthChange?.let { "${dashboardSigned(it)}%" } ?: "--", "Median 1RM change", "${snapshot.exercises.count { it.mode == TrackingMode.WEIGHT && it.changePercent != null }} comparable exercises", Modifier.weight(1f))
+            DashboardTile(snapshot.medianStrengthChange?.let { "${dashboardSigned(it)}%" } ?: "--", "Median strength score change", "${snapshot.exercises.count { it.mode == TrackingMode.WEIGHT && it.changePercent != null }} comparable exercises", Modifier.weight(1f))
             DashboardTile(snapshot.records.size.toString(), "New exercise bests", "Against earlier history", Modifier.weight(1f))
         }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -411,7 +411,7 @@ private fun DashboardExerciseCard(
                 (exercise.daysSinceLast?.let { " | last $it days ago" } ?: " | never trained"), style = MaterialTheme.typography.labelSmall)
             exercise.warning?.let { Text("Now: $it", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error) }
             if (expanded) {
-                if (exercise.mode == TrackingMode.WEIGHT) TextButton(onClick = onMetricHelp) { Text("1RM: what does it mean?", style = MaterialTheme.typography.labelSmall) }
+                if (exercise.mode == TrackingMode.WEIGHT) TextButton(onClick = onMetricHelp) { Text("Strength score: what does it mean?", style = MaterialTheme.typography.labelSmall) }
                 DashboardPlot(exercise.days.map { TimeValue(dashboardTimestamp(it.date, zone), it.metric) }, window)
                 if (exercise.mode == TrackingMode.WEIGHT) Text("Period workload: ${dashboardNumber(exercise.days.sumOf { it.volume } / 1000)} t (kg x reps)", style = MaterialTheme.typography.bodySmall)
                 TextButton(onClick = onOpen) { Text("Open exercise") }
@@ -441,7 +441,7 @@ private fun DashboardDayDialog(day: DashboardTraining, onDismiss: () -> Unit, on
                 Column(Modifier.fillMaxWidth().clickable { onMachine(id) }.padding(vertical = 4.dp)) {
                     Text(entries.first().machineName, fontWeight = FontWeight.SemiBold)
                     val mode = entries.first().trackingMode
-                    Text(if (mode == TrackingMode.WEIGHT) "${entries.size} sets | 1RM ${dashboardNumber(entries.maxOf { estimatedOneRepMax(it.weight, it.reps) })} kg | ${dashboardNumber(entries.sumOf { it.volume })} kg x reps"
+                    Text(if (mode == TrackingMode.WEIGHT) "${entries.size} sets | Strength score ${dashboardNumber(sessionStrengthScore(entries.map { com.gymlog.app.data.SetRecord(it.id, it.machineId, it.reps, it.weight, it.performedAt) }))} pts | ${dashboardNumber(entries.sumOf { it.volume })} kg x reps"
                     else "${dashboardNumber(entries.sumOf { it.weight })}m" + if (mode.usesResistanceLevel()) " | peak ${entries.maxOf { it.reps }} ${if (mode == TrackingMode.WATTS) "W" else "Lv."}" else "",
                         style = MaterialTheme.typography.bodySmall)
                 }
