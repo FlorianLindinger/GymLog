@@ -11,9 +11,10 @@ import com.gymlog.app.data.TrackingMode
 
 internal const val TRAINING_METRIC_EXPLANATION =
     "Off: Volume is total weight x reps across all sets in a training. " +
-    "On: Strength score sums weight x reps^0.1 for every valid set in a training day. Every set contributes fully, with no best-set bonus cap. " +
-    "The Lombardi-style exponent makes reps less influential than load. For example, 3 x 10 at 100 kg scores 377.7; 3 x 8 at 105 kg scores 387.8 even though volume falls. " +
-    "A large reduction in reps or sets can still lower the score. It is an app-specific comparison score in points, not a measured one-rep maximum, physical work or a validated sum of strength. Compare the same exercise with similar technique and effort. " +
+    "On: Strength score is the average estimated one-rep maximum (Epley: weight x (1 + reps / 30); a single rep is its own load) over every valid set in a training day, in kg. " +
+    "Every set counts, each extra rep adds about 3.3 % of the load, and one set more or fewer at the same performance does not change the score; volume shows the workload. " +
+    "For example, 3 x 10 at 100 kg scores 133.3 kg, 3 x 12 at 100 kg scores 140 kg, and 2 x 10 at 100 kg also scores 133.3 kg. " +
+    "Light warm-up sets logged with the work sets pull the average down, and estimates beyond about 12 reps are less reliable. It is an estimate for comparing the same exercise, not a measured maximum. " +
     "This choice applies to weight-exercise charts and entry summaries. Trend warnings and strength statistics always use the all-set strength score, regardless of this display choice. " +
     "Weight-exercise charts put the primary training metric on the left axis and recorded weight on the right. Reps use their own unlabelled scale across the plot height, with no trend fit. " +
     "Level and watts always use a Riegel-style estimate for a 10-minute effort, independent of this switch. " +

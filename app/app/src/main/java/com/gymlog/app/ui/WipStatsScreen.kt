@@ -441,7 +441,7 @@ private fun DashboardDayDialog(day: DashboardTraining, onDismiss: () -> Unit, on
                 Column(Modifier.fillMaxWidth().clickable { onMachine(id) }.padding(vertical = 4.dp)) {
                     Text(entries.first().machineName, fontWeight = FontWeight.SemiBold)
                     val mode = entries.first().trackingMode
-                    Text(if (mode == TrackingMode.WEIGHT) "${entries.size} sets | Strength score ${dashboardNumber(sessionStrengthScore(entries.map { com.gymlog.app.data.SetRecord(it.id, it.machineId, it.reps, it.weight, it.performedAt) }))} pts | ${dashboardNumber(entries.sumOf { it.volume })} kg x reps"
+                    Text(if (mode == TrackingMode.WEIGHT) "${entries.size} sets | Strength score ${dashboardNumber(sessionStrengthScore(entries.map { com.gymlog.app.data.SetRecord(it.id, it.machineId, it.reps, it.weight, it.performedAt) }))} kg | ${dashboardNumber(entries.sumOf { it.volume })} kg x reps"
                     else "${dashboardNumber(entries.sumOf { it.weight })}m" + if (mode.usesResistanceLevel()) " | peak ${entries.maxOf { it.reps }} ${if (mode == TrackingMode.WATTS) "W" else "Lv."}" else "",
                         style = MaterialTheme.typography.bodySmall)
                 }

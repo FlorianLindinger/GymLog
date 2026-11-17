@@ -10,6 +10,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 
 internal data class GymLogLoadState(
@@ -37,10 +39,21 @@ internal class GymLogViewModel(private val repository: GymRepository) : ViewMode
         _uiState.value = GymLogLoadState(state)
     }
 
-    fun mutate(action: () -> Unit) {
+    // Writes leave the main thread but must still apply in tap order (for example a weight change
+    // followed immediately by logging sets), so they share one lock.
+    private val writeLock = Mutex()
+
+    /** Runs a database write on the IO dispatcher, serialized with every other write. */
+    suspend fun <T> write(action: () -> T): T = writeLock.withLock { withContext(Dispatchers.IO) { action() } }
+
+    fun mutate(action: () -> Unit) = mutate(action) {}
+
+    /** Writes in the background, refreshes, then hands the result back on the main thread. */
+    fun <T> mutate(action: () -> T, onDone: (T) -> Unit) {
         viewModelScope.launch {
-            withContext(Dispatchers.IO) { action() }
+            val result = write(action)
             refresh()
+            onDone(result)
         }
     }
 

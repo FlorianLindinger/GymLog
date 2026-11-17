@@ -27,6 +27,18 @@ class BackupRecoveryTest {
 
     @Before fun setup() { repo = GymRepository(context, clock) }
 
+    @Test fun previousDayFatigueSurvivesBackupAndOlderBackupsUseDefaults() {
+        repo.savePriorDayFatigue(PriorDayFatigue(55, 25, 0))
+        val backup = repo.exportJson()
+        repo.savePriorDayFatigue(PriorDayFatigue())
+        repo.importJson(backup)
+        assertEquals(PriorDayFatigue(55, 25, 0), repo.loadPriorDayFatigue())
+        assertEquals(PriorDayFatigue(55, 25, 0), repo.loadUiState().priorDayFatigue)
+        val legacy = JSONObject(backup).apply { getJSONObject("settings").remove("priorDayFatigue") }
+        repo.importJson(legacy.toString())
+        assertEquals(PriorDayFatigue(), repo.loadPriorDayFatigue())
+    }
+
     @Test fun invalidLateRowsLeaveWorkoutDataAndEveryPreferenceUnchanged() {
         val first = repo.addMachine("Bench", 40.0, TrackingMode.WEIGHT)
         val second = repo.addMachine("Other", 20.0, TrackingMode.WEIGHT)
@@ -146,6 +158,6 @@ class BackupRecoveryTest {
         assertEquals(100, exerciseOverlap(candidate, recent, prior).percent)
         assertEquals(listOf(legs, abs), rankOverviewMachines(state.machines, clock.trainingDayStart(), recent,
             zone, now, prior, state.progressionSettings, state.fatigueBands).map { it.machine.id })
-        assertEquals(30, exerciseOverlap(candidate, emptyList(), prior).percent)
+        assertEquals(40, exerciseOverlap(candidate, emptyList(), prior).percent)
     }
 }

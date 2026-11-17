@@ -25,18 +25,42 @@ internal fun progressionWarningReasons(
             // Calendar training days preserve the 06:00 boundary across daylight-saving changes.
             val start = Instant.ofEpochMilli(clock.trainingDayStart()).atZone(clock.zoneId)
                 .minusDays(effective.volumeWindowDays.toLong() - 1).toInstant().toEpochMilli()
-            val volumes = summary.recentSets.filter { it.performedAt in start..clock.now() }
+            val scores = summary.recentSets.filter { it.performedAt in start..clock.now() }
                 .groupBy { clock.trainingDayStart(it.performedAt) }
-                .toSortedMap().values.map { sets -> trainingPerformance(sets, useOneRepMax = true) }
-            if (volumes.size >= 2 && volumes.first() > 0.0) {
-                val growth = (volumes.last() - volumes.first()) / volumes.first() * 100.0
+                .toSortedMap().map { (dayStart, sets) -> dayStart to trainingPerformance(sets, useOneRepMax = true) }
+            val growth = trendGrowthPercent(scores)
+            if (growth != null) {
                 if (growth < effective.volumeMinimumIncreasePercent) {
-                    val percent = if (growth % 1.0 == 0.0) growth.toInt().toString() else String.format(Locale.US, "%.1f", growth)
-                    add("Strength score trend ${if (growth >= 0.0) "+" else ""}$percent %")
+                    // Round first: a fitted line can land a hair off a whole number (119.99999…).
+                    val shown = kotlin.math.round(growth * 10.0) / 10.0
+                    val percent = if (shown % 1.0 == 0.0) shown.toInt().toString() else String.format(Locale.US, "%.1f", shown)
+                    add("Strength score trend ${if (shown >= 0.0) "+" else ""}$percent %")
                 }
             }
         }
     }
+}
+
+/**
+ * Percentage change of a least-squares line through every training day, from its value on the first day
+ * to its value on the last day. One unusually good or bad day therefore cannot decide the warning alone,
+ * while exactly two days still give the plain first-to-last change. Null when fewer than two days exist
+ * or the fitted start value is not positive (a percentage of it would be meaningless).
+ */
+internal fun trendGrowthPercent(points: List<Pair<Long, Double>>): Double? {
+    if (points.size < 2) return null
+    val origin = points.first().first
+    // Real elapsed days, so irregular gaps between trainings weigh correctly.
+    val xs = points.map { (it.first - origin) / 86_400_000.0 }
+    val ys = points.map { it.second }
+    val meanX = xs.average()
+    val meanY = ys.average()
+    val sxx = xs.sumOf { (it - meanX) * (it - meanX) }
+    if (sxx == 0.0) return null
+    val slope = xs.indices.sumOf { (xs[it] - meanX) * (ys[it] - meanY) } / sxx
+    val fittedStart = meanY + slope * (xs.first() - meanX)
+    if (fittedStart <= 0.0) return null
+    return slope * (xs.last() - xs.first()) / fittedStart * 100.0
 }
 
 /** Empty warning fields are explicit zero/disabled values, never inherited defaults. */

@@ -7,7 +7,7 @@ use the default trend visibility and reconstruct reps from recorded history;
 stale layouts belonging to old IDs are cleared.
 
 The workout restore runs in a database transaction. Global warning thresholds,
-fatigue boundaries and wheel preferences are saved after every workout row has
+fatigue boundaries, previous-day fatigue percentages and wheel preferences are saved after every workout row has
 validated. A malformed workout or wheel layout therefore leaves existing
 workouts and settings unchanged.
 

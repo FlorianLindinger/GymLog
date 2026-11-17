@@ -7,6 +7,7 @@ import androidx.health.connect.client.records.BodyFatRecord
 import androidx.health.connect.client.records.LeanBodyMassRecord
 import androidx.health.connect.client.records.Record
 import androidx.health.connect.client.records.WeightRecord
+import androidx.health.connect.client.request.ChangesTokenRequest
 import androidx.health.connect.client.request.ReadRecordsRequest
 import androidx.health.connect.client.time.TimeRangeFilter
 import java.time.Instant
@@ -45,6 +46,32 @@ class HealthConnectGateway(private val context: Context, private val clientOverr
     }
     fun sdkStatus(): Int = HealthConnectClient.getSdkStatus(context)
 
+    // Change-log position taken just before the last full read. Null forces the next check to report
+    // changes, e.g. on first use, after an expired token, or when the token could not be obtained.
+    @Volatile private var changesToken: String? = null
+
+    /**
+     * Asks Health Connect's change log whether any body record was added, updated or deleted since the
+     * last full read. This is a small query, so periodic refreshes can skip re-reading the whole history.
+     */
+    suspend fun hasChangesSinceLastRead(): Boolean {
+        var token = changesToken ?: return true
+        val health = client()
+        var changed = false
+        do {
+            val response = health.getChanges(token)
+            if (response.changesTokenExpired) {
+                changesToken = null
+                return true
+            }
+            if (response.changes.isNotEmpty()) changed = true
+            token = response.nextChangesToken
+        } while (response.hasMore)
+        // When something changed the caller does a full read, which takes a fresh token itself.
+        if (!changed) changesToken = token
+        return changed
+    }
+
     private fun client(): HealthConnectClient = clientOverride ?: HealthConnectClient.getOrCreate(context)
 
     fun writePermissions(entry: ManualBodyEntry): Set<String> = buildSet {
@@ -63,6 +90,14 @@ class HealthConnectGateway(private val context: Context, private val clientOverr
 
     suspend fun readBodyData(): BodyDataSnapshot {
         val health = client()
+        // Taken before reading so records written during the read show up in the next change check.
+        val token = try {
+            health.getChangesToken(ChangesTokenRequest(setOf(WeightRecord::class, BodyFatRecord::class, LeanBodyMassRecord::class)))
+        } catch (exception: kotlinx.coroutines.CancellationException) {
+            throw exception
+        } catch (_: Exception) {
+            null
+        }
         val start = Instant.EPOCH
         val end = Instant.now().plusSeconds(24L * 60L * 60L)
         val filter = TimeRangeFilter.between(start, end)
@@ -105,6 +140,7 @@ class HealthConnectGateway(private val context: Context, private val clientOverr
                 )
             }
         }
+        changesToken = token
         return BodyDataSnapshot(result.sortedBy { it.measuredAt }, System.currentTimeMillis())
     }
 }

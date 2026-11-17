@@ -67,6 +67,8 @@ import com.gymlog.app.data.TrackingMode
 import com.gymlog.app.data.BodyArea
 import com.gymlog.app.data.FatigueBands
 import com.gymlog.app.data.parseFatigueBands
+import com.gymlog.app.data.PriorDayFatigue
+import com.gymlog.app.data.parsePriorDayFatigue
 import com.gymlog.app.data.BackupSyncStatus
 import com.gymlog.app.data.GymRepository
 import com.gymlog.app.data.HistorySet
@@ -76,9 +78,7 @@ import com.gymlog.app.data.ExerciseOrderGroup
 import com.gymlog.app.data.MachineSummary
 import com.gymlog.app.data.ProgressionSettings
 import com.gymlog.app.data.TrainingPlan
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 
 private enum class Screen { OVERVIEW, BODY, STATS, WIP_STATS, ORDER, HISTORY, BACKUP, PLANS, DETAIL }
 enum class ExerciseEditField { NAME, TITLE_NOTE, OVERVIEW_NOTE }
@@ -94,6 +94,7 @@ internal data class AppUiState(
     val automaticBackupEnabled: Boolean,
     val backupSyncStatus: BackupSyncStatus,
     val fatigueBands: FatigueBands = FatigueBands(),
+    val priorDayFatigue: PriorDayFatigue = PriorDayFatigue(),
     val fatigueExercises: List<MachineSummary> = emptyList(),
 )
 
@@ -114,6 +115,7 @@ internal fun GymRepository.loadUiState(): AppUiState {
         automaticBackupEnabled = automaticBackupEnabled(),
         backupSyncStatus = backupSyncStatus(),
         fatigueBands = loadFatigueBands(),
+        priorDayFatigue = loadPriorDayFatigue(),
         fatigueExercises = loadFatigueExercises(),
     )
 }
@@ -140,6 +142,8 @@ fun GymLogApp(
     healthSyncing: Boolean,
     onHealthSync: () -> Unit,
     onAutoHealthSync: () -> Unit,
+    restoredBackup: BackupRestoreResult? = null,
+    onRestoredBackupShown: () -> Unit = {},
 ) {
     val viewModel: GymLogViewModel = androidx.lifecycle.viewmodel.compose.viewModel(factory = GymLogViewModel.factory(repository))
     val loadState by viewModel.uiState.collectAsState()
@@ -175,13 +179,36 @@ fun GymLogApp(
     fun mutate(action: () -> Unit) = viewModel.mutate(action)
     fun deleteWithUndo(message: String, action: () -> com.gymlog.app.data.DeletionJournal?) {
         scope.launch {
-            val journal = withContext(Dispatchers.IO) { action() } ?: return@launch
+            val journal = viewModel.write(action) ?: return@launch
             refresh()
             snackbarHostState.currentSnackbarData?.dismiss()
             if (snackbarHostState.showSnackbar(message, "Undo", duration = SnackbarDuration.Long) == SnackbarResult.ActionPerformed) {
-                withContext(Dispatchers.IO) { repository.restoreDeletion(journal) }
+                viewModel.write { repository.restoreDeletion(journal) }
                 refresh()
             }
+        }
+    }
+    fun offerRestoreUndo(restored: BackupRestoreResult) {
+        scope.launch {
+            refresh()
+            snackbarHostState.currentSnackbarData?.dismiss()
+            if (snackbarHostState.showSnackbar("Backup restored", "Undo", duration = SnackbarDuration.Long) == SnackbarResult.ActionPerformed) {
+                try {
+                    restored.undo()
+                    refresh()
+                } catch (exception: kotlinx.coroutines.CancellationException) {
+                    throw exception
+                } catch (exception: Exception) {
+                    snackbarHostState.showSnackbar("Could not undo restore: ${exception.message}")
+                }
+            }
+        }
+    }
+    // A restore that finished after the activity was recreated has no callback; offer its Undo here.
+    LaunchedEffect(restoredBackup) {
+        restoredBackup?.let {
+            onRestoredBackupShown()
+            offerRestoreUndo(it)
         }
     }
     LaunchedEffect(externalDataVersion) {
@@ -315,25 +342,23 @@ fun GymLogApp(
                 onEditPlanNotes = { showPlanNotes = true },
                 areaFrequency = areaFrequency,
                 onQuickSet = { machine, reps ->
-                    if (isDirectMetric(machine.machine.trackingMode)) {
-                        reps.firstOrNull()?.let { repository.addTrainingMinutes(machine.machine.id, it) }
-                    } else {
-                        repository.addSets(machine.machine.id, reps, machine.machine.currentWeight)
-                    }
                     scrollToExerciseId = machine.machine.id.takeIf { reps.any { it > 0 } }
-                    refresh()
+                    mutate {
+                        if (isDirectMetric(machine.machine.trackingMode)) {
+                            reps.firstOrNull()?.let { repository.addTrainingMinutes(machine.machine.id, it) }
+                        } else {
+                            repository.addSets(machine.machine.id, reps, machine.machine.currentWeight)
+                        }
+                    }
                 },
                 onDeleteCurrentExerciseSets = { machine -> deleteWithUndo("Current ${machine.machine.name} entries deleted") { repository.deleteCurrentExerciseSetsWithJournal(machine.machine.id) } },
-                onMetricChange = { machine, value ->
-                    repository.changeWeight(machine.machine.id, value)
-                    refresh()
-                },
+                onMetricChange = { machine, value -> mutate { repository.changeWeight(machine.machine.id, value) } },
                 onMetricChangeForSession = { machine, value ->
-                    repository.changeMetricForCurrentTrainingUnit(machine.machine.id, value)
-                    refresh()
+                    mutate { repository.changeMetricForCurrentTrainingUnit(machine.machine.id, value) }
                 },
                 progressionSettings = uiState.progressionSettings,
                 fatigueBands = uiState.fatigueBands,
+                priorDayFatigue = uiState.priorDayFatigue,
             )
             Screen.BODY -> BodyOverviewScreen(
                 snapshot = bodyData,
@@ -350,8 +375,7 @@ fun GymLogApp(
                 modifier = Modifier.padding(padding),
                 onUpdateSet = { id, reps, weight -> mutate { repository.updateSet(id, reps, weight) } },
                 onAddSet = { machineId, reps, weight, performedAt ->
-                    repository.addHistoricalSet(machineId, reps, weight, performedAt)
-                    refresh()
+                    mutate { repository.addHistoricalSet(machineId, reps, weight, performedAt) }
                 },
                 onDeleteSet = { id -> deleteWithUndo("Set deleted") { repository.deleteSetWithJournal(id) } },
                 onDeleteExerciseDay = { machineId, start, end -> deleteWithUndo("Exercise entries deleted") { repository.deleteExerciseDayWithJournal(machineId, start, end) } },
@@ -385,6 +409,11 @@ fun GymLogApp(
                     repository.saveFatigueBands(bands)
                     viewModel.replace(Result.success(uiState.copy(fatigueBands = bands)))
                 },
+                priorDayFatigue = uiState.priorDayFatigue,
+                onPriorDayFatigue = { prior ->
+                    repository.savePriorDayFatigue(prior)
+                    viewModel.replace(Result.success(uiState.copy(priorDayFatigue = prior)))
+                },
                 modifier = Modifier.padding(padding),
                 onMove = { id, direction -> mutate { repository.moveMachineWithinOrderGroup(id, direction) } },
                 onGroup = { id, group -> mutate { repository.setExerciseOrderGroup(id, group) } },
@@ -395,21 +424,18 @@ fun GymLogApp(
                 activePlanId = uiState.activeTrainingPlanId,
                 modifier = Modifier.padding(padding),
                 onOpen = {
-                    repository.setActiveTrainingPlan(it)
-                    refresh()
+                    mutate { repository.setActiveTrainingPlan(it) }
                     screen = Screen.OVERVIEW
                 },
                 onCreate = {
-                    repository.createTrainingPlan(it)
-                    refresh()
+                    mutate { repository.createTrainingPlan(it) }
                     screen = Screen.OVERVIEW
                 },
                 onRename = { id, name -> mutate { repository.renameTrainingPlan(id, name) } },
                 onDelete = { id -> deleteWithUndo("Training plan deleted") { repository.deleteTrainingPlanWithJournal(id) } },
                 onDuplicate = { mutate { repository.duplicateTrainingPlan(it) } },
                 onCreateDemo = {
-                    repository.createDemoTrainingPlan()
-                    refresh()
+                    mutate { repository.createDemoTrainingPlan() }
                     screen = Screen.OVERVIEW
                 },
             )
@@ -433,7 +459,8 @@ fun GymLogApp(
                     repository = repository,
                     onAreaColor = { area, color -> mutate { repository.setAreaColor(area, color) } },
                     onChanged = ::refresh,
-                    onTrainingLogged = { scrollToExerciseId = summary.machine.id; refresh() },
+                    write = ::mutate,
+                    onTrainingLogged = { scrollToExerciseId = summary.machine.id },
                     onEditDetails = { editingExerciseField = it },
                     isHidden = summary.machine.id in uiState.hiddenMachineIds,
                     onDeleteSets = { sets -> deleteWithUndo("${sets.size} set${if (sets.size == 1) "" else "s"} deleted") { repository.deleteSetsWithJournal(sets.map { it.id }) } },
@@ -451,11 +478,11 @@ fun GymLogApp(
     if (showAdd) AddMachineDialog(
         onDismiss = { showAdd = false },
         onAdd = { name, weight, trackingMode, note, areas ->
-            val id = repository.addMachine(name, weight, trackingMode, note, areas)
-            refresh()
             showAdd = false
-            selectedId = id
-            screen = Screen.DETAIL
+            viewModel.mutate({ repository.addMachine(name, weight, trackingMode, note, areas) }) { id ->
+                selectedId = id
+                screen = Screen.DETAIL
+            }
         },
     )
 
@@ -526,10 +553,10 @@ fun GymLogApp(
                 Text("Volume or strength score", style = MaterialTheme.typography.titleSmall)
                 Text("Choose Use strength score instead of volume with the switch in Menu. Tap its outlined label for details. " + TRAINING_METRIC_EXPLANATION)
                 Text("Progress Warnings & Overrides", style = MaterialTheme.typography.titleSmall)
-                Text("Warnings show days without a kg increase (default 60 days) and growth in all-set strength score. The trend window compares the first and latest training days within the last X days, including today (default 60 days). The Menu metric switch only changes charts and entry summaries. Blank or 0 disables the corresponding warning; either a blank/0 window or minimum percentage disables the trend warning. At least 2 training days in that period are needed.")
+                Text("Warnings show days without a kg increase (default 60 days) and growth in all-set strength score. The trend fits a straight line through every training day within the last X days, including today (default 60 days), and reports its change from the first to the latest day, so a single unusual day does not decide the warning. The Menu metric switch only changes charts and entry summaries. Blank or 0 disables the corresponding warning; either a blank/0 window or minimum percentage disables the trend warning. At least 2 training days in that period are needed.")
                 Text("Every exercise has Progress Warnings in its details. Follow global warning settings uses future global changes. Turn it off for custom thresholds. Trend warnings always use the all-set strength score formula; there is no per-exercise metric setting. Blank custom fields disable warnings rather than inheriting global values. Warnings apply to weight exercises.")
                 Text("Exercise Ordering & Outlines", style = MaterialTheme.typography.titleSmall)
-                Text("Open Exercise Order from Menu. The current exercise stays first with a blue outline. Auto groups unfinished exercises into four configurable color bins. All distinct exercises in this training contribute with decreasing influence (neutral regions: 100%, 50%, 25%, 12.5%, then a 10% floor). Planning factors keep biceps/triceps overlap slightly longer (1.1), quads/hamstrings slightly shorter (0.9), core/abs 20% slower to recover (factor 1.25), and other regions neutral (1.0). These are heuristics, not measured recovery times. Preset Core/abs percentages are 50% higher; saved profiles keep their editable percentages, without dividing by exercise count. Yesterday adds 30% per exercise, two days ago 15%, and three days ago 7.5%. Contributions from exercises across all plans, including hidden exercises, accumulate once per training day without order weighting. The score uses the strongest intensity-weighted region, so adding regions cannot dilute an existing clash. Choose the green/yellow/orange/red boundaries in Exercise Order. Defaults switch at 25%, 50% and 75%; Auto priority and warning/frequency bias stay within those color groups. Completed exercises have no overlap outline. Missing profiles count as zero overlap, so green can also mean an unconfigured profile.")
+                Text("Open Exercise Order from Menu. The current exercise stays first with a blue outline. Auto groups unfinished exercises into four configurable color bins. All distinct exercises in this training contribute with decreasing influence (neutral regions: 100%, 50%, 25%, 12.5%, then a 10% floor). Planning factors keep biceps/triceps overlap slightly longer (1.1), quads/hamstrings slightly shorter (0.9), core/abs 20% slower to recover (factor 1.25), and other regions neutral (1.0). These are heuristics, not measured recovery times. Preset Core/abs percentages are 50% higher; saved profiles keep their editable percentages, without dividing by exercise count. By default yesterday adds 40% per exercise, two days ago 20%, and three days ago 10%; change these in Exercise Order (0 turns a day off). Contributions from exercises across all plans, including hidden exercises, accumulate once per training day without order weighting. The score uses the strongest intensity-weighted region, so adding regions cannot dilute an existing clash. Choose the green/yellow/orange/red boundaries in Exercise Order. Defaults switch at 25%, 50% and 75%; Auto priority and warning/frequency bias stay within those color groups. Completed exercises have no overlap outline. Missing profiles count as zero overlap, so green can also mean an unconfigured profile.")
                 Text("Within each overlap bin, higher Auto priority comes first (+ moves earlier, - moves later), then a small combined boost for one or two active warnings and fewer recent training days. The frequency boost is capped and disappears after three training days in the last two calendar months. Unfinished manual top and bottom use your arrow order; completed exercises follow from first to last done. Exercises across all plans, including hidden exercises, contribute recent training context.")
                 Text("Body Regions & Colors", style = MaterialTheme.typography.titleSmall)
                 Text("Choose L (25%), M (50%), H (100%), or type a custom region percentage in exercise details. Zero removes the region. Marker widths follow the percentage. Preset Core/abs values are 50% higher; existing saved profiles are unchanged. English/German exercise suggestions provide editable starting profiles. These are planning estimates, not recovery measurements. The body-region guide's Show/Hide choice is remembered for every exercise, even when profile edits are cancelled.")
@@ -575,8 +602,7 @@ fun GymLogApp(
         pinned = activePlan.notesPinned,
         onDismiss = { showPlanNotes = false; showMenu = true },
         onSave = { notes, pinned ->
-            repository.saveTrainingPlanNotes(activePlan.id, notes, pinned)
-            refresh()
+            mutate { repository.saveTrainingPlanNotes(activePlan.id, notes, pinned) }
             showPlanNotes = false
             showMenu = true
         },
@@ -586,21 +612,20 @@ fun GymLogApp(
         activePlan = activePlan,
         plans = uiState.trainingPlans,
         onCreate = { name ->
-            repository.createTrainingPlan(name)
-            refresh()
+            mutate { repository.createTrainingPlan(name) }
             showTrainingHeader = false
         },
         onExport = onExportPlan, onImport = onImportPlan,
         onDismiss = { showTrainingHeader = false },
         onSave = { name, notes, pinned ->
-            repository.renameTrainingPlan(activePlan.id, name)
-            repository.saveTrainingPlanNotes(activePlan.id, notes, pinned)
-            refresh()
+            mutate {
+                repository.renameTrainingPlan(activePlan.id, name)
+                repository.saveTrainingPlanNotes(activePlan.id, notes, pinned)
+            }
             showTrainingHeader = false
         },
         onSwitch = { planId ->
-            repository.setActiveTrainingPlan(planId)
-            refresh()
+            mutate { repository.setActiveTrainingPlan(planId) }
             showTrainingHeader = false
         },
     )
@@ -635,8 +660,7 @@ fun GymLogApp(
                 initialFocus = focus,
                 onDismiss = { editingExerciseField = null },
                 onSave = { name, titleNote, overviewNote ->
-                    repository.updateMachine(machine.id, name, titleNote, overviewNote, machine.pauseTime)
-                    refresh()
+                    mutate { repository.updateMachine(machine.id, name, titleNote, overviewNote, machine.pauseTime) }
                     editingExerciseField = null
                 },
             )
@@ -650,22 +674,7 @@ fun GymLogApp(
         confirmButton = {
             Button(onClick = {
                 confirmImport = false
-                onImport { restored ->
-                    if (restored != null) scope.launch {
-                        refresh()
-                        snackbarHostState.currentSnackbarData?.dismiss()
-                        if (snackbarHostState.showSnackbar("Backup restored", "Undo", duration = SnackbarDuration.Long) == SnackbarResult.ActionPerformed) {
-                            try {
-                                restored.undo()
-                                refresh()
-                            } catch (exception: kotlinx.coroutines.CancellationException) {
-                                throw exception
-                            } catch (exception: Exception) {
-                                snackbarHostState.showSnackbar("Could not undo restore: ${exception.message}")
-                            }
-                        }
-                    }
-                }
+                onImport { restored -> if (restored != null) offerRestoreUndo(restored) }
             }) { Text("Choose Backup") }
         },
         dismissButton = { TextButton(onClick = { confirmImport = false }) { Text("Cancel") } },
@@ -815,12 +824,47 @@ internal fun FatigueBandSettings(current: FatigueBands, onSave: (FatigueBands) -
 }
 
 @Composable
+internal fun PriorDayFatigueSettings(current: PriorDayFatigue, onSave: (PriorDayFatigue) -> Unit) {
+    var yesterday by remember(current) { mutableStateOf(current.yesterday.toString()) }
+    var twoDays by remember(current) { mutableStateOf(current.twoDaysAgo.toString()) }
+    var threeDays by remember(current) { mutableStateOf(current.threeDaysAgo.toString()) }
+    val draft = parsePriorDayFatigue(yesterday, twoDays, threeDays)
+    Card(Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text("Fatigue from previous days", style = MaterialTheme.typography.titleSmall)
+            Text("Each exercise from an earlier training day adds this share of a full exercise to its regions. 0 ignores that day.",
+                style = MaterialTheme.typography.bodySmall)
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                listOf(Triple("Yesterday (%)", yesterday, { value: String -> yesterday = value }),
+                    Triple("2 days (%)", twoDays, { value: String -> twoDays = value }),
+                    Triple("3 days (%)", threeDays, { value: String -> threeDays = value })).forEach { (label, value, update) ->
+                    OutlinedTextField(value, { update(it.filter(Char::isDigit)) }, Modifier.weight(1f),
+                        label = { Text(label) }, singleLine = true, isError = draft == null,
+                        keyboardOptions = KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Number))
+                }
+            }
+            if (draft == null) Text("Use values from 0 to 100.", color = MaterialTheme.colorScheme.error,
+                style = MaterialTheme.typography.bodySmall)
+            Row {
+                TextButton(onClick = {
+                    val defaults = PriorDayFatigue()
+                    yesterday = defaults.yesterday.toString(); twoDays = defaults.twoDaysAgo.toString(); threeDays = defaults.threeDaysAgo.toString()
+                }) { Text("Default days") }
+                Button(onClick = { draft?.let(onSave) }, enabled = draft != null && draft != current) { Text("Save days") }
+            }
+        }
+    }
+}
+
+@Composable
 private fun OrderScreen(
     machines: List<MachineSummary>,
     fatigueExercises: List<MachineSummary>,
     fatigueBands: FatigueBands,
     progressionSettings: ProgressionSettings,
     onFatigueBands: (FatigueBands) -> Unit,
+    priorDayFatigue: PriorDayFatigue,
+    onPriorDayFatigue: (PriorDayFatigue) -> Unit,
     modifier: Modifier = Modifier,
     onMove: (Long, Int) -> Unit,
     onGroup: (Long, ExerciseOrderGroup) -> Unit,
@@ -829,10 +873,13 @@ private fun OrderScreen(
     val now = System.currentTimeMillis()
     val clock = com.gymlog.app.data.GymClock()
     val cutoff = clock.trainingDayStart(now)
-    val ranked = rankOverviewMachines(machines, cutoff, recentTrainingExercises(fatigueExercises, cutoff),
-        zone = clock.zoneId, now = now,
-        prior = com.gymlog.app.data.priorExerciseExposures(fatigueExercises, now, clock.zoneId),
-        progressionSettings = progressionSettings, fatigueBands = fatigueBands)
+    // Ranking walks every exercise's history; recompute it only when its inputs change, not on every redraw.
+    val ranked = remember(machines, fatigueExercises, fatigueBands, priorDayFatigue, progressionSettings, cutoff) {
+        rankOverviewMachines(machines, cutoff, recentTrainingExercises(fatigueExercises, cutoff),
+            zone = clock.zoneId, now = now,
+            prior = com.gymlog.app.data.priorExerciseExposures(fatigueExercises, now, clock.zoneId, priorDayFatigue),
+            progressionSettings = progressionSettings, fatigueBands = fatigueBands)
+    }
     val groups = listOf(
         ExerciseOrderGroup.MANUAL_TOP to "Manual top",
         ExerciseOrderGroup.AUTOMATIC to "Auto sorted",
@@ -844,9 +891,10 @@ private fun OrderScreen(
         verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
         item { FatigueBandSettings(fatigueBands, onFatigueBands) }
+        item { PriorDayFatigueSettings(priorDayFatigue, onPriorDayFatigue) }
         item {
             Text(
-                "The current exercise stays first, then unfinished Manual top in your arrow order. Auto uses four configurable color bins, green, yellow, orange and red. All distinct exercises in this training contribute with decreasing influence (neutral regions: 100%, 50%, 25%, 12.5%, then a 10% floor). Planning factors keep biceps/triceps overlap slightly longer (1.1), quads/hamstrings slightly shorter (0.9), core/abs 20% slower to recover (factor 1.25), and other regions neutral (1.0). These are heuristics, not measured recovery times. Preset Core/abs percentages are 50% higher; saved profiles keep their editable percentages, without dividing by exercise count. Yesterday adds 30% per exercise, two days ago 15%, and three days ago 7.5%. Contributions from exercises across all plans, including hidden exercises, accumulate once per training day without order weighting. The score uses the strongest intensity-weighted region, so adding regions cannot dilute an existing clash. Within each bin, higher Auto priority comes first (+ moves earlier, - moves later), then a small combined boost for one or two active warnings and fewer recent training days. The frequency boost is capped and disappears after three training days in the last two calendar months. Unknown overlap counts as zero. Unfinished Manual bottom keeps your arrow order, followed by completed exercises from first to last done.",
+                "The current exercise stays first, then unfinished Manual top in your arrow order. Auto uses four configurable color bins, green, yellow, orange and red. All distinct exercises in this training contribute with decreasing influence (neutral regions: 100%, 50%, 25%, 12.5%, then a 10% floor). Planning factors keep biceps/triceps overlap slightly longer (1.1), quads/hamstrings slightly shorter (0.9), core/abs 20% slower to recover (factor 1.25), and other regions neutral (1.0). These are heuristics, not measured recovery times. Preset Core/abs percentages are 50% higher; saved profiles keep their editable percentages, without dividing by exercise count. By default yesterday adds 40% per exercise, two days ago 20%, and three days ago 10%; change these in Exercise Order (0 turns a day off). Contributions from exercises across all plans, including hidden exercises, accumulate once per training day without order weighting. The score uses the strongest intensity-weighted region, so adding regions cannot dilute an existing clash. Within each bin, higher Auto priority comes first (+ moves earlier, - moves later), then a small combined boost for one or two active warnings and fewer recent training days. The frequency boost is capped and disappears after three training days in the last two calendar months. Unknown overlap counts as zero. Unfinished Manual bottom keeps your arrow order, followed by completed exercises from first to last done.",
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )

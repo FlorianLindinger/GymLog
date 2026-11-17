@@ -69,6 +69,7 @@ import com.gymlog.app.data.AreaAssignment
 import com.gymlog.app.data.ExerciseCatalog
 import com.gymlog.app.data.ExerciseTemplate
 import com.gymlog.app.data.ExerciseOverlap
+import com.gymlog.app.data.PriorDayFatigue
 import com.gymlog.app.data.priorExerciseExposures
 import com.gymlog.app.data.exerciseOverlap
 import com.gymlog.app.data.rankOverviewMachines
@@ -119,6 +120,7 @@ fun OverviewScreen(
     progressionSettings: ProgressionSettings,
     fatigueBands: FatigueBands = FatigueBands(),
     fatigueExercises: List<MachineSummary> = machines + hiddenMachines,
+    priorDayFatigue: PriorDayFatigue = PriorDayFatigue(),
 ) {
     val zone = ZoneId.systemDefault()
     val now = System.currentTimeMillis()
@@ -132,8 +134,8 @@ fun OverviewScreen(
     val recentExercises = remember(fatigueExercises, todayTrainingDate) {
         recentTrainingExercises(fatigueExercises, trainingDayStart(now, zone))
     }
-    val priorExposures = remember(fatigueExercises, todayTrainingDate) {
-        priorExerciseExposures(fatigueExercises, now, zone)
+    val priorExposures = remember(fatigueExercises, todayTrainingDate, priorDayFatigue) {
+        priorExerciseExposures(fatigueExercises, now, zone, priorDayFatigue)
     }
     val scope = rememberCoroutineScope()
     val rankedMachines = remember(machines, trainingUnitCutoff, recentExercises, priorExposures, progressionSettings, fatigueBands, todayTrainingDate) {
@@ -360,8 +362,8 @@ fun ProgressionSettingsDialog(
                     Switch(checked = followGlobal, onCheckedChange = { followGlobal = it })
                 }
             }
-            Text("Trend warnings use the all-set strength score: sum weight × reps^0.1 over every valid set in each training day. It is a comparison score, not a one-rep maximum.", style = MaterialTheme.typography.titleSmall)
-            Text("Blank or 0 disables that warning. Days without a weight increase defaults to 60 and counts complete 24-hour days. Trend warnings are disabled if either the window or minimum increase is blank or 0. Compare the first and latest training days within the last X days, including today; at least 2 training days are needed. Default trend window: 60 days.")
+            Text("Trend warnings use the strength score: the average estimated one-rep maximum (Epley) over every valid set in each training day. It is an estimate, not a measured maximum.", style = MaterialTheme.typography.titleSmall)
+            Text("Blank or 0 disables that warning. Days without a weight increase defaults to 60 and counts complete 24-hour days. Trend warnings are disabled if either the window or minimum increase is blank or 0. A straight line is fitted through every training day within the last X days, including today, and its change from the first to the latest day is compared; at least 2 training days are needed. Default trend window: 60 days.")
             if (!followGlobal) {
                 TextButton(onClick = { showMetricHelp = true }) { Text("How Strength score is calculated") }
                 OutlinedTextField(days, { days = it.filter(Char::isDigit) },
@@ -632,8 +634,6 @@ internal fun sessionTrendColor(summary: MachineSummary): Color = when (summary.p
     else -> Color(0xFF9E9E9E)
 }
 
-private const val TRAINING_UNIT_MILLIS = 6L * 60L * 60L * 1000L
-
 fun currentTrainingUnitSets(summary: MachineSummary, now: Long = System.currentTimeMillis(), zone: ZoneId = ZoneId.systemDefault()): List<SetRecord> {
     val day = trainingDate(now, zone)
     val start = day.atTime(6, 0).atZone(zone).toInstant().toEpochMilli()
@@ -667,6 +667,9 @@ fun QuickRepDialog(
 ) {
     val slots = maxOf(5, initialReps.size)
     val reps = remember(initialReps) { mutableStateListOf<Int>().apply { addAll((initialReps + List(5) { 0 }).take(slots)) } }
+    // Clearing every wheel would replace today's entry with nothing and bypass the confirmed,
+    // undoable delete path, so that case is routed to onDelete instead of onAdd.
+    val clearsEntry = reps.none { it > 0 }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(if (isChange) "Change Sets" else "Log Up to 5 Sets") },
@@ -695,7 +698,8 @@ fun QuickRepDialog(
                 Text("Last: ${lastReps.joinToString(",").ifEmpty { "None" }}", style = MaterialTheme.typography.labelLarge)
             }
         },
-        confirmButton = { Button(onClick = { onAdd(reps.toList()) }, enabled = isChange || reps.any { it > 0 }) { Text(if (isChange) "Change Sets" else "Save Sets") } },
+        confirmButton = { Button(onClick = { if (clearsEntry) onDelete?.invoke() else onAdd(reps.toList()) },
+            enabled = !clearsEntry || onDelete != null) { Text(if (isChange) "Change Sets" else "Save Sets") } },
         dismissButton = { Row { if (onDelete != null) TextButton(onClick = onDelete) { Text("Delete sets", color = MaterialTheme.colorScheme.error) }; TextButton(onClick = onDismiss) { Text("Cancel") } } },
     )
 }

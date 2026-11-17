@@ -50,9 +50,10 @@ class StatsDashboardTest {
         assertEquals(2, result.current.weightSets)
         assertEquals(2000.0, result.current.volume, 0.0)
         assertEquals(45.0, result.current.cardioMinutes, 0.0)
-        assertEquals(setStrengthScore(100.0, 10) * 2, result.exercises[0].latest!!, 0.000001)
+        // Two equal sets average to one set's estimate.
+        assertEquals(setStrengthScore(100.0, 10), result.exercises[0].latest!!, 0.000001)
         assertEquals("Strength score", result.exercises[0].label)
-        assertEquals("pts", result.exercises[0].unit)
+        assertEquals("kg", result.exercises[0].unit)
         assertEquals(estimatedTenMinuteIntensity(7.0, 20.0), result.exercises[1].latest!!, 0.0)
         assertEquals(estimatedTenMinuteIntensity(120.0, 25.0), result.exercises[2].latest!!, 0.0)
         assertEquals("Est. 10-min power", result.exercises[2].label)
@@ -69,7 +70,8 @@ class StatsDashboardTest {
         assertEquals(10.0, result.medianStrengthChange!!, 0.000001)
         assertFalse(result.exercises.single().isRecord)
         assertTrue(result.records.isEmpty())
-        val improved = machine.copy(recentSets = machine.recentSets + set(5, "2026-10-22T15:00:00Z", 65.0))
+        // Same-day sets are averaged: 55 and 70 give 62.5, above the earlier best of 60.
+        val improved = machine.copy(recentSets = machine.recentSets + set(5, "2026-10-22T15:00:00Z", 70.0))
         assertTrue(buildStatsDashboard(listOf(improved), period, settings, clock).exercises.single().isRecord)
     }
 

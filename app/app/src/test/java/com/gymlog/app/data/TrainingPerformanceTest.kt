@@ -28,8 +28,9 @@ class TrainingPerformanceTest {
     }
 
     @Test
-    fun setScoreWeightsLoadMoreStronglyThanRepetitionsAndIgnoresInvalidSets() {
-        assertEquals(125.8925411794, setStrengthScore(100.0, 10), 0.000001)
+    fun setEstimateIsEpleyAndIgnoresInvalidSets() {
+        assertEquals(133.3333333333, setStrengthScore(100.0, 10), 0.000001)
+        assertEquals(140.0, setStrengthScore(100.0, 12), 0.000001)
         assertEquals(100.0, setStrengthScore(100.0, 1), 0.0)
         listOf(0.0, -1.0, Double.NaN, Double.POSITIVE_INFINITY).forEach {
             assertEquals(0.0, setStrengthScore(it, 10), 0.0)
@@ -38,30 +39,28 @@ class TrainingPerformanceTest {
     }
 
     @Test
-    fun everySetContributesFullyWithoutABestSetBonusCap() {
+    fun sessionScoreAveragesEverySetSoSetCountAloneDoesNotChangeIt() {
         val first = SetRecord(1, 1, 10, 100.0, 0)
         val second = SetRecord(2, 1, 5, 90.0, 1)
-        val firstScore = setStrengthScore(100.0, 10)
         assertEquals(1450.0, trainingPerformance(listOf(first, second), false), 0.0)
-        assertEquals(firstScore, sessionStrengthScore(listOf(first)), 0.0)
-        assertEquals(firstScore * 2, sessionStrengthScore(listOf(first, first)), 0.000001)
-        val score = sessionStrengthScore(listOf(first, second))
-        assertEquals(firstScore + setStrengthScore(90.0, 5), score, 0.000001)
-        assertEquals(firstScore * 100, sessionStrengthScore(List(100) { first }), 0.000001)
-        assertEquals(score, sessionStrengthScore(listOf(second, first)), 0.0)
-        assertEquals(firstScore, sessionStrengthScore(listOf(first, first.copy(reps = 0))), 0.0)
+        assertEquals(setStrengthScore(100.0, 10), sessionStrengthScore(listOf(first)), 0.0)
+        assertEquals(sessionStrengthScore(listOf(first)), sessionStrengthScore(List(5) { first }), 0.000001)
+        val mixed = sessionStrengthScore(listOf(first, second))
+        assertEquals((setStrengthScore(100.0, 10) + setStrengthScore(90.0, 5)) / 2, mixed, 0.000001)
+        assertEquals(mixed, sessionStrengthScore(listOf(second, first)), 0.0)
+        // Invalid rows are skipped rather than averaged in as zero.
+        assertEquals(sessionStrengthScore(listOf(first)), sessionStrengthScore(listOf(first, first.copy(reps = 0))), 0.0)
         assertEquals(0.0, trainingPerformance(emptyList(), true), 0.0)
     }
 
     @Test
-    fun ordinaryLoadProgressionCanImproveScoreEvenWhenVolumeFallsButMuchLessWorkCanLowerIt() {
+    fun moreRepsRaiseTheScoreAndAWeakSetLowersIt() {
         val before = List(3) { SetRecord(it.toLong(), 1, 10, 100.0, 0) }
-        val after = List(3) { SetRecord(it.toLong(), 1, 8, 105.0, 0) }
-        assertEquals(377.6776235383, trainingPerformance(before, true), .000001)
-        assertEquals(387.8104902036, trainingPerformance(after, true), .000001)
-        org.junit.Assert.assertTrue(trainingPerformance(after, false) < trainingPerformance(before, false))
-        org.junit.Assert.assertTrue(trainingPerformance(after, true) > trainingPerformance(before, true))
-        org.junit.Assert.assertTrue(trainingPerformance(after.take(1), true) < trainingPerformance(before, true))
-        org.junit.Assert.assertTrue(trainingPerformance(after.map { it.copy(reps = 1) }, true) < trainingPerformance(before, true))
+        val moreReps = List(3) { SetRecord(it.toLong(), 1, 12, 100.0, 0) }
+        assertEquals(133.3333333333, trainingPerformance(before, true), .000001)
+        assertEquals(140.0, trainingPerformance(moreReps, true), .000001)
+        org.junit.Assert.assertTrue(trainingPerformance(before.dropLast(1) + before.last().copy(reps = 6), true) <
+            trainingPerformance(before, true))
+        assertEquals(trainingPerformance(before, true), trainingPerformance(before.take(2), true), .000001)
     }
 }

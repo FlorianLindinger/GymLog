@@ -41,15 +41,23 @@ internal val BodyArea.recoveryFactor: Double get() = when (this) {
 /** One exercise's contribution from a previous training day. */
 internal data class PriorExerciseExposure(val summary: MachineSummary, val weight: Double)
 
-/** Each exercise contributes once per previous training day, independent of logging order. */
-internal fun priorExerciseExposures(machines: List<MachineSummary>, now: Long, zone: ZoneId): List<PriorExerciseExposure> {
+/** Each exercise contributes once per previous training day, independent of logging order (default 40%, 20%, 10%). */
+internal fun priorExerciseExposures(
+    machines: List<MachineSummary>,
+    now: Long,
+    zone: ZoneId,
+    priorDays: PriorDayFatigue = PriorDayFatigue(),
+): List<PriorExerciseExposure> {
     val clock = GymClock(zoneId = zone)
     val today = Instant.ofEpochMilli(clock.trainingDayStart(now)).atZone(zone)
     return (1L..3L).flatMap { days ->
+        val weight = priorDays.weights[days.toInt() - 1]
+        // A disabled day must not add context either; it would otherwise still mark regions as shared.
+        if (weight <= 0.0) return@flatMap emptyList()
         val start = today.minusDays(days).toInstant().toEpochMilli()
         val end = today.minusDays(days - 1).toInstant().toEpochMilli()
         machines.filter { summary -> summary.recentSets.any { it.performedAt >= start && it.performedAt < end } }
-            .map { PriorExerciseExposure(it, 0.3 * 0.5.pow(days.toInt() - 1)) }
+            .map { PriorExerciseExposure(it, weight) }
     }
 }
 

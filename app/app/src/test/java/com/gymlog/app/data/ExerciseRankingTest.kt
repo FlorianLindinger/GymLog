@@ -26,8 +26,21 @@ class ExerciseRankingTest {
         val recent = exercise(1, BodyArea.CHEST, times = listOf(now - day, now - day + 1000,
             now - 2 * day, now - 3 * day, now - 4 * day))
         val prior = priorExerciseExposures(listOf(recent), now, zone)
-        assertEquals(listOf(0.3, 0.15, 0.075), prior.map { it.weight })
-        assertEquals(53, exerciseOverlap(exercise(2, BodyArea.CHEST), emptyList(), prior).percent)
+        assertEquals(listOf(0.4, 0.2, 0.1), prior.map { it.weight })
+        assertEquals(70, exerciseOverlap(exercise(2, BodyArea.CHEST), emptyList(), prior).percent)
+    }
+
+    @Test
+    fun customPreviousDayFatigueChangesWeightsAndZeroDropsThatDay() {
+        val now = Instant.parse("2026-11-06T12:00:00Z").toEpochMilli()
+        val recent = exercise(1, BodyArea.CHEST, times = listOf(now - day, now - 2 * day, now - 3 * day))
+        val custom = priorExerciseExposures(listOf(recent), now, zone, PriorDayFatigue(50, 0, 5))
+        assertEquals(listOf(0.5, 0.05), custom.map { it.weight })
+        assertEquals(55, exerciseOverlap(exercise(2, BodyArea.CHEST), emptyList(), custom).percent)
+        assertTrue(priorExerciseExposures(listOf(recent), now, zone, PriorDayFatigue(0, 0, 0)).isEmpty())
+        assertNull(parsePriorDayFatigue("101", "20", "10"))
+        assertNull(parsePriorDayFatigue("", "20", "10"))
+        assertEquals(PriorDayFatigue(0, 20, 100), parsePriorDayFatigue("0", "20", "100"))
     }
 
     @Test
@@ -93,8 +106,9 @@ class ExerciseRankingTest {
             exercise(5, BodyArea.CHEST, times = listOf(twoDays - 2 * day)))
         val exposures = priorExerciseExposures(items, now, zone)
         assertEquals(4, exposures.size)
-        assertEquals(listOf(0.3, 0.3, 0.15, 0.075), exposures.map { it.weight })
-        assertEquals(83, exerciseOverlap(exercise(99, BodyArea.CHEST), emptyList(), exposures).percent)
+        assertEquals(listOf(0.4, 0.4, 0.2, 0.1), exposures.map { it.weight })
+        // 0.4 + 0.4 + 0.2 + 0.1 exceeds one full region and is capped.
+        assertEquals(100, exerciseOverlap(exercise(99, BodyArea.CHEST), emptyList(), exposures).percent)
         assertEquals(exposures.toSet(), priorExerciseExposures(items.reversed(), now, zone).toSet())
     }
     @Test

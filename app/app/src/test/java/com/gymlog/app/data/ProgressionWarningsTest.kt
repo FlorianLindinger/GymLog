@@ -87,8 +87,9 @@ class ProgressionWarningsTest {
     fun scoreIncludesEverySetAndIgnoresOlderTrainings() {
         val exercise = summary(100, 10, 10).let { it.copy(recentSets = it.recentSets +
             SetRecord(99, 1, 1, 1.0, start.toEpochMilli() + day + 1_000)) }
-        val settings = ProgressionSettings(useOneRepMax = false, staleDays = 0, volumeWindowDays = 28)
-        assertEquals("Strength score trend -7.4 %", progressionWarning(exercise, settings, clock))
+        val settings = ProgressionSettings(useOneRepMax = false, staleDays = 0, volumeWindowDays = 28, volumeMinimumIncreasePercent = 100)
+        // The 1 kg set is averaged into its day (13.33 and 1 -> 7.17 kg) and the 100-rep day is outside the window.
+        assertEquals("Strength score trend +86 %", progressionWarning(exercise, settings, clock))
     }
 
     @Test
@@ -134,10 +135,11 @@ class ProgressionWarningsTest {
         val exercise = summary(10, 10, 10).let { it.copy(recentSets = it.recentSets +
             SetRecord(99, 1, 10, 10.0, start.toEpochMilli() + 2 * day + 1_000)) }
         val global = ProgressionSettings(useOneRepMax = true, staleDays = 0, volumeWindowDays = 60, volumeMinimumIncreasePercent = 150)
-        assertEquals("Strength score trend +100 %", progressionWarning(exercise, global, clock))
-        assertEquals("Strength score trend +100 %", progressionWarning(exercise, global.copy(useOneRepMax = false), clock))
+        // The repeated set on the last day is averaged, so all days score the same.
+        assertEquals("Strength score trend +0 %", progressionWarning(exercise, global, clock))
+        assertEquals("Strength score trend +0 %", progressionWarning(exercise, global.copy(useOneRepMax = false), clock))
         val override = exercise.copy(machine = exercise.machine.copy(progressionSettings = global.copy(useOneRepMax = false)))
-        assertEquals("Strength score trend +100 %", progressionWarning(override, global, clock))
+        assertEquals("Strength score trend +0 %", progressionWarning(override, global, clock))
         assertNull(progressionWarning(exercise, global.copy(volumeWindowDays = 0), clock))
     }
 
@@ -163,6 +165,20 @@ class ProgressionWarningsTest {
         ))
         assertEquals("Strength score trend -5 %", progressionWarning(exercise, ProgressionSettings(staleDays = 0), clock))
         assertNull(progressionWarning(exercise, ProgressionSettings(staleDays = 0, volumeWindowDays = 59), clock))
+    }
+
+    @Test
+    fun trendUsesEveryTrainingDaySoOneBadLastDayDoesNotDecideAlone() {
+        val exercise = summary(1, 1, 1, 1).let { summary ->
+            summary.copy(recentSets = summary.recentSets.mapIndexed { index, set ->
+                set.copy(weight = listOf(100.0, 110.0, 120.0, 90.0)[index])
+            })
+        }
+        // First-to-last alone would report -10 %; the fitted line falls 6 from 108.
+        assertEquals("Strength score trend -5.6 %", progressionWarning(exercise, ProgressionSettings(staleDays = 0), clock))
+        assertEquals(-10.0, trendGrowthPercent(listOf(0L to 100.0, day to 90.0))!!, 1e-9)
+        assertNull(trendGrowthPercent(listOf(0L to 100.0)))
+        assertNull(trendGrowthPercent(listOf(0L to 0.0, day to 0.0)))
     }
 
     @Test

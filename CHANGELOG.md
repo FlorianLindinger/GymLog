@@ -8,7 +8,12 @@ Notable changes to GymLog are recorded here. Planned work belongs in `docs/TODO.
 
 - Always offer ranked starting profiles for weak exercise-name matches, labeled as potentially weak suggestions.
 - Add compact L/M/H and editable percentage controls for body regions. Scale preset Core/abs values by 50% and draw proportionally wider markers; preserve existing profiles without a hidden Core multiplier. Keep custom percentages in storage, plan files, duplication, and backups.
-- Add 10% fatigue per exercise from yesterday and 5% from two days ago, independent of order and counted once per exercise per training day.
+- Add 40% fatigue per exercise from yesterday, 20% from two days ago and 10% from three days ago, independent of order and counted once per exercise per training day. The three percentages are editable in Exercise Order and included in backups.
+- Strength score is now the average Epley estimated one-rep maximum (kg) over every valid set in a training day instead of a sum of weight x reps^0.1 points, so reps count properly and set count no longer swings it; volume remains the workload measure.
+- Strength-score trend warnings fit a line through every training day in the window instead of comparing only the first and latest day.
+- Database writes and backup/plan file reads and writes run off the main thread. A backup restored while the activity was recreated still offers Undo; plan export no longer fails after rotation.
+- Clearing every wheel in "Change Sets" now goes through the confirmed, undoable delete instead of silently removing the entry. Manual Health Connect sync reports permission-check failures instead of crashing.
+- JSON backup code moved to GymBackupJson.kt; unused repository functions removed.
 - Highlight exercise notes through color and weight without changing padding or typography size. Show only the latest entry above the chart and full recent history below it.
 - Restore green/red overview history separators; use neutral colors within exercise history. Initialize new-session wheels from the latest recorded batch instead of stale saved wheel values.
 - Put plus adjustment rows above minus rows for time and weight. Allow a local date when adding body weight, preserving that date in local data and Health Connect records.

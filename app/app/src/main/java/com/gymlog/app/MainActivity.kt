@@ -13,6 +13,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.health.connect.client.HealthConnectClient
@@ -68,17 +69,28 @@ class MainActivity : ComponentActivity() {
             var lastHealthSyncElapsed by remember { mutableStateOf<Long?>(null) }
             val healthGateway = remember { HealthConnectGateway(this) }
             val scope = rememberCoroutineScope()
-            fun readHealthData() {
+            // Automatic refreshes pass onlyIfChanged: a cheap change-log query replaces re-reading the full
+            // body history every minute on the Body screen, which was the app's main battery cost.
+            fun readHealthData(onlyIfChanged: Boolean = false) {
                 if (healthSyncing) return
                 healthSyncing = true
                 scope.launch {
-                    healthSyncStatus = "Syncing Health Connect…"
+                    val previousStatus = healthSyncStatus
+                    if (!onlyIfChanged) healthSyncStatus = "Syncing Health Connect…"
                     try {
-                        runCatching { withContext(Dispatchers.IO) { healthGateway.readBodyData() } }
+                        runCatching {
+                            withContext(Dispatchers.IO) {
+                                if (onlyIfChanged && !healthGateway.hasChangesSinceLastRead()) null
+                                else healthGateway.readBodyData()
+                            }
+                        }
                             .onSuccess {
-                                bodyData = manualBodyStore.merge(it)
                                 lastHealthSyncElapsed = SystemClock.elapsedRealtime()
-                                healthSyncStatus = "Synced ${it.measurements.size} measurements."
+                                if (it == null) healthSyncStatus = previousStatus
+                                else {
+                                    bodyData = manualBodyStore.merge(it)
+                                    healthSyncStatus = "Synced ${it.measurements.size} measurements."
+                                }
                             }
                             .onFailure { healthSyncStatus = "Health Connect sync failed: ${it.message}" }
                     } finally {
@@ -93,7 +105,7 @@ class MainActivity : ComponentActivity() {
                 checkingHealthPermissions = true
                 scope.launch {
                     try {
-                        if (healthGateway.hasPermissions()) readHealthData()
+                        if (healthGateway.hasPermissions()) readHealthData(onlyIfChanged = true)
                     } catch (exception: kotlinx.coroutines.CancellationException) {
                         throw exception
                     } catch (exception: Exception) {
@@ -115,18 +127,28 @@ class MainActivity : ComponentActivity() {
             val exportLauncher = rememberLauncherForActivityResult(
                 ActivityResultContracts.CreateDocument("application/json"),
             ) { uri ->
-                if (uri != null) runCatching {
-                    contentResolver.openOutputStream(uri)?.bufferedWriter().use { writer ->
-                        requireNotNull(writer) { "Could not open the selected file" }
-                        writer.write(repository.exportJson())
+                if (uri != null) scope.launch {
+                    // Serializing every exercise and set can take long enough to stall the UI.
+                    runCatching {
+                        withContext(Dispatchers.IO) {
+                            contentResolver.openOutputStream(uri)?.bufferedWriter().use { writer ->
+                                requireNotNull(writer) { "Could not open the selected file" }
+                                writer.write(repository.exportJson())
+                            }
+                        }
+                    }.onSuccess {
+                        Toast.makeText(this@MainActivity, "Backup saved", Toast.LENGTH_SHORT).show()
+                    }.onFailure {
+                        if (it is kotlinx.coroutines.CancellationException) throw it
+                        Toast.makeText(this@MainActivity, "Export failed: ${it.message}", Toast.LENGTH_LONG).show()
                     }
-                }.onSuccess {
-                    Toast.makeText(this, "Backup saved", Toast.LENGTH_SHORT).show()
-                }.onFailure {
-                    Toast.makeText(this, "Export failed: ${it.message}", Toast.LENGTH_LONG).show()
                 }
             }
+            // The completion callback is lost if the activity is recreated while the picker is open
+            // (rotation, or the system killing GymLog). The restore still runs; its Undo is then handed
+            // to GymLogApp through this state instead.
             var pendingBackupImport by remember { mutableStateOf<((BackupRestoreResult?) -> Unit)?>(null) }
+            var orphanedRestore by remember { mutableStateOf<BackupRestoreResult?>(null) }
             fun refreshRestoredData() {
                 dataVersion++
                 bodyData = manualBodyStore.merge(bodyData.copy(measurements = bodyData.measurements.filter { it.source != packageName }))
@@ -150,10 +172,11 @@ class MainActivity : ComponentActivity() {
                         }
                     }.onSuccess { snapshot ->
                         refreshRestoredData()
-                        complete?.invoke(BackupRestoreResult {
+                        val result = BackupRestoreResult {
                             withContext(Dispatchers.IO) { repository.importJson(snapshot, preserveIds = true) }
                             refreshRestoredData()
-                        })
+                        }
+                        if (complete != null) complete(result) else orphanedRestore = result
                         Toast.makeText(this@MainActivity, "Backup restored", Toast.LENGTH_SHORT).show()
                     }.onFailure {
                         if (it is kotlinx.coroutines.CancellationException) throw it
@@ -181,21 +204,37 @@ class MainActivity : ComponentActivity() {
                     else complete("Health Connect write permission was not granted. You can turn off sync to save in GymLog only.")
                 }
             }
-            var pendingPlanExport by remember { mutableStateOf<String?>(null) }
+            // Only the plan ID is kept (and saved across recreation); the file text is built when writing.
+            var pendingPlanExport by rememberSaveable { mutableStateOf<Long?>(null) }
             val exportPlanLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
-                if (uri != null) runCatching {
-                    val text = requireNotNull(pendingPlanExport) { "Select the plan and download it again" }
-                    contentResolver.openOutputStream(uri)?.bufferedWriter().use { writer -> requireNotNull(writer).write(text) }
-                }.onSuccess { Toast.makeText(this, "Training plan saved", Toast.LENGTH_SHORT).show() }
-                    .onFailure { Toast.makeText(this, "Plan export failed: ${it.message}", Toast.LENGTH_LONG).show() }
+                val planId = pendingPlanExport
                 pendingPlanExport = null
+                if (uri != null) scope.launch {
+                    runCatching {
+                        withContext(Dispatchers.IO) {
+                            val text = repository.exportTrainingPlan(requireNotNull(planId) { "Select the plan and download it again" })
+                            contentResolver.openOutputStream(uri)?.bufferedWriter().use { writer -> requireNotNull(writer).write(text) }
+                        }
+                    }.onSuccess { Toast.makeText(this@MainActivity, "Training plan saved", Toast.LENGTH_SHORT).show() }
+                        .onFailure {
+                            if (it is kotlinx.coroutines.CancellationException) throw it
+                            Toast.makeText(this@MainActivity, "Plan export failed: ${it.message}", Toast.LENGTH_LONG).show()
+                        }
+                }
             }
             val importPlanLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-                if (uri != null) runCatching {
-                    val text = contentResolver.openInputStream(uri)?.bufferedReader().use { requireNotNull(it).readText() }
-                    repository.importTrainingPlan(text)
-                }.onSuccess { dataVersion++; Toast.makeText(this, "Training plan added", Toast.LENGTH_SHORT).show() }
-                    .onFailure { Toast.makeText(this, "Plan import failed: ${it.message}", Toast.LENGTH_LONG).show() }
+                if (uri != null) scope.launch {
+                    runCatching {
+                        withContext(Dispatchers.IO) {
+                            val text = contentResolver.openInputStream(uri)?.bufferedReader().use { requireNotNull(it).readText() }
+                            repository.importTrainingPlan(text)
+                        }
+                    }.onSuccess { dataVersion++; Toast.makeText(this@MainActivity, "Training plan added", Toast.LENGTH_SHORT).show() }
+                        .onFailure {
+                            if (it is kotlinx.coroutines.CancellationException) throw it
+                            Toast.makeText(this@MainActivity, "Plan import failed: ${it.message}", Toast.LENGTH_LONG).show()
+                        }
+                }
             }
             GymLogTheme(accentColor) {
                 GymLogApp(
@@ -223,7 +262,7 @@ class MainActivity : ComponentActivity() {
                         }
                     },
                     onExportPlan = {
-                        pendingPlanExport = repository.exportTrainingPlan()
+                        pendingPlanExport = repository.activeTrainingPlanId()
                         exportPlanLauncher.launch("GymLog-plan-${LocalDate.now()}.json")
                     },
                     onImportPlan = { importPlanLauncher.launch(arrayOf("application/json", "text/plain")) },
@@ -231,6 +270,8 @@ class MainActivity : ComponentActivity() {
                         repository.setAccentColor(it)
                         accentColor = it
                     },
+                    restoredBackup = orphanedRestore,
+                    onRestoredBackupShown = { orphanedRestore = null },
                     bodyData = bodyData,
                     healthSyncStatus = healthSyncStatus,
                     healthSyncing = healthSyncing,
@@ -238,8 +279,15 @@ class MainActivity : ComponentActivity() {
                     onHealthSync = {
                         when (healthGateway.sdkStatus()) {
                             HealthConnectClient.SDK_AVAILABLE -> scope.launch {
-                                if (healthGateway.hasPermissions()) readHealthData()
-                                else healthPermissionLauncher.launch(HealthConnectGateway.permissions)
+                                // An uncaught Health Connect IPC failure here would crash the app; report it like automatic sync does.
+                                try {
+                                    if (healthGateway.hasPermissions()) readHealthData()
+                                    else healthPermissionLauncher.launch(HealthConnectGateway.permissions)
+                                } catch (exception: kotlinx.coroutines.CancellationException) {
+                                    throw exception
+                                } catch (exception: Exception) {
+                                    healthSyncStatus = "Health Connect sync failed: ${exception.message}"
+                                }
                             }
                             HealthConnectClient.SDK_UNAVAILABLE_PROVIDER_UPDATE_REQUIRED ->
                                 runCatching {

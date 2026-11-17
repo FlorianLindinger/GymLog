@@ -62,7 +62,7 @@ internal data class DashboardExercise(
         TrackingMode.DURATION -> "Duration"
     }
     val unit get() = when (mode) {
-        TrackingMode.WEIGHT -> "pts"
+        TrackingMode.WEIGHT -> "kg"
         TrackingMode.WATTS -> "W"
         TrackingMode.STRENGTH -> "Lv."
         TrackingMode.DURATION -> "min"

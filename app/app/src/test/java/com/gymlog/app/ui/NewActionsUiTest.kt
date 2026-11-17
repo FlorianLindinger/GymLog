@@ -70,12 +70,38 @@ class NewActionsUiTest {
     }
 
     @get:Rule val compose = createComposeRule()
+    @Test fun previousDayFatigueEditorRejectsOutOfRangeAndSaves() {
+        var saved: PriorDayFatigue? = null
+        compose.setContent { GymLogTheme { PriorDayFatigueSettings(PriorDayFatigue()) { saved = it } } }
+        compose.onNodeWithText("Save days").assertIsNotEnabled()
+        compose.onNodeWithText("Yesterday (%)").performTextReplacement("150")
+        compose.onNodeWithText("Save days").assertIsNotEnabled()
+        compose.onNodeWithText("Yesterday (%)").performTextReplacement("30")
+        compose.onNodeWithText("3 days (%)").performTextReplacement("0")
+        compose.onNodeWithText("Save days").assertIsEnabled().performClick()
+        assertEquals(PriorDayFatigue(30, 20, 0), saved)
+    }
     @Test fun compactRegionEditorSavesCustomPercentage() {
         var saved: List<AreaAssignment>? = null
         compose.setContent { GymLogTheme { MuscleProfileDialog("Custom exercise", emptyList(), onDismiss = {}, onSave = { saved = it }) } }
         compose.onNodeWithContentDescription("Core percentage").performScrollTo().performTextInput("150")
         compose.onNodeWithText("Save").performClick()
         assertEquals(1.5, saved!!.single { it.area == BodyArea.CORE }.intensity, 0.0)
+    }
+    @Test fun clearingEveryWheelUsesConfirmedDeleteInsteadOfSilentlyReplacingTheEntry() {
+        var added: List<Int>? = null
+        var deleted = 0
+        compose.setContent { GymLogTheme { QuickRepDialog(List(5) { 0 }, listOf(10, 10), isChange = true,
+            onDismiss = {}, onAdd = { added = it }, onDelete = { deleted++ }) } }
+        compose.onNode(hasText("Change Sets") and hasClickAction()).assertIsEnabled().performClick()
+        compose.runOnIdle {
+            assertEquals(1, deleted)
+            assertNull(added)
+        }
+    }
+    @Test fun emptyNewEntryCannotBeSaved() {
+        compose.setContent { GymLogTheme { QuickRepDialog(List(5) { 0 }, emptyList(), onDismiss = {}, onAdd = { fail("No sets") }) } }
+        compose.onNode(hasText("Save Sets") and hasClickAction()).assertIsNotEnabled()
     }
     @Test fun bannerCreatesAnotherPlanAndSwitchesDirectlyBack() {
         val repo = GymRepository(ApplicationProvider.getApplicationContext<Context>())

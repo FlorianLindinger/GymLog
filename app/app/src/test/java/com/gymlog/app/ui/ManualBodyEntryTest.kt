@@ -30,6 +30,20 @@ class ManualBodyEntryTest {
         assertEquals(20.0, data.measurements.single { it.metric == BodyMetric.FAT_PERCENTAGE }.value, 0.0)
         assertEquals(16.0, data.measurements.single { it.metric == BodyMetric.FAT_MASS }.value, 0.0)
     }
+    @Test fun periodicChecksSkipFullReadsUntilHealthConnectChanges() = runBlocking {
+        val fake = FakeHealthConnectClient()
+        val gateway = HealthConnectGateway(context, fake)
+        // Nothing read yet: the caller must do a full read.
+        assertTrue(gateway.hasChangesSinceLastRead())
+        gateway.readBodyData()
+        assertFalse(gateway.hasChangesSinceLastRead())
+        assertFalse(gateway.hasChangesSinceLastRead())
+        gateway.writeBodyData(ManualBodyEntry(81.0, measuredAt = 1700000000000, id = "scale"))
+        assertTrue(gateway.hasChangesSinceLastRead())
+        assertTrue(gateway.hasChangesSinceLastRead())
+        assertEquals(81.0, gateway.readBodyData().measurements.single { it.metric == BodyMetric.WEIGHT }.value, 0.0)
+        assertFalse(gateway.hasChangesSinceLastRead())
+    }
     @Test fun deniedWritesAreNotReportedAsSuccess() = runBlocking {
         val fake = FakeHealthConnectClient()
         fake.overrides.insertRecords = stub { throw SecurityException("Permission revoked") }

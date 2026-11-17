@@ -82,6 +82,23 @@ class BackupRestoreUiTest {
         assertEquals(1, repo.loadMachines().single().recentSets.size)
     }
 
+    @Test fun restoreFinishedAfterRecreationStillOffersUndo() {
+        val repo = GymRepository(context)
+        repo.addMachine("Bench", 40.0, TrackingMode.WEIGHT)
+        var undoCalls = 0
+        var shown = 0
+        val restored = BackupRestoreResult { undoCalls++ }
+        // No onImport callback is involved: the activity hands the result over as state.
+        compose.setContent { GymLogTheme {
+            GymLogApp(repo, 0, {}, { it(null) }, { _, done -> done(null) }, {}, {}, {},
+                BodyDataSnapshot(), "", false, {}, {}, restoredBackup = restored, onRestoredBackupShown = { shown++ })
+        } }
+        compose.waitUntil(10000) { compose.onAllNodesWithText("Undo").fetchSemanticsNodes().isNotEmpty() }
+        assertEquals(1, shown)
+        compose.onNodeWithText("Undo").performClick()
+        compose.waitUntil(10000) { undoCalls == 1 }
+    }
+
     @Test fun recoveryRequiresASeparateConfirmationBeforeDeletingThePreservedDatabase() {
         context.openOrCreateDatabase(GYMLOG_DATABASE, Context.MODE_PRIVATE, null).use { database ->
             database.execSQL("CREATE TABLE machines(id INTEGER PRIMARY KEY,name TEXT)")

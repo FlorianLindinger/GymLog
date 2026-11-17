@@ -29,7 +29,7 @@ exercise's contribution is unchanged. Four green/yellow/orange/red bins are shar
 This model uses exercise order within the training day, not elapsed recovery
 time. It does not estimate readiness, fatigue, hours until recovery, or injury
 risk. It does not account for load, proximity to failure, training experience,
-sleep, or individual recovery. This checkout also retains its previous-day contributions: 30% per exercise yesterday, 15% two days ago, and 7.5% three days ago, without order weighting. Editable region intensities and the 10% floor for older current-day exercises are preserved.
+sleep, or individual recovery. This checkout also retains its previous-day contributions: by default 40% per exercise yesterday, 20% two days ago, and 10% three days ago, without order weighting. These three percentages are editable in Menu > Exercise Order (0 to 100; 0 ignores that day), saved locally and included in JSON backups. Editable region intensities and the 10% floor for older current-day exercises are preserved.
 
 ## Evidence and limits
 

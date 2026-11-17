@@ -37,7 +37,7 @@ Watts and level metrics use the best individual estimate per training: `intensit
 
 Preset Core/abs percentages are 1.5 times the base L/M/H value. Saved region percentages are not automatically changed. All region calculations, markers, backup/restore, plan files, and duplication use the explicit intensity value. The region editor accepts 0?1000%; zero removes a region. Profiles are starting estimates, not muscle activation measurements. Weak text matches still return ranked suggestions without applying one automatically.
 
-Previous-day fatigue uses the local 06:00 training-day boundary: 30% for each exercise yesterday, 15% two days ago and 7.5% three days ago. Multiple sets do not multiply this contribution. Today's exercise order retains 100/50/25/12.5/10/10? weights.
+Previous-day fatigue uses the local 06:00 training-day boundary: 40% for each exercise yesterday, 20% two days ago and 10% three days ago. Multiple sets do not multiply this contribution. Today's exercise order retains 100/50/25/12.5/10/10? weights.
 
 Tests cover custom percentage persistence, weak preset matches, prior-day weighting, colored overview separators, stale saved wheel values, dated Body entries including daylight saving, and the compact percentage editor.
 

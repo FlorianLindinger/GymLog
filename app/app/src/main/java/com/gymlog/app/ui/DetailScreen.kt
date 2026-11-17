@@ -84,6 +84,8 @@ fun DetailScreen(
     repository: GymRepository,
     onAreaColor: (BodyArea, Long) -> Unit,
     onChanged: () -> Unit,
+    // Runs a database write off the main thread, then refreshes; defaults to the old synchronous behaviour.
+    write: (() -> Unit) -> Unit = { it(); onChanged() },
     onTrainingLogged: () -> Unit,
     onEditDetails: (ExerciseEditField) -> Unit,
     isHidden: Boolean,
@@ -237,7 +239,7 @@ fun DetailScreen(
                         }
                     }
                     if (machine.trackingMode != TrackingMode.DURATION) Text(
-                        "${if (useOneRepMax) "Strength score" else if (machine.trackingMode.usesResistanceLevel()) "Est. 10-min" else "Volume"}: ${formatAxisValue(volume)} ${if (useOneRepMax) "pts" else if (machine.trackingMode == TrackingMode.WATTS) "W" else if (machine.trackingMode == TrackingMode.STRENGTH) "Lv." else "a.u."}", style = MaterialTheme.typography.labelSmall,
+                        "${if (useOneRepMax) "Strength score" else if (machine.trackingMode.usesResistanceLevel()) "Est. 10-min" else "Volume"}: ${formatAxisValue(volume)} ${if (useOneRepMax) "kg" else if (machine.trackingMode == TrackingMode.WATTS) "W" else if (machine.trackingMode == TrackingMode.STRENGTH) "Lv." else "a.u."}", style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
@@ -248,7 +250,7 @@ fun DetailScreen(
         }
 
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            OutlinedButton(onClick = { repository.setMachineHidden(machine.id, !isHidden); onChanged() }, modifier = Modifier.weight(1f)) {
+            OutlinedButton(onClick = { write { repository.setMachineHidden(machine.id, !isHidden) } }, modifier = Modifier.weight(1f)) {
                 Text(if (isHidden) "Unhide exercise" else "Hide exercise")
             }
             OutlinedButton(
@@ -270,9 +272,9 @@ fun DetailScreen(
                 SessionMetricsChart(summary.recentSets, machine.trackingMode, machine.showTrend, detailChartWindow, useOneRepMax, height = 320.dp)
                 Text("Plot settings", style = MaterialTheme.typography.titleSmall)
                 ChartRangeControls(machine.chartWindow, machine.showTrend,
-                    { range -> repository.setChartWindow(machine.id, range.storageValue); onChanged() },
+                    { range -> write { repository.setChartWindow(machine.id, range.storageValue) } },
                     { showCustomChartRange = true },
-                    { repository.setShowTrend(machine.id, !machine.showTrend); onChanged() },
+                    { write { repository.setShowTrend(machine.id, !machine.showTrend) } },
                     showTrendControl = machine.trackingMode != TrackingMode.DURATION)
                 OutlinedButton(onClick = { showWarningSettings = true }, modifier = Modifier.fillMaxWidth()) { Text("Progress Warnings") }
             }
@@ -286,13 +288,11 @@ fun DetailScreen(
         initiallyFollowGlobal = machine.progressionSettings == null,
         onDismiss = { showWarningSettings = false },
         onFollowGlobal = {
-            repository.saveExerciseProgressionSettings(machine.id, null)
-            onChanged()
+            write { repository.saveExerciseProgressionSettings(machine.id, null) }
             showWarningSettings = false
         },
         onSave = {
-            repository.saveExerciseProgressionSettings(machine.id, it)
-            onChanged()
+            write { repository.saveExerciseProgressionSettings(machine.id, it) }
             showWarningSettings = false
         },
     )
@@ -302,13 +302,11 @@ fun DetailScreen(
         trackingMode = machine.trackingMode,
         onDismiss = { showWeight = false },
         onSave = {
-            repository.changeWeight(machine.id, it)
-            onChanged()
+            write { repository.changeWeight(machine.id, it) }
             showWeight = false
         },
         onSaveCurrentAndNext = if (currentUnitSets.isNotEmpty()) { value ->
-            repository.changeMetricForCurrentTrainingUnit(machine.id, value)
-            onChanged()
+            write { repository.changeMetricForCurrentTrainingUnit(machine.id, value) }
             showWeight = false
         } else null,
     )
@@ -319,7 +317,7 @@ fun DetailScreen(
                 isChange = currentUnitSets.isNotEmpty(),
                 onDismiss = { quickEntry = false },
                 onAdd = {
-                    repository.addTrainingMinutes(machine.id, it)
+                    write { repository.addTrainingMinutes(machine.id, it) }
                     onTrainingLogged()
                     quickEntry = false
                 },
@@ -334,8 +332,8 @@ fun DetailScreen(
                 isChange = currentUnitSets.isNotEmpty(),
                 onDismiss = { quickEntry = false },
                 onAdd = {
-                    repository.addSets(machine.id, it, machine.currentWeight)
-                    if (it.any { reps -> reps > 0 }) onTrainingLogged() else onChanged()
+                    write { repository.addSets(machine.id, it, machine.currentWeight) }
+                    onTrainingLogged()
                     quickEntry = false
                 },
                 onDelete = currentUnitSets.takeIf { it.isNotEmpty() }?.let { sets ->
@@ -352,12 +350,11 @@ fun DetailScreen(
         onSave = { start, end ->
             customChartStart = start; customChartEnd = end
             chartPreferences.edit().putLong("${machine.id}_start", start).putLong("${machine.id}_end", end).apply()
-            repository.setChartWindow(machine.id, ChartRange.CUSTOM.storageValue); onChanged(); showCustomChartRange = false
+            write { repository.setChartWindow(machine.id, ChartRange.CUSTOM.storageValue) }; showCustomChartRange = false
         },
     )
     if (showAreas) MuscleProfileDialog(machine.name, summary.areas, areaColors, onAreaColor, onDismiss = { showAreas = false }) {
-        repository.saveAreas(machine.id, it)
-        onChanged()
+        write { repository.saveAreas(machine.id, it) }
         showAreas = false
     }
     deletingSets?.let { sets ->
@@ -385,18 +382,18 @@ fun DetailScreen(
             initialReps = sets.map { it.reps }, lastReps = sets.map { it.reps }, isChange = true,
             onDismiss = { changingSets = null },
             onAdd = { reps ->
-                if (reps.none { it > 0 }) deletingSets = sets
-                else { repository.changeRecordedSets(machine.id, sets.map { it.id }, reps); onChanged() }
+                write { repository.changeRecordedSets(machine.id, sets.map { it.id }, reps) }
                 changingSets = null
             },
+            // Clearing every wheel removes the whole entry, which goes through the confirmed delete.
+            onDelete = { deletingSets = sets; changingSets = null },
         )
     }
     changingMinutes?.let { set ->
         MetricValueDialog(current = set.weight, trackingMode = TrackingMode.DURATION,
             onDismiss = { changingMinutes = null },
             onSave = { minutes ->
-                repository.updateSet(set.id, set.reps, minutes)
-                onChanged()
+                write { repository.updateSet(set.id, set.reps, minutes) }
                 changingMinutes = null
             },
         )
