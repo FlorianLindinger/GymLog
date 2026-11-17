@@ -9,17 +9,43 @@ import org.junit.Test
 
 class ProgressionWarningsTest {
     @Test
+    fun weightIncreaseWarningDefaultsToSixtyCompleteDaysAndResetsOnRecordedIncrease() {
+        val exercise = summary(10)
+        val settings = ProgressionSettings(volumeMinimumIncreasePercent = 0)
+        assertEquals(60, settings.staleDays)
+        fun at(offset: Long) = GymClock(Clock.fixed(start.plusMillis(offset), ZoneOffset.UTC))
+        assertNull(progressionWarning(exercise, settings, at(60 * day - 1)))
+        assertEquals("60 days no kg increase", progressionWarning(exercise, settings, at(60 * day)))
+        assertEquals("61 days no kg increase", progressionWarning(exercise, settings, at(61 * day)))
+        assertNull(progressionWarning(exercise, settings.copy(staleDays = 0), at(61 * day)))
+        val increased = exercise.copy(recentSets = exercise.recentSets +
+            SetRecord(99, 1, 10, 11.0, start.toEpochMilli() + 59 * day))
+        assertNull(progressionWarning(increased, settings, at(60 * day)))
+    }
+
+    @Test
+    fun oldWeekThresholdsConvertToDaysWithoutOverflowOrReenablingDisabledWarnings() {
+        assertEquals(60, migratedStaleDays(null, null))
+        assertEquals(28, migratedStaleDays(null, 4))
+        assertEquals(0, migratedStaleDays(null, 0))
+        assertEquals(0, migratedStaleDays(null, -1))
+        assertEquals(Int.MAX_VALUE, migratedStaleDays(null, Int.MAX_VALUE))
+        assertEquals(75, migratedStaleDays(75, 4))
+        assertEquals(0, migratedStaleDays(0, 4))
+    }
+
+    @Test
     fun plannedWeightIncreaseHidesStaleBadgeWithoutChangingRecordedProgressOrTrend() {
         val original = summary(10, 10, 10)
         val planned = original.copy(machine = original.machine.copy(currentWeight = 12.0))
-        val settings = ProgressionSettings(staleWeeks = 4, volumeWindowDays = 60)
+        val settings = ProgressionSettings(staleDays = 28, volumeWindowDays = 60)
         assertEquals("Strength score trend +0 %", progressionWarning(planned, settings, clock))
         assertNull(progressionWarning(planned, settings.copy(volumeMinimumIncreasePercent = 0), clock))
         assertEquals(original.weightIncreases(), planned.weightIncreases())
         assertEquals(original.recordedMetricChangeCount(), planned.recordedMetricChangeCount())
-        assertEquals("4 weeks no kg increase", progressionWarning(original, settings.copy(volumeMinimumIncreasePercent = 0), clock))
+        assertEquals("28 days no kg increase", progressionWarning(original, settings.copy(volumeMinimumIncreasePercent = 0), clock))
         val lower = original.copy(machine = original.machine.copy(currentWeight = 9.0))
-        assertEquals("4 weeks no kg increase", progressionWarning(lower, settings.copy(volumeMinimumIncreasePercent = 0), clock))
+        assertEquals("28 days no kg increase", progressionWarning(lower, settings.copy(volumeMinimumIncreasePercent = 0), clock))
     }
 
     private val start = Instant.parse("2026-09-01T12:00:00Z")
@@ -36,11 +62,11 @@ class ProgressionWarningsTest {
     @Test
     fun warningsUseCompactTextAndOnlySeparateTwoWarnings() {
         val exercise = summary(10, 10, 10)
-        val settings = ProgressionSettings(useOneRepMax = false, staleWeeks = 4, volumeWindowDays = 60)
-        assertEquals("4 weeks no kg increase · Strength score trend +0 %", progressionWarning(exercise, settings, clock))
-        assertEquals("Strength score trend +0 %", progressionWarning(exercise, settings.copy(staleWeeks = 0), clock))
-        assertEquals("4 weeks no kg increase", progressionWarning(exercise, settings.copy(volumeMinimumIncreasePercent = 0), clock))
-        assertNull(progressionWarning(exercise, settings.copy(staleWeeks = 0, volumeMinimumIncreasePercent = 0), clock))
+        val settings = ProgressionSettings(useOneRepMax = false, staleDays = 28, volumeWindowDays = 60)
+        assertEquals("28 days no kg increase · Strength score trend +0 %", progressionWarning(exercise, settings, clock))
+        assertEquals("Strength score trend +0 %", progressionWarning(exercise, settings.copy(staleDays = 0), clock))
+        assertEquals("28 days no kg increase", progressionWarning(exercise, settings.copy(volumeMinimumIncreasePercent = 0), clock))
+        assertNull(progressionWarning(exercise, settings.copy(staleDays = 0, volumeMinimumIncreasePercent = 0), clock))
     }
 
     @Test
@@ -50,7 +76,7 @@ class ProgressionWarningsTest {
                 set.copy(weight = listOf(10.0, 20.0, 21.0)[index])
             })
         }
-        val settings = ProgressionSettings(useOneRepMax = false, staleWeeks = 0, volumeWindowDays = 28, volumeMinimumIncreasePercent = 6)
+        val settings = ProgressionSettings(useOneRepMax = false, staleDays = 0, volumeWindowDays = 28, volumeMinimumIncreasePercent = 6)
         assertEquals("Strength score trend +5 %", progressionWarning(exercise, settings, clock))
         assertNull(progressionWarning(exercise, settings.copy(volumeWindowDays = 60), clock))
         assertNull(progressionWarning(exercise, settings.copy(volumeWindowDays = 27), clock))
@@ -61,12 +87,12 @@ class ProgressionWarningsTest {
     fun scoreIncludesEverySetAndIgnoresOlderTrainings() {
         val exercise = summary(100, 10, 10).let { it.copy(recentSets = it.recentSets +
             SetRecord(99, 1, 1, 1.0, start.toEpochMilli() + day + 1_000)) }
-        val settings = ProgressionSettings(useOneRepMax = false, staleWeeks = 0, volumeWindowDays = 28)
+        val settings = ProgressionSettings(useOneRepMax = false, staleDays = 0, volumeWindowDays = 28)
         assertEquals("Strength score trend -7.4 %", progressionWarning(exercise, settings, clock))
     }
 
     @Test
-    fun recordedWeightIncreaseResetsWeekWarningAndOtherModesHaveNoKgWarnings() {
+    fun recordedWeightIncreaseResetsDayWarningAndOtherModesHaveNoKgWarnings() {
         val exercise = summary(10, 10).let { it.copy(recentSets = it.recentSets +
             SetRecord(99, 1, 10, 11.0, clock.now() - day)) }
         val settings = ProgressionSettings(useOneRepMax = false, volumeMinimumIncreasePercent = 0)
@@ -77,15 +103,15 @@ class ProgressionWarningsTest {
     @Test
     fun exerciseOverridesReplaceGlobalsIncludingExplicitlyDisabledWarnings() {
         val exercise = summary(10, 10, 10)
-        val global = ProgressionSettings(useOneRepMax = false, staleWeeks = 4, volumeWindowDays = 60)
-        val disabled = ProgressionSettings(useOneRepMax = false, staleWeeks = 0, volumeWindowDays = 0, volumeMinimumIncreasePercent = 0)
+        val global = ProgressionSettings(useOneRepMax = false, staleDays = 28, volumeWindowDays = 60)
+        val disabled = ProgressionSettings(useOneRepMax = false, staleDays = 0, volumeWindowDays = 0, volumeMinimumIncreasePercent = 0)
         val customized = exercise.copy(machine = exercise.machine.copy(progressionSettings = disabled))
         assertNull(progressionWarning(customized, global, clock))
         val volumeOnly = customized.copy(machine = customized.machine.copy(progressionSettings = disabled.copy(
             volumeWindowDays = 60, volumeMinimumIncreasePercent = 5,
         )))
         assertEquals("Strength score trend +0 %", progressionWarning(volumeOnly, global, clock))
-        assertEquals("4 weeks no kg increase · Strength score trend +0 %", progressionWarning(exercise, global, clock))
+        assertEquals("28 days no kg increase · Strength score trend +0 %", progressionWarning(exercise, global, clock))
         assertNull(progressionWarning(exercise, disabled, clock))
     }
 
@@ -97,7 +123,7 @@ class ProgressionWarningsTest {
         assertEquals(5, parseWarningSetting("5"))
         assertNull(parseWarningSetting("-1"))
         assertNull(parseWarningSetting("99999999999999999999"))
-        val settings = ProgressionSettings(useOneRepMax = false, staleWeeks = 0, volumeWindowDays = parseWarningSetting("")!!)
+        val settings = ProgressionSettings(useOneRepMax = false, staleDays = 0, volumeWindowDays = parseWarningSetting("")!!)
         assertNull(progressionWarning(summary(10, 10, 10), settings, clock))
         assertNull(progressionWarning(summary(10, 10, 10), settings.copy(volumeWindowDays = 60,
             volumeMinimumIncreasePercent = parseWarningSetting("")!!), clock))
@@ -107,7 +133,7 @@ class ProgressionWarningsTest {
     fun formulaWarningIgnoresGlobalDisplayChoiceAndLegacyExerciseMetricOverride() {
         val exercise = summary(10, 10, 10).let { it.copy(recentSets = it.recentSets +
             SetRecord(99, 1, 10, 10.0, start.toEpochMilli() + 2 * day + 1_000)) }
-        val global = ProgressionSettings(useOneRepMax = true, staleWeeks = 0, volumeWindowDays = 60, volumeMinimumIncreasePercent = 150)
+        val global = ProgressionSettings(useOneRepMax = true, staleDays = 0, volumeWindowDays = 60, volumeMinimumIncreasePercent = 150)
         assertEquals("Strength score trend +100 %", progressionWarning(exercise, global, clock))
         assertEquals("Strength score trend +100 %", progressionWarning(exercise, global.copy(useOneRepMax = false), clock))
         val override = exercise.copy(machine = exercise.machine.copy(progressionSettings = global.copy(useOneRepMax = false)))
@@ -135,8 +161,8 @@ class ProgressionWarningsTest {
             SetRecord(3, 1, 1, 19.0, now),
             SetRecord(4, 1, 1, 100.0, now + 1),
         ))
-        assertEquals("Strength score trend -5 %", progressionWarning(exercise, ProgressionSettings(staleWeeks = 0), clock))
-        assertNull(progressionWarning(exercise, ProgressionSettings(staleWeeks = 0, volumeWindowDays = 59), clock))
+        assertEquals("Strength score trend -5 %", progressionWarning(exercise, ProgressionSettings(staleDays = 0), clock))
+        assertNull(progressionWarning(exercise, ProgressionSettings(staleDays = 0, volumeWindowDays = 59), clock))
     }
 
     @Test
@@ -150,6 +176,6 @@ class ProgressionWarningsTest {
             SetRecord(3, 1, 1, 10.0, dstClock.now()),
         ))
         assertEquals("Strength score trend +0 %", progressionWarning(exercise,
-            ProgressionSettings(staleWeeks = 0, volumeWindowDays = 3), dstClock))
+            ProgressionSettings(staleDays = 0, volumeWindowDays = 3), dstClock))
     }
 }

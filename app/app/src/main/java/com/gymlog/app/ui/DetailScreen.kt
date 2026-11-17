@@ -405,14 +405,12 @@ fun DetailScreen(
 
 @Composable
 private fun ExerciseNoteCard(note: String, onEdit: () -> Unit) {
-    Card(modifier = Modifier.fillMaxWidth().clickable(onClick = onEdit),
-        colors = androidx.compose.material3.CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.tertiaryContainer),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.tertiary)) {
+    Card(modifier = Modifier.fillMaxWidth().clickable(onClick = onEdit)) {
         Column(Modifier.padding(horizontal = 10.dp, vertical = 6.dp), verticalArrangement = Arrangement.spacedBy(1.dp)) {
             Text("Note", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
             Text(
                 note.ifBlank { "Click to add a note" },
-                color = if (note.isBlank()) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onTertiaryContainer,
+                color = if (note.isBlank()) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface,
                 fontWeight = if (note.isBlank()) FontWeight.Normal else FontWeight.SemiBold,
             )
         }
@@ -478,7 +476,7 @@ private fun DualAxisSessionPlot(
     val repsColor = Color(0xFFFFA726)
     val weightColor = MaterialTheme.colorScheme.primary
     val volumeColor = Color(0xFF00BCD4)
-    val intensityOnRight = trackingMode.usesResistanceLevel()
+    val timedIntensity = trackingMode.usesResistanceLevel()
     val axes = exerciseChartAxes(trackingMode)
     val repsAxis = axes.repetitions
     val weightAxis = axes.load
@@ -500,33 +498,31 @@ private fun DualAxisSessionPlot(
         .clickable(role = androidx.compose.ui.semantics.Role.Button) { showMetricExplanation = true }
         .padding(horizontal = 5.dp, vertical = 4.dp)
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
-        ChartLegendEntry(if (intensityOnRight) "Minutes" else performanceLabel,
-            if (intensityOnRight) weight else volume, window, !intensityOnRight && showTrend,
-            if (intensityOnRight) weightColor else volumeColor, TextAlign.Start,
-            Modifier.weight(if (intensityOnRight) 1f else 1.5f).then(if (intensityOnRight) Modifier else metricHelp))
-        ChartLegendEntry(if (intensityOnRight) performanceLabel else "Reps/set",
-            if (intensityOnRight) volume else reps, window, intensityOnRight && showTrend,
-            if (intensityOnRight) volumeColor else repsColor, TextAlign.Center,
-            Modifier.weight(if (intensityOnRight) 1.5f else 1f).then(if (intensityOnRight) metricHelp else Modifier))
-        ChartLegendEntry(if (trackingMode == TrackingMode.WATTS) "Watts" else if (intensityOnRight) "Level" else "Weight [kg]",
-            if (intensityOnRight) reps else weight, window, showTrend,
-            if (intensityOnRight) repsColor else weightColor, TextAlign.End, Modifier.weight(1f))
+        ChartLegendEntry(performanceLabel, volume, window, showTrend, volumeColor, TextAlign.Start,
+            Modifier.weight(1.5f).then(metricHelp))
+        ChartLegendEntry(if (timedIntensity) "Minutes" else "Reps/set",
+            if (timedIntensity) weight else reps, window, false,
+            if (timedIntensity) weightColor else repsColor, TextAlign.Center, Modifier.weight(1f))
+        ChartLegendEntry(if (trackingMode == TrackingMode.WATTS) "Watts" else if (timedIntensity) "Level" else "Weight [kg]",
+            if (timedIntensity) reps else weight, window, showTrend,
+            if (timedIntensity) repsColor else weightColor, TextAlign.End, Modifier.weight(1f))
     }
+    // Canvas draws in list order: independent reps/minutes stay behind load and performance.
     val baseSeries = remember(reps, weight, volume, repsColor, weightColor, volumeColor, repsAxis, weightAxis) { listOf(
         TimeSeries(reps, repsColor, repsAxis),
         TimeSeries(weight, weightColor, weightAxis),
         TimeSeries(volume, volumeColor, axes.performance, pointRadius = 3.8f),
-    ) }
+    ).sortedBy { it.axis != PlotAxis.INDEPENDENT } }
     val plottedSeries = remember(baseSeries, showTrend, window, repsAxis, weightAxis) {
         baseSeries + if (showTrend) exerciseChartTrendSeries(baseSeries, window,
-            unfittedAxis = if (intensityOnRight) axes.load else axes.repetitions, performanceAxis = axes.performance) else emptyList()
+            unfittedAxis = if (timedIntensity) axes.load else axes.repetitions, performanceAxis = axes.performance) else emptyList()
     }
     TimeWindowChart(
         height = height,
         series = plottedSeries,
         window = window,
-        leftColor = if (intensityOnRight) weightColor else volumeColor,
-        rightColor = if (intensityOnRight) repsColor else weightColor,
+        leftColor = volumeColor,
+        rightColor = if (timedIntensity) repsColor else weightColor,
         matchWeightSteps = trackingMode == TrackingMode.WEIGHT,
     )
     if (showMetricExplanation) TrainingMetricExplanationDialog(trackingMode) { showMetricExplanation = false }
@@ -550,12 +546,12 @@ private fun AxisMetricPlot(
 internal data class ExerciseChartAxes(val repetitions: PlotAxis, val load: PlotAxis, val performance: PlotAxis)
 
 internal fun exerciseChartAxes(mode: TrackingMode): ExerciseChartAxes = if (mode.usesResistanceLevel())
-    ExerciseChartAxes(PlotAxis.RIGHT, PlotAxis.LEFT, PlotAxis.INDEPENDENT)
+    ExerciseChartAxes(PlotAxis.RIGHT, PlotAxis.INDEPENDENT, PlotAxis.LEFT)
 else ExerciseChartAxes(PlotAxis.INDEPENDENT, PlotAxis.RIGHT, PlotAxis.LEFT)
 
 /** Reps/minutes remain raw-only regardless of which axis is assigned to them. */
 internal fun exerciseChartTrendSeries(series: List<TimeSeries>, window: ChartWindow,
-    unfittedAxis: PlotAxis = PlotAxis.LEFT, performanceAxis: PlotAxis = PlotAxis.INDEPENDENT): List<TimeSeries> =
+    unfittedAxis: PlotAxis = PlotAxis.INDEPENDENT, performanceAxis: PlotAxis = PlotAxis.LEFT): List<TimeSeries> =
     series.filter { it.axis != unfittedAxis }.map {
         trendTimeSeries(it.points, if (it.axis == performanceAxis) Color(0xFF007C91) else it.color, it.axis, window)
     }

@@ -49,9 +49,9 @@ Manual top/bottom override automatic ranking for unfinished exercises.
 
 ## Progress warnings
 
-Weight-tracked exercises show warnings on one line: `4 weeks no kg increase` and/or `1RM trend 2 %`, separated by a middle dot only when both apply. Trend warnings always use session-adjusted Wathan 1RM, regardless of the chart display choice or legacy per-exercise metric overrides.
+Weight-tracked exercises show warnings on one line: `60 days no kg increase` and/or `Strength score trend +2 %`, separated by a middle dot only when both apply. Trend warnings always use the all-set strength score, regardless of the chart display choice or legacy per-exercise metric overrides.
 
-**Progress Warnings** settings let you choose weeks without a kg increase, the minimum 1RM increase percentage, and the trend window in trainings (default 5, minimum 2). Blank or zero disables the corresponding warning. Either a blank/zero window or minimum percentage disables trend warnings. Once a full window is available, its first and last training days are compared; training days start at 06:00 local time.
+**Progress Warnings** settings let you choose days without a kg increase (default 60 complete 24-hour days), the minimum strength-score increase percentage, and the trend window in days (default 60, requiring at least two training days). Blank or zero disables the corresponding warning. Either a blank/zero window or minimum percentage disables trend warnings. The first and last training days within that window are compared; training days start at 06:00 local time. Saved week thresholds convert to equivalent days in local settings, exercise overrides, backups and plan files; zero stays disabled. Newly exported settings use day fields.
 
 Every exercise has **Progress Warnings** in its details. It follows global thresholds by default. Turn off **Follow global warning settings** to customize thresholds or disable warnings for that exercise. There is no per-exercise Volume/1RM choice. Custom thresholds survive plan duplication, deletion undo, and JSON backup/restore. Legacy metric fields remain readable for compatibility but do not affect warnings or exercise display overrides.
 

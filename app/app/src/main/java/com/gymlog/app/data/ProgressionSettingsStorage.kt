@@ -3,13 +3,15 @@ package com.gymlog.app.data
 import org.json.JSONObject
 
 internal fun ProgressionSettings.toJson(): JSONObject = JSONObject()
-    .put("staleWeeks", staleWeeks.coerceAtLeast(0))
+    .put("staleDays", staleDays.coerceAtLeast(0))
     .put("volumeWindowDays", volumeWindowDays.coerceAtLeast(0))
     .put("volumeMinimumIncreasePercent", volumeMinimumIncreasePercent.coerceAtLeast(0))
     .put("useOneRepMax", useOneRepMax)
 
 internal fun progressionSettingsFromJson(json: JSONObject): ProgressionSettings = ProgressionSettings(
-    staleWeeks = json.optInt("staleWeeks", 0).coerceAtLeast(0),
+    staleDays = migratedStaleDays(
+        json.takeIf { it.has("staleDays") }?.optInt("staleDays", 0),
+        json.optInt("staleWeeks", 0)),
     volumeWindowDays = migratedTrendWindowDays(
         json.takeIf { it.has("volumeWindowDays") }?.optInt("volumeWindowDays", 60),
         json.takeIf { it.has("volumeWindowTrainings") }?.optInt("volumeWindowTrainings", 0)),

@@ -21,6 +21,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
 import com.gymlog.app.data.GymRepository
 import com.gymlog.app.ui.GymLogApp
+import com.gymlog.app.ui.BackupRestoreResult
 import com.gymlog.app.ui.BodyDataSnapshot
 import com.gymlog.app.ui.BodyMeasurement
 import com.gymlog.app.ui.ManualBodyEntry
@@ -125,21 +126,40 @@ class MainActivity : ComponentActivity() {
                     Toast.makeText(this, "Export failed: ${it.message}", Toast.LENGTH_LONG).show()
                 }
             }
+            var pendingBackupImport by remember { mutableStateOf<((BackupRestoreResult?) -> Unit)?>(null) }
+            fun refreshRestoredData() {
+                dataVersion++
+                bodyData = manualBodyStore.merge(bodyData.copy(measurements = bodyData.measurements.filter { it.source != packageName }))
+            }
             val importLauncher = rememberLauncherForActivityResult(
                 ActivityResultContracts.OpenDocument(),
             ) { uri ->
-                if (uri != null) runCatching {
-                    val json = contentResolver.openInputStream(uri)?.bufferedReader().use { reader ->
-                        requireNotNull(reader) { "Could not open the selected file" }
-                        reader.readText()
+                val complete = pendingBackupImport
+                pendingBackupImport = null
+                if (uri == null) complete?.invoke(null)
+                else scope.launch {
+                    runCatching {
+                        withContext(Dispatchers.IO) {
+                            val json = contentResolver.openInputStream(uri)?.bufferedReader().use { reader ->
+                                requireNotNull(reader) { "Could not open the selected file" }
+                                reader.readText()
+                            }
+                            val snapshot = repository.exportJson()
+                            repository.importJson(json)
+                            snapshot
+                        }
+                    }.onSuccess { snapshot ->
+                        refreshRestoredData()
+                        complete?.invoke(BackupRestoreResult {
+                            withContext(Dispatchers.IO) { repository.importJson(snapshot, preserveIds = true) }
+                            refreshRestoredData()
+                        })
+                        Toast.makeText(this@MainActivity, "Backup restored", Toast.LENGTH_SHORT).show()
+                    }.onFailure {
+                        if (it is kotlinx.coroutines.CancellationException) throw it
+                        complete?.invoke(null)
+                        Toast.makeText(this@MainActivity, "Import failed: ${it.message}", Toast.LENGTH_LONG).show()
                     }
-                    repository.importJson(json)
-                }.onSuccess {
-                    dataVersion++
-                    bodyData = manualBodyStore.merge(bodyData.copy(measurements = bodyData.measurements.filter { it.source != packageName }))
-                    Toast.makeText(this, "Backup restored", Toast.LENGTH_SHORT).show()
-                }.onFailure {
-                    Toast.makeText(this, "Import failed: ${it.message}", Toast.LENGTH_LONG).show()
                 }
             }
 
@@ -182,7 +202,16 @@ class MainActivity : ComponentActivity() {
                     repository = repository,
                     externalDataVersion = dataVersion,
                     onExport = { exportLauncher.launch("GymLog-${LocalDate.now()}.json") },
-                    onImport = { importLauncher.launch(arrayOf("application/json", "text/plain")) },
+                    onImport = { complete ->
+                        pendingBackupImport = complete
+                        try {
+                            importLauncher.launch(arrayOf("application/json", "text/plain"))
+                        } catch (exception: Exception) {
+                            pendingBackupImport = null
+                            complete(null)
+                            Toast.makeText(this, "Could not choose backup: ${exception.message}", Toast.LENGTH_LONG).show()
+                        }
+                    },
                     onSaveBodyEntry = { entry, complete ->
                         scope.launch {
                             if (!entry.syncHealthConnect) saveBodyEntry(entry, complete)

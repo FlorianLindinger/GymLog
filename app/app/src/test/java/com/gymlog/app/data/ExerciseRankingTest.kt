@@ -32,7 +32,7 @@ class ExerciseRankingTest {
 
     @Test
     fun extremeBiasAndPriorityCannotCrossAColorBinAndCustomBandsChangeGrouping() {
-        val settings = ProgressionSettings(staleWeeks = 1)
+        val settings = ProgressionSettings(staleDays = 7)
         val conflict = exercise(1, BodyArea.CHEST, times = listOf(40 * day, 45 * day, 50 * day)).let {
             it.copy(machine = it.machine.copy(rankingPriority = -999))
         }
@@ -56,13 +56,13 @@ class ExerciseRankingTest {
 
     @Test
     fun activePerExerciseWarningsAreMixedIntoAutomaticOrder() {
-        val global = ProgressionSettings(staleWeeks = 1, volumeWindowDays = 60)
+        val global = ProgressionSettings(staleDays = 7, volumeWindowDays = 60)
         fun item(id: Long, settings: ProgressionSettings) = exercise(id, BodyArea.CHEST,
             times = listOf(40 * day, 45 * day, 50 * day)).let {
             it.copy(machine = it.machine.copy(progressionSettings = settings))
         }
-        val none = item(1, global.copy(staleWeeks = 0, volumeMinimumIncreasePercent = 0))
-        val one = item(2, global.copy(staleWeeks = 0))
+        val none = item(1, global.copy(staleDays = 0, volumeMinimumIncreasePercent = 0))
+        val one = item(2, global.copy(staleDays = 0))
         val two = item(3, global)
         assertEquals(listOf(3L, 2L, 1L), rankOverviewMachines(listOf(none, one, two), 60 * day,
             emptyList(), zone, 60 * day, progressionSettings = global).map { it.machine.id })

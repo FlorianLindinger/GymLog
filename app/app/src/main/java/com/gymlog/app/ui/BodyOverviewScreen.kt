@@ -333,7 +333,7 @@ fun BodyOverviewScreen(
                 ChartRangeControls(
                     selectedWindow = window,
                     showTrend = showTrend,
-                    showTrendControl = false, rangeLabel = ::bodyRangeLabel,
+                    showTrendControl = false, rangeLabel = ::bodyPresetLabel, showExtendedYearRanges = false,
                     onWindowSelected = { preset ->
                         window = preset
                         preferences.edit().putString("window", preset.storageValue).apply()
@@ -860,7 +860,8 @@ private fun BodyChartSettingsDialog(
                     if (!global) BodySettingsInheritance(draft.globalInterval, { draft = draft.copy(globalInterval = it) })
                     if (global || !draft.globalInterval) {
                         ChartRangeControls(draft.interval, draft.showFit,
-                            { draft = draft.copy(interval = it) }, { custom = true }, {}, showTrendControl = false, rangeLabel = ::bodyRangeLabel)
+                            { draft = draft.copy(interval = it) }, { custom = true }, {}, showTrendControl = false,
+                            rangeLabel = ::bodyPresetLabel, showExtendedYearRanges = false)
                         if (draft.interval == ChartRange.CUSTOM && draft.customStart != null && draft.customEnd != null) {
                             BodySettingsHint("${formatChartDate(draft.customStart!!)} - ${formatChartDate(draft.customEnd!!)}")
                         }
@@ -927,7 +928,8 @@ private fun BodyChartSettingsDialog(
                                 SettingCheck("Follow plot interval", draft.highLowFollowPlot) { draft = draft.copy(highLowFollowPlot = it) }
                                 if (!draft.highLowFollowPlot) {
                                     ChartRangeControls(draft.highLowRange, false,
-                                        { draft = draft.copy(highLowRange = it) }, { customHighLow = true }, {}, showTrendControl = false, rangeLabel = ::bodyRangeLabel)
+                                        { draft = draft.copy(highLowRange = it) }, { customHighLow = true }, {}, showTrendControl = false,
+                                        rangeLabel = ::bodyPresetLabel, showExtendedYearRanges = false)
                                     if (draft.highLowRange == ChartRange.CUSTOM && draft.highLowStart != null && draft.highLowEnd != null) {
                                         BodySettingsHint("${formatChartDate(draft.highLowStart!!)} - ${formatChartDate(draft.highLowEnd!!)}")
                                     }

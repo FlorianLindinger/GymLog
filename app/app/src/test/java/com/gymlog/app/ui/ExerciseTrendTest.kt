@@ -19,8 +19,22 @@ class ExerciseTrendTest {
         val fits = exerciseChartTrendSeries(raw, ChartWindow(null, key = "all"),
             unfittedAxis = axes.repetitions, performanceAxis = axes.performance)
         assertEquals(listOf(PlotAxis.RIGHT, PlotAxis.LEFT), fits.map { it.axis })
-        listOf(TrackingMode.STRENGTH, TrackingMode.WATTS).forEach {
-            assertEquals(ExerciseChartAxes(PlotAxis.RIGHT, PlotAxis.LEFT, PlotAxis.INDEPENDENT), exerciseChartAxes(it))
+    }
+
+    @Test
+    fun timedIntensityChartsUsePerformanceOnLeftAndIndependentMinutesWithoutAFit() {
+        val points = listOf(TimeValue(0, 10.0), TimeValue(1000, 20.0))
+        listOf(TrackingMode.STRENGTH, TrackingMode.WATTS).forEach { mode ->
+            val axes = exerciseChartAxes(mode)
+            assertEquals(PlotAxis.LEFT, axes.performance)
+            assertEquals(PlotAxis.RIGHT, axes.repetitions) // Timed records store level/watts here.
+            assertEquals(PlotAxis.INDEPENDENT, axes.load) // Timed records store minutes here.
+            val raw = listOf(TimeSeries(points, androidx.compose.ui.graphics.Color.Red, axes.repetitions),
+                TimeSeries(points, androidx.compose.ui.graphics.Color.Green, axes.load),
+                TimeSeries(points, androidx.compose.ui.graphics.Color.Blue, axes.performance))
+            val fits = exerciseChartTrendSeries(raw, ChartWindow(null, key = "all"),
+                unfittedAxis = axes.load, performanceAxis = axes.performance)
+            assertEquals(listOf(PlotAxis.RIGHT, PlotAxis.LEFT), fits.map { it.axis })
         }
     }
 
@@ -31,9 +45,9 @@ class ExerciseTrendTest {
             TimeSeries(points, androidx.compose.ui.graphics.Color.Green, PlotAxis.RIGHT),
             TimeSeries(points, androidx.compose.ui.graphics.Color.Blue, PlotAxis.INDEPENDENT))
         val fits = exerciseChartTrendSeries(raw, ChartWindow(null, key = "all"))
-        assertEquals(listOf(PlotAxis.RIGHT, PlotAxis.INDEPENDENT), fits.map { it.axis })
+        assertEquals(listOf(PlotAxis.LEFT, PlotAxis.RIGHT), fits.map { it.axis })
         assertTrue(fits.all { it.dashed && !it.showPoints })
-        assertTrue(exerciseChartTrendSeries(raw.take(1), ChartWindow(null, key = "minutes")).isEmpty())
+        assertTrue(exerciseChartTrendSeries(raw.takeLast(1), ChartWindow(null, key = "minutes")).isEmpty())
     }
 
     @Test
@@ -115,7 +129,8 @@ class ExerciseTrendTest {
         assertTrue(watts.text.contains("104.25 W"))
         listOf(level, watts).forEach { help ->
             assertTrue(!help.text.contains("reps") && !help.text.contains("sets") && !help.text.contains("1RM"))
-            assertTrue(help.text.contains("right axis") && help.text.contains("minutes on the left"))
+            assertTrue(help.text.contains("left axis") && help.text.contains("right axis"))
+            assertTrue(help.text.contains("Minutes use an independent, unlabelled scale"))
         }
         assertEquals(TRAINING_METRIC_EXPLANATION, trainingMetricExplanation(TrackingMode.WEIGHT).text)
         assertEquals(TRAINING_METRIC_EXPLANATION, trainingMetricExplanation().text)

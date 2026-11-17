@@ -24,8 +24,7 @@ internal class GymDatabase(context: Context) : SQLiteOpenHelper(context, GYMLOG_
 
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
         if (oldVersion < 9) {
-            resetSchema(db)
-            return
+            throw IllegalStateException("GymLog database version $oldVersion requires recovery with a compatible app or a JSON backup. The existing database has been preserved.")
         }
         if (oldVersion < 10) {
             db.execSQL("ALTER TABLE machines ADD COLUMN order_group TEXT NOT NULL DEFAULT 'AUTOMATIC'")
@@ -43,13 +42,4 @@ internal class GymDatabase(context: Context) : SQLiteOpenHelper(context, GYMLOG_
         throw IllegalStateException("GymLog data cannot be opened by an older app version")
     }
 
-    private fun resetSchema(db: SQLiteDatabase) {
-        db.execSQL("DROP TABLE IF EXISTS sets")
-        db.execSQL("DROP TABLE IF EXISTS weight_history")
-        db.execSQL("DROP TABLE IF EXISTS machine_areas")
-        db.execSQL("DROP TABLE IF EXISTS machines")
-        db.execSQL("DROP TABLE IF EXISTS training_plans")
-        db.execSQL("DROP TABLE IF EXISTS area_colors")
-        onCreate(db)
-    }
 }

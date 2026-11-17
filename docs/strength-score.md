@@ -37,5 +37,7 @@ backup compatibility.
 
 For weight-exercise charts, strength score (or volume when selected) is on the
 left Y axis, recorded weight remains on the right, and reps use an independent
-unlabelled scale. Reps have no fit. Level/watt/duration metrics keep their
-existing definitions and axis roles.
+unlabelled scale. Reps have no fit. Level/watt charts also put the estimated
+10-minute measure on the left and recorded level/watts on the right. Minutes
+use an independent, unlabelled scale across the plot height with no fit.
+Metric definitions are unchanged; duration-only charts show recorded minutes.

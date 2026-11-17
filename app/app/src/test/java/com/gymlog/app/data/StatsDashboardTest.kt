@@ -13,7 +13,7 @@ import org.junit.Test
 class StatsDashboardTest {
     private val clock = GymClock(Clock.fixed(Instant.parse("2026-10-25T12:00:00Z"), ZoneOffset.UTC))
     private val period = DashboardPeriod(LocalDate.parse("2026-10-20"), LocalDate.parse("2026-10-22"))
-    private val settings = ProgressionSettings(staleWeeks = 0, volumeMinimumIncreasePercent = 0)
+    private val settings = ProgressionSettings(staleDays = 0, volumeMinimumIncreasePercent = 0)
 
     private fun set(id: Long, time: String, weight: Double = 10.0, reps: Int = 10) =
         SetRecord(id, 1, reps, weight, Instant.parse(time).toEpochMilli())

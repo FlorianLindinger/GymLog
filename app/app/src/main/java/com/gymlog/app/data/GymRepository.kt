@@ -24,6 +24,7 @@ class GymRepository(context: Context, private val gymClock: GymClock = GymClock(
             preferences.edit()
                 .remove("active_training_plan")
                 .remove("progress_stale_weeks")
+                .remove("progress_stale_days")
                 .remove("progress_stale_trainings")
                 .remove("progress_volume_minimum_percent")
                 .remove("progress_volume_window_trainings")
@@ -74,7 +75,9 @@ class GymRepository(context: Context, private val gymClock: GymClock = GymClock(
     }
 
     fun loadProgressionSettings(): ProgressionSettings = ProgressionSettings(
-        staleWeeks = preferences.getInt("progress_stale_weeks", 4),
+        staleDays = migratedStaleDays(
+            if (preferences.contains("progress_stale_days")) preferences.getInt("progress_stale_days", 60) else null,
+            if (preferences.contains("progress_stale_weeks")) preferences.getInt("progress_stale_weeks", 4) else null),
         volumeWindowDays = migratedTrendWindowDays(
             if (preferences.contains("progress_volume_window_days")) preferences.getInt("progress_volume_window_days", 60) else null,
             if (preferences.contains("progress_volume_window_trainings")) preferences.getInt("progress_volume_window_trainings", 5) else null),
@@ -84,7 +87,8 @@ class GymRepository(context: Context, private val gymClock: GymClock = GymClock(
 
     fun saveProgressionSettings(settings: ProgressionSettings) {
         preferences.edit()
-            .putInt("progress_stale_weeks", settings.staleWeeks.coerceAtLeast(0))
+            .putInt("progress_stale_days", settings.staleDays.coerceAtLeast(0))
+            .remove("progress_stale_weeks")
             .remove("progress_stale_trainings")
             .putInt("progress_volume_window_days", settings.volumeWindowDays.coerceAtLeast(0))
             .remove("progress_volume_window_trainings")
@@ -292,6 +296,14 @@ class GymRepository(context: Context, private val gymClock: GymClock = GymClock(
     }
 
     fun loadMachines(): List<MachineSummary> = loadMachinesForPlan(ensureTrainingPlan(db.readableDatabase))
+
+    fun loadFatigueExercises(): List<MachineSummary> {
+        migrateLegacyMachineState()
+        val now = gymClock.now()
+        val since = java.time.Instant.ofEpochMilli(gymClock.trainingDayStart(now)).atZone(gymClock.zoneId)
+            .minusDays(3).toInstant().toEpochMilli()
+        return exerciseReads.loadForFatigue(since, now)
+    }
 
     private fun loadMachinesForPlan(planId: Long): List<MachineSummary> {
         migrateLegacyMachineState()
@@ -865,7 +877,7 @@ class GymRepository(context: Context, private val gymClock: GymClock = GymClock(
                     .put("orangeFrom", bands.orangeFrom).put("redFrom", bands.redFrom))
             }
             loadProgressionSettings().let {
-                put("progressStaleWeeks", it.staleWeeks)
+                put("progressStaleDays", it.staleDays)
                 put("progressVolumeWindowDays", it.volumeWindowDays)
                 put("progressVolumeMinimumPercent", it.volumeMinimumIncreasePercent)
                 put("progressUseOneRepMax", it.useOneRepMax)
@@ -905,6 +917,8 @@ class GymRepository(context: Context, private val gymClock: GymClock = GymClock(
                     put("sortOrder", summary.machine.sortOrder)
                     put("pinned", summary.machine.pinned)
                     put("rankingPriority", summary.machine.rankingPriority)
+                    put("showTrend", summary.machine.showTrend)
+                    summary.setWheelValues?.let { put("setWheelValues", JSONArray(it)) }
                     put("progressionSettings", summary.machine.progressionSettings?.toJson())
                     put("excludedFromAutoRanking", summary.machine.excludedFromAutoRanking)
                     put("hidden", isMachineHidden(summary.machine.id))
@@ -951,21 +965,28 @@ class GymRepository(context: Context, private val gymClock: GymClock = GymClock(
                 if (e.has("muscle")) e.getDouble("muscle") else null,
                 e.getLong("time"), e.getString("id"))
         }
-        root.optJSONObject("settings")?.let { settings ->
+        // Parse settings now, but do not persist them until every workout row has validated.
+        val settings = root.optJSONObject("settings")
+        val importedBands = settings?.let {
             val bands = settings.optJSONObject("fatigueBands")
-            saveFatigueBands(fatigueBandsOrDefault(bands?.optInt("yellowFrom", 25) ?: 25,
-                bands?.optInt("orangeFrom", 50) ?: 50, bands?.optInt("redFrom", 75) ?: 75))
-            saveProgressionSettings(ProgressionSettings(
-                staleWeeks = settings.optInt("progressStaleWeeks", 4),
+            fatigueBandsOrDefault(bands?.optInt("yellowFrom", 25) ?: 25,
+                bands?.optInt("orangeFrom", 50) ?: 50, bands?.optInt("redFrom", 75) ?: 75)
+        }
+        val importedProgression = settings?.let {
+            ProgressionSettings(
+                staleDays = migratedStaleDays(
+                    settings.takeIf { it.has("progressStaleDays") }?.optInt("progressStaleDays", 60),
+                    settings.takeIf { it.has("progressStaleWeeks") }?.optInt("progressStaleWeeks", 4)),
                 volumeWindowDays = migratedTrendWindowDays(
                     settings.takeIf { it.has("progressVolumeWindowDays") }?.optInt("progressVolumeWindowDays", 60),
                     settings.takeIf { it.has("progressVolumeWindowTrainings") }?.optInt("progressVolumeWindowTrainings", 5)),
                 volumeMinimumIncreasePercent = settings.optInt("progressVolumeMinimumPercent", 5),
                 useOneRepMax = settings.optBoolean("progressUseOneRepMax", true),
-            ))
+            )
         }
         val database = db.writableDatabase
         val importedPlanIds = mutableMapOf<Long, Long>()
+        val importedWheels = mutableMapOf<Long, String>()
         database.transaction {
             database.delete("machines", null, null)
             database.delete("training_plans", null, null)
@@ -1047,16 +1068,26 @@ class GymRepository(context: Context, private val gymClock: GymClock = GymClock(
                     addWeightHistory(database, id, change.getDouble("weight"), change.getLong("changedAt"))
                 }
                 if (changes.length() == 0) addWeightHistory(database, id, item.getDouble("currentWeight"), gymClock.now())
-                preferences.edit()
-                    .putInt("ranking_priority_$id", item.optInt("rankingPriority", 0))
-                    .putBoolean("ranking_excluded_$id", item.optBoolean("excludedFromAutoRanking", false))
-                    .putBoolean("hidden_machine_$id", item.optBoolean("hidden", false))
-                    .apply()
+                if (item.has("setWheelValues") && !item.isNull("setWheelValues")) {
+                    val wheels = item.getJSONArray("setWheelValues")
+                    require(wheels.length() == 5) { "An exercise must have exactly five set-wheel values" }
+                    val values = (0 until wheels.length()).map { wheels.getInt(it) }
+                    require(values.all { it >= 0 }) { "Set-wheel values must not be negative" }
+                    importedWheels[id] = values.joinToString(",")
+                }
             }
         }
         val activePlanId = importedPlanIds[root.getLong("activePlanId")]
             ?: importedPlanIds.values.first()
-        preferences.edit().putLong("active_training_plan", activePlanId).apply()
+        importedBands?.let(::saveFatigueBands)
+        importedProgression?.let(::saveProgressionSettings)
+        preferences.edit().apply {
+            // Old IDs must not leak wheel layouts into imported exercises, even with preserveIds.
+            preferences.all.keys.filter { it.startsWith("set_wheels_") }.forEach { remove(it) }
+            importedWheels.forEach { (id, values) -> putString(setWheelPreference(id), values) }
+            putBoolean("machine_state_in_sqlite", true)
+            putLong("active_training_plan", activePlanId)
+        }.apply()
         if (manualBody != null) check(appContext.getSharedPreferences("manual_body_entries", Context.MODE_PRIVATE)
             .edit().putString("entries", manualBody.toString()).commit()) { "Could not restore body entries" }
     }

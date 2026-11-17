@@ -76,7 +76,7 @@ data class SetRecord(
 data class WeightChange(val weight: Double, val changedAt: Long)
 
 data class ProgressionSettings(
-    val staleWeeks: Int = 4,
+    val staleDays: Int = 60,
     val volumeWindowDays: Int = 60,
     val volumeMinimumIncreasePercent: Int = 5,
     val useOneRepMax: Boolean = true, // Legacy preference name; selects the all-set strength score.

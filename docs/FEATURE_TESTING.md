@@ -42,3 +42,11 @@ Previous-day fatigue uses the local 06:00 training-day boundary: 30% for each ex
 Tests cover custom percentage persistence, weak preset matches, prior-day weighting, colored overview separators, stale saved wheel values, dated Body entries including daylight saving, and the compact percentage editor.
 
 Fatigue color boundaries are shared by Auto grouping and outline colors. Four bands default to switches at 25/50/75%; the Exercise Order editor validates strictly increasing starts from 1 to 100. FatigueBandsTest checks boundaries, validation and distinct colors; ExerciseRankingTest checks no region dilution, cumulative prior-day work and no bias crossing color groups; repository/UI tests cover persistence, backup compatibility and editing.
+
+Weight-increase staleness is configured and displayed in days, defaulting to 60 complete 24-hour days. ProgressionWarningsTest covers the exact threshold, disablement, recorded-increase reset and overflow-safe week migration. Repository tests cover global preferences, exercise overrides, backup/plan round trips and fresh-data defaults; NewActionsUiTest checks the day field and its default.
+
+Timed level/watt charts use the estimated 10-minute measure on the left, recorded intensity on the right and independent unlabelled minutes. ExerciseTrendTest checks both timed modes and excludes minutes from fitted series while retaining performance/intensity fits.
+
+Body interval pickers use fixed nominal labels: 1/2/3wk, 1/2/3/4/6mon, 1/2yr, All and Custom. NewActionsUiTest checks the actual top selector labels and saved month/year/All selections. ETA/history formatting and stored interval durations remain separate.
+
+BackupRecoveryTest covers invalid late backup rows leaving workouts/preferences unchanged, trend visibility and five-slot wheel layouts with remapped/preserved IDs, legacy backup defaults, preserved pre-v9 databases, supported v9 upgrades, and fatigue across plans (including hidden exercises and date bounds). BackupRestoreUiTest checks cancelled import followed by a plan import, successful restore/Undo, and explicit confirmation before discarding a preserved database. See [backup and recovery behavior](backup-and-recovery.md).

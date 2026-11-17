@@ -173,12 +173,16 @@ internal fun ChartRangeControls(
     trendLabel: String = "Trend",
     showTrendControl: Boolean = true,
     rangeLabel: (ChartRange) -> String = { it.storageValue },
+    showExtendedYearRanges: Boolean = true,
 ) {
     val rows = listOf(
         listOf(ChartRange.ONE_WEEK, ChartRange.TWO_WEEKS, ChartRange.THREE_WEEKS, ChartRange.ONE_MONTH, ChartRange.TWO_MONTHS, ChartRange.THREE_MONTHS, ChartRange.FOUR_MONTHS),
         buildList<ChartRange?> {
-            addAll(listOf(ChartRange.SIX_MONTHS, ChartRange.ONE_YEAR, ChartRange.TWO_YEARS, ChartRange.THREE_YEARS))
-            if (!showTrendControl) add(ChartRange.FIVE_YEARS)
+            addAll(listOf(ChartRange.SIX_MONTHS, ChartRange.ONE_YEAR, ChartRange.TWO_YEARS))
+            if (showExtendedYearRanges) {
+                add(ChartRange.THREE_YEARS)
+                if (!showTrendControl) add(ChartRange.FIVE_YEARS)
+            }
             addAll(listOf(ChartRange.ALL, ChartRange.CUSTOM))
             if (showTrendControl) add(null)
         },

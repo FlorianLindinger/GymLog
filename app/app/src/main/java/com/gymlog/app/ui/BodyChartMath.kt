@@ -84,6 +84,13 @@ internal fun bodyHistoryLabel(range: ChartRange): String = when (range) {
     else -> bodyRangeLabel(range) + " history"
 }
 
+/** Preset names keep their selected units; approximate month/year durations must not rename them. */
+internal fun bodyPresetLabel(range: ChartRange): String = when (range) {
+    ChartRange.ALL -> "All"
+    ChartRange.CUSTOM -> "Custom"
+    else -> range.storageValue.replace("W", "wk").replace("M", "mon").replace("Y", "yr")
+}
+
 internal fun bodyRangeLabel(range: ChartRange): String = chartWindowDuration(range)?.let { duration ->
     formatBodyEta(duration / 86_400_000.0).replace(" weeks", "wk").replace(" week", "wk")
         .replace(" mon.", "mon").replace(" years", "yr").replace(" year", "yr")

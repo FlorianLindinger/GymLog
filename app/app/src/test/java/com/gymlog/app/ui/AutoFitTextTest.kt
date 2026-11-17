@@ -14,6 +14,32 @@ import kotlin.math.ceil
 
 class AutoFitTextTest {
     @Test
+    fun longHistoriesOnlyMeasurePrefixesNearTheVisibleWidth() {
+        val text = "Last: " + List(10_000) { "12,10,8" }.joinToString(" | ")
+        var measuredCharacters = 0
+        val end = overviewHistoryPrefixLength(text) {
+            measuredCharacters += it.length
+            assertTrue("Must not lay out thousands of offscreen entries", it.length <= 190)
+            it.length <= 80
+        }
+        assertEquals("Last: 12,10,8 | 12,10,8 | 12,10,8 | 12,10,8 | 12,10,8 | 12,10,8 | 12,10,8".length, end)
+        assertTrue(measuredCharacters < 1000)
+    }
+
+    @Test
+    fun historyFittingKeepsTheLongestWholePrefixOrAtLeastTheNewestEntry() {
+        for (count in listOf(1, 2, 19, 1000)) {
+            val entries = List(count) { if (it % 2 == 0) "12,10,8" else "5" }
+            val text = "Last: " + entries.joinToString(" | ")
+            val prefixes = entries.indices.map { "Last: " + entries.take(it + 1).joinToString(" | ") }
+            for (width in listOf(0, 1, 12, 30, 100, 100_000)) {
+                val expected = prefixes.lastOrNull { it.length <= width } ?: prefixes.first()
+                assertEquals(expected.length, overviewHistoryPrefixLength(text) { it.length <= width })
+            }
+        }
+    }
+
+    @Test
     fun timedHistoryCanUseMoreThanEightEntriesAndFitsWholeEntries() {
         val summary = MachineSummary(
             Machine(1, "Time", "", "", "", ChartRange.ALL, 0, TrackingMode.DURATION, 10.0, 0), emptyList(),

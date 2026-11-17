@@ -24,7 +24,7 @@ internal const val TEN_MINUTE_EXPLANATION =
     "The best individual entry supplies the training value; extra entries do not add together. " +
     "At 10 minutes the estimate equals recorded intensity. Longer efforts adjust it upward; shorter efforts downward. " +
     "The fixed exponent is a heuristic, not fitted to your performance. Compare similar hard efforts near 10 minutes; extrapolation is less reliable. " +
-    "The estimate line uses its own scale; the legend shows its value and trend. "
+    "The estimate uses the left axis; the legend shows its value and trend. "
 
 internal data class TrainingMetricExplanation(val title: String, val text: String)
 
@@ -33,12 +33,12 @@ internal fun trainingMetricExplanation(mode: TrackingMode? = null): TrainingMetr
         TEN_MINUTE_EXPLANATION +
         "For example, 20 minutes at level 6 estimates 6.25 for 10 minutes. " +
         "Use it only as a rough comparison on the same machine: it assumes a linear level scale, which GymLog cannot verify. " +
-        "This is not calibrated physical work or a calorie estimate. Level is on the right axis and minutes on the left.")
+        "This is not calibrated physical work or a calorie estimate. Level is on the right axis. Minutes use an independent, unlabelled scale across the plot height, with no trend fit.")
     TrackingMode.WATTS -> TrainingMetricExplanation("Estimated 10-minute power",
         TEN_MINUTE_EXPLANATION +
         "For example, 20 minutes at 100 W estimates 104.25 W for 10 minutes. " +
         "The recorded watts are assumed to apply throughout each entry. This is an effort comparison, not measured maximum power or calories. " +
-        "Watts are on the right axis and minutes on the left.")
+        "Watts are on the right axis. Minutes use an independent, unlabelled scale across the plot height, with no trend fit.")
     TrackingMode.DURATION -> TrainingMetricExplanation("Recorded minutes",
         "This chart shows recorded training minutes. No intensity or load is estimated for duration-only exercises.")
     else -> TrainingMetricExplanation("Volume or strength score", TRAINING_METRIC_EXPLANATION)

@@ -94,6 +94,7 @@ internal data class AppUiState(
     val automaticBackupEnabled: Boolean,
     val backupSyncStatus: BackupSyncStatus,
     val fatigueBands: FatigueBands = FatigueBands(),
+    val fatigueExercises: List<MachineSummary> = emptyList(),
 )
 
 internal fun GymRepository.loadUiState(): AppUiState {
@@ -113,6 +114,7 @@ internal fun GymRepository.loadUiState(): AppUiState {
         automaticBackupEnabled = automaticBackupEnabled(),
         backupSyncStatus = backupSyncStatus(),
         fatigueBands = loadFatigueBands(),
+        fatigueExercises = loadFatigueExercises(),
     )
 }
 
@@ -128,7 +130,7 @@ fun GymLogApp(
     repository: GymRepository,
     externalDataVersion: Int,
     onExport: () -> Unit,
-    onImport: () -> Unit,
+    onImport: ((BackupRestoreResult?) -> Unit) -> Unit,
     onSaveBodyEntry: (ManualBodyEntry, (String?) -> Unit) -> Unit,
     onExportPlan: () -> Unit,
     onImportPlan: () -> Unit,
@@ -161,7 +163,6 @@ fun GymLogApp(
     var showTrainingMetricHelp by remember { mutableStateOf(false) }
     var confirmDeleteLastTraining by remember { mutableStateOf(false) }
     var editingExerciseField by remember { mutableStateOf<ExerciseEditField?>(null) }
-    var importUndoSnapshot by remember { mutableStateOf<String?>(null) }
     var initialExternalVersionHandled by remember { mutableStateOf(false) }
     var showHiddenExercises by rememberSaveable { mutableStateOf(repository.showHiddenExercises()) }
     val overviewListState = rememberLazyListState()
@@ -189,13 +190,6 @@ fun GymLogApp(
             return@LaunchedEffect
         }
         refresh()
-        importUndoSnapshot?.let { snapshot ->
-            importUndoSnapshot = null
-            if (snackbarHostState.showSnackbar("Backup restored", "Undo", duration = SnackbarDuration.Long) == SnackbarResult.ActionPerformed) {
-                repository.importJson(snapshot, preserveIds = true)
-                refresh()
-            }
-        }
     }
 
     val loadError = uiStateResult.exceptionOrNull()
@@ -294,6 +288,7 @@ fun GymLogApp(
             Screen.OVERVIEW -> OverviewScreen(
                 machines = uiState.machines.filterNot { it.machine.id in uiState.hiddenMachineIds },
                 hiddenMachines = uiState.machines.filter { it.machine.id in uiState.hiddenMachineIds },
+                fatigueExercises = uiState.fatigueExercises,
                 activePlanName = activePlan?.name ?: "Training plan",
                 activePlanNotes = activePlan?.notes.orEmpty(),
                 activePlanNotesPinned = activePlan?.notesPinned == true,
@@ -383,6 +378,7 @@ fun GymLogApp(
             )
             Screen.ORDER -> OrderScreen(
                 machines = uiState.machines,
+                fatigueExercises = uiState.fatigueExercises,
                 fatigueBands = uiState.fatigueBands,
                 progressionSettings = uiState.progressionSettings,
                 onFatigueBands = { bands ->
@@ -530,20 +526,20 @@ fun GymLogApp(
                 Text("Volume or strength score", style = MaterialTheme.typography.titleSmall)
                 Text("Choose Use strength score instead of volume with the switch in Menu. Tap its outlined label for details. " + TRAINING_METRIC_EXPLANATION)
                 Text("Progress Warnings & Overrides", style = MaterialTheme.typography.titleSmall)
-                Text("Warnings show weeks without a kg increase and growth in all-set strength score. The trend window compares the first and latest training days within the last X days, including today (default 60 days). The Menu metric switch only changes charts and entry summaries. Blank or 0 disables the corresponding warning; either a blank/0 window or minimum percentage disables the trend warning. At least 2 training days in that period are needed.")
+                Text("Warnings show days without a kg increase (default 60 days) and growth in all-set strength score. The trend window compares the first and latest training days within the last X days, including today (default 60 days). The Menu metric switch only changes charts and entry summaries. Blank or 0 disables the corresponding warning; either a blank/0 window or minimum percentage disables the trend warning. At least 2 training days in that period are needed.")
                 Text("Every exercise has Progress Warnings in its details. Follow global warning settings uses future global changes. Turn it off for custom thresholds. Trend warnings always use the all-set strength score formula; there is no per-exercise metric setting. Blank custom fields disable warnings rather than inheriting global values. Warnings apply to weight exercises.")
                 Text("Exercise Ordering & Outlines", style = MaterialTheme.typography.titleSmall)
-                Text("Open Exercise Order from Menu. The current exercise stays first with a blue outline. Auto groups unfinished exercises into four configurable color bins. All distinct exercises in this training contribute with decreasing influence (neutral regions: 100%, 50%, 25%, 12.5%, then a 10% floor). Planning factors keep biceps/triceps overlap slightly longer (1.1), quads/hamstrings slightly shorter (0.9), core/abs 20% slower to recover (factor 1.25), and other regions neutral (1.0). These are heuristics, not measured recovery times. Preset Core/abs percentages are 50% higher; saved profiles keep their editable percentages, without dividing by exercise count. Yesterday adds 30% per exercise, two days ago 15%, and three days ago 7.5%. Contributions from all those exercises accumulate once per training day without order weighting. The score uses the strongest intensity-weighted region, so adding regions cannot dilute an existing clash. Choose the green/yellow/orange/red boundaries in Exercise Order. Defaults switch at 25%, 50% and 75%; Auto priority and warning/frequency bias stay within those color groups. Completed exercises have no overlap outline. Missing profiles count as zero overlap, so green can also mean an unconfigured profile.")
-                Text("Within each overlap bin, higher Auto priority comes first (+ moves earlier, - moves later), then a small combined boost for one or two active warnings and fewer recent training days. The frequency boost is capped and disappears after three training days in the last two calendar months. Unfinished manual top and bottom use your arrow order; completed exercises follow from first to last done. Hidden exercises still contribute recent training context.")
+                Text("Open Exercise Order from Menu. The current exercise stays first with a blue outline. Auto groups unfinished exercises into four configurable color bins. All distinct exercises in this training contribute with decreasing influence (neutral regions: 100%, 50%, 25%, 12.5%, then a 10% floor). Planning factors keep biceps/triceps overlap slightly longer (1.1), quads/hamstrings slightly shorter (0.9), core/abs 20% slower to recover (factor 1.25), and other regions neutral (1.0). These are heuristics, not measured recovery times. Preset Core/abs percentages are 50% higher; saved profiles keep their editable percentages, without dividing by exercise count. Yesterday adds 30% per exercise, two days ago 15%, and three days ago 7.5%. Contributions from exercises across all plans, including hidden exercises, accumulate once per training day without order weighting. The score uses the strongest intensity-weighted region, so adding regions cannot dilute an existing clash. Choose the green/yellow/orange/red boundaries in Exercise Order. Defaults switch at 25%, 50% and 75%; Auto priority and warning/frequency bias stay within those color groups. Completed exercises have no overlap outline. Missing profiles count as zero overlap, so green can also mean an unconfigured profile.")
+                Text("Within each overlap bin, higher Auto priority comes first (+ moves earlier, - moves later), then a small combined boost for one or two active warnings and fewer recent training days. The frequency boost is capped and disappears after three training days in the last two calendar months. Unfinished manual top and bottom use your arrow order; completed exercises follow from first to last done. Exercises across all plans, including hidden exercises, contribute recent training context.")
                 Text("Body Regions & Colors", style = MaterialTheme.typography.titleSmall)
                 Text("Choose L (25%), M (50%), H (100%), or type a custom region percentage in exercise details. Zero removes the region. Marker widths follow the percentage. Preset Core/abs values are 50% higher; existing saved profiles are unchanged. English/German exercise suggestions provide editable starting profiles. These are planning estimates, not recovery measurements. The body-region guide's Show/Hide choice is remembered for every exercise, even when profile edits are cancelled.")
                 Text("Training Days & Time", style = MaterialTheme.typography.titleSmall)
                 Text("A training day runs from 06:00 to 05:59 the next day. The overview timer estimates your training duration and becomes completed after 30 minutes without an entry when the estimated duration at the last entry is under one hour; otherwise after 10 minutes. Stats duration uses the first and last recorded entry; a single entry has 0 minutes between them. Overview history shows minutes without a suffix; Lv. means level, and W means watts.")
                 Text("Stats", style = MaterialTheme.typography.titleSmall)
-                Text("Weight-increase counters compare recorded training loads; editing the next weight alone does not count. A higher next-session weight hides the weeks-without-increase warning until you log it or revert it; the recorded-history counter and Strength score trend stay unchanged. Body Area Training counts each exercise once per training day, weighted High = 1, Medium = 0.5 and Low = 0.25. Cards marked last 30 days keep that fixed window.")
+                Text("Weight-increase counters compare recorded training loads; editing the next weight alone does not count. A higher next-session weight hides the days-without-increase warning until you log it or revert it; the recorded-history counter and Strength score trend stay unchanged. Body Area Training counts each exercise once per training day, weighted High = 1, Medium = 0.5 and Low = 0.25. Cards marked last 30 days keep that fixed window.")
                 Text("WIP stats", style = MaterialTheme.typography.titleSmall)
                 Text("WIP stats is a separate dashboard beside Stats. It compares equal calendar periods, tracks weekly goals, and offers a tappable training calendar, exercise charts and records. Its totals follow the selected interval and hidden-exercise switch. Tap How measured for the calculation rules.")
-                Text("The strength explorer uses all-set strength score, while level and watts use estimated intensity for a 10-minute effort. The Riegel-style estimate is intensity x (minutes / 10)^0.06, taking the best entry. This is a fixed heuristic, not a fitted model; level comparisons assume a linear scale on the same machine. Level changes are estimated level steps, not percentages. Tap the exercise chart's metric legend for its mode-specific calculation and limitations. Level and watt charts show minutes on the left and intensity on the right. New settings default to Strength score; saved choices are preserved.")
+                Text("The strength explorer uses all-set strength score, while level and watts use estimated intensity for a 10-minute effort. The Riegel-style estimate is intensity x (minutes / 10)^0.06, taking the best entry. This is a fixed heuristic, not a fitted model; level comparisons assume a linear scale on the same machine. Level changes are estimated level steps, not percentages. Tap the exercise chart's metric legend for its mode-specific calculation and limitations. Level and watt charts show the estimated 10-minute measure on the left and recorded intensity on the right; minutes use an independent, unlabelled scale across the plot height with no trend fit. New settings default to Strength score; saved choices are preserved.")
                 Text("Body Plot Settings", style = MaterialTheme.typography.titleSmall)
                 Text("Body Settings controls global plot defaults. Order and hide plots saves your plot order and visibility; reset restores Weight, Muscle Mass, Fat Mass, Fat %, then Muscle Mass %. Tap an individual plot for overrides; Follow global switches choose which settings inherit future global changes. Raw data and two trailing moving averages can be toggled independently: one uses a period in days, the other a percentage of the displayed interval. Both averages can be overlaid. Fits use original measurements. Blank Y-axis limits use automatic scaling. Targets and acceptance ranges belong to each plot; the global target switches control visibility. Show goal - acceptance and Show goal + acceptance independently control the lower and upper dashed boundary lines and their shaded halves of the acceptance band.")
                 Text("Body Reference Lines", style = MaterialTheme.typography.titleSmall)
@@ -553,7 +549,7 @@ fun GymLogApp(
                 Text("History, Hidden Exercises & Undo", style = MaterialTheme.typography.titleSmall)
                 Text("Calendar & History lets you edit or delete individual entries, an exercise's day or a whole training day. Hiding an exercise retains its records; use Show hidden exercises to find it again. When an Undo message appears after a deletion, tap Undo while it is visible to restore the data.")
                 Text("Backups", style = MaterialTheme.typography.titleSmall)
-                Text("Data, Backup & Sync provides JSON export and restore. Restoring replaces the current workout data. Backups preserve exercise warning overrides and the Volume/Strength score choice. Export a backup before moving devices or replacing data.")
+                Text("Data, Backup & Sync provides JSON export and restore. Restoring replaces the current workout data. Backups preserve exercise warning overrides, trend visibility, rep-wheel layouts and the Volume/Strength score choice. Undo is offered only after a successful backup restore; cancelling the file picker leaves data unchanged. Export a backup before moving devices or replacing data.")
             }
         },
         confirmButton = { TextButton(onClick = { showHelp = false; showMenu = true }) { Text("Close") } },
@@ -653,9 +649,23 @@ fun GymLogApp(
         text = { Text("Restoring replaces all current GymLog data. Export a backup first if you want to keep it.") },
         confirmButton = {
             Button(onClick = {
-                importUndoSnapshot = repository.exportJson()
                 confirmImport = false
-                onImport()
+                onImport { restored ->
+                    if (restored != null) scope.launch {
+                        refresh()
+                        snackbarHostState.currentSnackbarData?.dismiss()
+                        if (snackbarHostState.showSnackbar("Backup restored", "Undo", duration = SnackbarDuration.Long) == SnackbarResult.ActionPerformed) {
+                            try {
+                                restored.undo()
+                                refresh()
+                            } catch (exception: kotlinx.coroutines.CancellationException) {
+                                throw exception
+                            } catch (exception: Exception) {
+                                snackbarHostState.showSnackbar("Could not undo restore: ${exception.message}")
+                            }
+                        }
+                    }
+                }
             }) { Text("Choose Backup") }
         },
         dismissButton = { TextButton(onClick = { confirmImport = false }) { Text("Cancel") } },
@@ -730,12 +740,23 @@ private fun DataRecoveryDialog(
     onRetry: () -> Unit,
     onCreateFresh: () -> Unit,
 ) {
+    var confirmReset by remember { mutableStateOf(false) }
+    if (confirmReset) {
+        AlertDialog(
+            onDismissRequest = { confirmReset = false },
+            title = { Text("Delete existing GymLog data?") },
+            text = { Text("This permanently deletes the preserved database. Keep a copy or a JSON backup before continuing.") },
+            confirmButton = { Button(onClick = { confirmReset = false; onCreateFresh() }) { Text("Delete and Create New") } },
+            dismissButton = { TextButton(onClick = { confirmReset = false }) { Text("Cancel") } },
+        )
+        return
+    }
     AlertDialog(
         onDismissRequest = {},
         title = { Text("GymLog data could not be opened") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("The local database may be from an incompatible app version or may be damaged.")
+                Text("The local database may be from an incompatible app version or may be damaged. Its existing data has been kept.")
                 Text("Creating a new database permanently removes the GymLog data stored in this app. Manual JSON backup files are not deleted.")
                 error.message?.takeIf { it.isNotBlank() }?.let {
                     Text(
@@ -746,8 +767,8 @@ private fun DataRecoveryDialog(
                 }
             }
         },
-        confirmButton = { Button(onClick = onCreateFresh) { Text("Create New Database") } },
-        dismissButton = { TextButton(onClick = onRetry) { Text("Try Again") } },
+        confirmButton = { Button(onClick = onRetry) { Text("Try Again") } },
+        dismissButton = { TextButton(onClick = { confirmReset = true }) { Text("Create New Database") } },
     )
 }
 
@@ -796,6 +817,7 @@ internal fun FatigueBandSettings(current: FatigueBands, onSave: (FatigueBands) -
 @Composable
 private fun OrderScreen(
     machines: List<MachineSummary>,
+    fatigueExercises: List<MachineSummary>,
     fatigueBands: FatigueBands,
     progressionSettings: ProgressionSettings,
     onFatigueBands: (FatigueBands) -> Unit,
@@ -804,8 +826,12 @@ private fun OrderScreen(
     onGroup: (Long, ExerciseOrderGroup) -> Unit,
     onPriority: (Long, Int) -> Unit,
 ) {
-    val cutoff = com.gymlog.app.data.GymClock().trainingDayStart(System.currentTimeMillis())
-    val ranked = rankOverviewMachines(machines, cutoff, recentTrainingExercises(machines, cutoff),
+    val now = System.currentTimeMillis()
+    val clock = com.gymlog.app.data.GymClock()
+    val cutoff = clock.trainingDayStart(now)
+    val ranked = rankOverviewMachines(machines, cutoff, recentTrainingExercises(fatigueExercises, cutoff),
+        zone = clock.zoneId, now = now,
+        prior = com.gymlog.app.data.priorExerciseExposures(fatigueExercises, now, clock.zoneId),
         progressionSettings = progressionSettings, fatigueBands = fatigueBands)
     val groups = listOf(
         ExerciseOrderGroup.MANUAL_TOP to "Manual top",
@@ -820,7 +846,7 @@ private fun OrderScreen(
         item { FatigueBandSettings(fatigueBands, onFatigueBands) }
         item {
             Text(
-                "The current exercise stays first, then unfinished Manual top in your arrow order. Auto uses four configurable color bins, green, yellow, orange and red. All distinct exercises in this training contribute with decreasing influence (neutral regions: 100%, 50%, 25%, 12.5%, then a 10% floor). Planning factors keep biceps/triceps overlap slightly longer (1.1), quads/hamstrings slightly shorter (0.9), core/abs 20% slower to recover (factor 1.25), and other regions neutral (1.0). These are heuristics, not measured recovery times. Preset Core/abs percentages are 50% higher; saved profiles keep their editable percentages, without dividing by exercise count. Yesterday adds 30% per exercise, two days ago 15%, and three days ago 7.5%. Contributions from all those exercises accumulate once per training day without order weighting. The score uses the strongest intensity-weighted region, so adding regions cannot dilute an existing clash. Within each bin, higher Auto priority comes first (+ moves earlier, - moves later), then a small combined boost for one or two active warnings and fewer recent training days. The frequency boost is capped and disappears after three training days in the last two calendar months. Unknown overlap counts as zero. Unfinished Manual bottom keeps your arrow order, followed by completed exercises from first to last done.",
+                "The current exercise stays first, then unfinished Manual top in your arrow order. Auto uses four configurable color bins, green, yellow, orange and red. All distinct exercises in this training contribute with decreasing influence (neutral regions: 100%, 50%, 25%, 12.5%, then a 10% floor). Planning factors keep biceps/triceps overlap slightly longer (1.1), quads/hamstrings slightly shorter (0.9), core/abs 20% slower to recover (factor 1.25), and other regions neutral (1.0). These are heuristics, not measured recovery times. Preset Core/abs percentages are 50% higher; saved profiles keep their editable percentages, without dividing by exercise count. Yesterday adds 30% per exercise, two days ago 15%, and three days ago 7.5%. Contributions from exercises across all plans, including hidden exercises, accumulate once per training day without order weighting. The score uses the strongest intensity-weighted region, so adding regions cannot dilute an existing clash. Within each bin, higher Auto priority comes first (+ moves earlier, - moves later), then a small combined boost for one or two active warnings and fewer recent training days. The frequency boost is capped and disappears after three training days in the last two calendar months. Unknown overlap counts as zero. Unfinished Manual bottom keeps your arrow order, followed by completed exercises from first to last done.",
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )

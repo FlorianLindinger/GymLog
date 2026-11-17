@@ -60,3 +60,5 @@ These boosts do not change the overlap outline colors, manual groups or
 completed-exercise order.
 
 Color boundaries are global, saved locally and included in JSON backups. Older backups without boundaries use the defaults. Auto priority and warning/frequency boosts only reorder within a color bin; current-exercise and manual-group placement keep their existing rules.
+
+Fatigue context includes recorded exercises across all training plans, including hidden exercises. Switching plans changes the candidate list, not the accumulated regional load. The read query retains only the current training day and the three preceding training days, using the local 06:00 boundary and excluding future entries. Automatic ordering and overview colors use this same context; frequency boosts and completed-exercise placement still refer to the active plan.

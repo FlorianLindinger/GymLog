@@ -21,6 +21,35 @@ import org.robolectric.annotation.LooperMode
 @Config(sdk = [28])
 @LooperMode(LooperMode.Mode.PAUSED)
 class NewActionsUiTest {
+    @Test fun bodyIntervalPickerShowsNominalPresetsAndSavesTheSelectedRange() {
+        compose.setContent { GymLogTheme {
+            BodyOverviewScreen(BodyDataSnapshot(), {}, "", false, onSync = {}, onAutoSync = {}, onGym = {})
+        } }
+        listOf("1wk", "2wk", "3wk", "1mon", "2mon", "3mon", "4mon", "6mon", "1yr", "2yr", "All", "Custom")
+            .forEach { compose.onNodeWithText(it).assertIsDisplayed() }
+        listOf("8wk", "12mon", "1yr 11mon", "2yr 11mon", "4yr 11mon", "3yr", "5yr")
+            .forEach { compose.onNodeWithText(it).assertDoesNotExist() }
+        compose.onNodeWithText("2mon").performClick()
+        val prefs = ApplicationProvider.getApplicationContext<Context>().getSharedPreferences("body_graph_settings", 0)
+        compose.runOnIdle { assertEquals("2M", prefs.getString("window", null)) }
+        compose.onNodeWithText("1yr").performClick()
+        compose.runOnIdle { assertEquals("1Y", prefs.getString("window", null)) }
+        compose.onNodeWithText("All").performClick()
+        compose.runOnIdle { assertEquals("ALL", prefs.getString("window", null)) }
+    }
+
+    @Test fun weightWarningEditorUsesDaysAndDefaultsToSixty() {
+        var saved: ProgressionSettings? = null
+        compose.setContent { GymLogTheme {
+            ProgressionSettingsDialog(ProgressionSettings(), onDismiss = {}, onSave = { saved = it })
+        } }
+        val field = compose.onNode(hasText("Days Without Weight Increase") and hasSetTextAction())
+        field.performScrollTo().assertTextContains("60")
+        field.performTextReplacement("75")
+        compose.onNodeWithText("Save").performClick()
+        assertEquals(75, saved?.staleDays)
+    }
+
     @Test fun fatigueBoundaryEditorRejectsInvalidOrderAndSavesChosenThresholds() {
         val repo = GymRepository(ApplicationProvider.getApplicationContext<Context>())
         val current = androidx.compose.runtime.mutableStateOf(FatigueBands())
@@ -85,13 +114,13 @@ class NewActionsUiTest {
     @Test fun exerciseShowsLatestEntryAbovePlotAndFullHistoryBelow() {
         val repo = GymRepository(ApplicationProvider.getApplicationContext<Context>())
         val id = repo.addMachine("Bench", 40.0, TrackingMode.WEIGHT)
-        val start = System.currentTimeMillis() - 42L * 86_400_000
+        val start = System.currentTimeMillis() - 70L * 86_400_000
         repeat(4) { repo.addHistoricalSet(id, 10, 40.0, start + it * 86_400_000) }
         val summary = repo.loadMachines().single()
         compose.setContent { GymLogTheme { DetailScreen(summary, emptyMap(), emptyMap(), repository = repo,
             onAreaColor = { _, _ -> }, onChanged = {}, onTrainingLogged = {}, onEditDetails = {},
             isHidden = false, onDeleteSets = {}, onDeleteExercise = {}, onDeleted = {}) } }
-        compose.onNodeWithText("weeks no kg increase", substring = true).assertIsDisplayed()
+        compose.onNodeWithText("days no kg increase", substring = true).assertIsDisplayed()
         compose.onNodeWithText("Last:", substring = true).assertIsDisplayed()
         compose.onNodeWithText("Recent Entries").performScrollTo().assertIsDisplayed()
         compose.onNodeWithText("Tap plot to enlarge and adjust").performScrollTo().performClick()
@@ -124,6 +153,8 @@ class NewActionsUiTest {
         compose.onNodeWithText("Delete Last Training").performScrollTo().performClick()
         compose.onNodeWithText("Delete Training").performClick()
         compose.waitUntil(10000) { repo.loadMachines().single().recentSets.isEmpty() }
+        // The IO deletion finishes before the coroutine publishes the snackbar to Compose.
+        compose.waitUntil(10000) { compose.onAllNodesWithText("Undo").fetchSemanticsNodes().isNotEmpty() }
         compose.onNodeWithText("Undo").performClick()
         compose.waitUntil(10000) { repo.loadMachines().single().recentSets.size == 1 }
     }

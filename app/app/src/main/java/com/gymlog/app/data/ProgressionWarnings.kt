@@ -18,9 +18,9 @@ internal fun progressionWarningReasons(
     if (summary.machine.trackingMode != TrackingMode.WEIGHT || summary.recentSets.isEmpty()) return emptyList()
     val reference = summary.weightIncreases().maxOfOrNull { it.changedAt }
         ?: summary.recentSets.minOfOrNull { it.performedAt }
-    val weeks = reference?.let { ((clock.now() - it).coerceAtLeast(0L) / 604_800_000L).toInt() } ?: 0
+    val days = reference?.let { ((clock.now() - it).coerceAtLeast(0L) / 86_400_000L).toInt() } ?: 0
     return buildList {
-        if (effective.staleWeeks > 0 && weeks >= effective.staleWeeks && summary.pendingMetricDirection() <= 0) add("$weeks weeks no kg increase")
+        if (effective.staleDays > 0 && days >= effective.staleDays && summary.pendingMetricDirection() <= 0) add("$days days no kg increase")
         if (effective.volumeMinimumIncreasePercent > 0 && effective.volumeWindowDays > 0) {
             // Calendar training days preserve the 06:00 boundary across daylight-saving changes.
             val start = Instant.ofEpochMilli(clock.trainingDayStart()).atZone(clock.zoneId)
@@ -46,3 +46,9 @@ internal fun parseWarningSetting(value: String): Int? =
 /** Training counts have no exact day equivalent; adopt 60 days but preserve explicit disablement. */
 internal fun migratedTrendWindowDays(days: Int?, legacyTrainings: Int?): Int =
     days?.coerceAtLeast(0) ?: if (legacyTrainings != null && legacyTrainings <= 0) 0 else 60
+
+/** Keep explicit old durations and disablement; absent settings use the new 60-day default. */
+internal fun migratedStaleDays(days: Int?, legacyWeeks: Int?): Int =
+    days?.coerceAtLeast(0) ?: legacyWeeks?.let {
+        (it.toLong() * 7L).coerceIn(0L, Int.MAX_VALUE.toLong()).toInt()
+    } ?: 60
